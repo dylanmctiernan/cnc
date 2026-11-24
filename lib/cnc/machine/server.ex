@@ -55,6 +55,7 @@ defmodule CNC.Machine.Server do
     console: Console.new(),
     settings: %{},
     travel_source: :config,
+    travel_issues: [],
     backoff: 0
   ]
 
@@ -123,6 +124,7 @@ defmodule CNC.Machine.Server do
         settings: %{},
         travel: d.config_travel,
         travel_source: :config,
+        travel_issues: [],
         backoff: next_backoff(delay)
     }
 
@@ -347,19 +349,46 @@ defmodule CNC.Machine.Server do
 
   # Max travel $130-$132 are lengths. Mapped to ranges by convention: X/Y run
   # 0..length, Z runs -length..0 (origin front-left, Z zero at the top).
-  # Anything missing or non-positive keeps the configured travel.
+  #
+  # The configured travel is the machine's physical maximum: the controller
+  # may narrow it, never widen it. A wider axis is capped and reported in
+  # travel_issues (e.g. a typo'd $130=12500). Anything missing or
+  # non-positive keeps the configured travel.
   defp apply_settings(d) do
     lengths = for n <- 130..132, do: length_mm(d.settings[n])
 
-    case lengths do
-      [x, y, z] when is_float(x) and is_float(y) and is_float(z) ->
-        %{d | travel: {{0.0, x}, {0.0, y}, {-z, 0.0}}, travel_source: :controller}
-
-      _ ->
-        Logger.warning("controller travel incomplete: #{inspect(d.settings)}")
-        d
-    end
+    if Enum.all?(lengths, &is_float/1),
+      do: use_controller_travel(d, lengths),
+      else: incomplete(d)
   end
+
+  defp incomplete(d) do
+    Logger.warning("controller travel incomplete: #{inspect(d.settings)}")
+    d
+  end
+
+  defp use_controller_travel(d, reported) do
+    physical = physical_lengths(d.config_travel)
+
+    {lengths, issues} =
+      [:x, :y, :z]
+      |> Enum.zip(Enum.zip(reported, physical))
+      |> Enum.map_reduce([], fn {axis, {got, max}}, issues ->
+        if got > max, do: {max, [{axis, got, max} | issues]}, else: {got, issues}
+      end)
+
+    if issues != [], do: Logger.warning("controller travel exceeds machine: #{inspect(issues)}")
+    [x, y, z] = lengths
+
+    %{
+      d
+      | travel: {{0.0, x}, {0.0, y}, {-z, 0.0}},
+        travel_source: :controller,
+        travel_issues: Enum.reverse(issues)
+    }
+  end
+
+  defp physical_lengths({{x0, x1}, {y0, y1}, {z0, z1}}), do: [x1 - x0, y1 - y0, z1 - z0]
 
   defp length_mm(value) when is_binary(value) do
     case Float.parse(value) do
@@ -450,7 +479,8 @@ defmodule CNC.Machine.Server do
       tier: d.tier,
       jog: d.vector,
       travel: d.travel,
-      travel_source: d.travel_source
+      travel_source: d.travel_source,
+      travel_issues: d.travel_issues
     }
   end
 

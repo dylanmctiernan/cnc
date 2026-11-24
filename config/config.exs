@@ -25,9 +25,10 @@ config :cnc, CNCWeb.Endpoint,
 # Controller link. Dev/test default is the in-process simulator.
 config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []
 
-# Fallback machine travel in mm (machine coordinates, origin front-left after
-# homing). After connecting, the Machine reads the controller's $130-$132 and
-# uses those instead; this is only used until then, or if they're missing.
+# The machine's physical travel in mm (machine coordinates, origin front-left
+# after homing). After connecting, the Machine reads the controller's
+# $130-$132: they may narrow this but never widen it (wider values are capped
+# and flagged). Used as-is until then, or if they're missing.
 config :cnc, :machine, travel: {{0.0, 1250.0}, {0.0, 1250.0}, {-100.0, 0.0}}
 
 # Configure esbuild (the version is required)

@@ -23,6 +23,8 @@ defmodule CNC.Machine.State do
       clamps jogs to (the controller's soft limits remain authoritative)
     * `travel_source` — `:controller` once read from `$130`–`$132` after
       connecting, otherwise `:config` (the fallback)
+    * `travel_issues` — `[{axis, reported_mm, max_mm}]` for axes where the
+      controller claimed more travel than the machine physically has (capped)
   """
 
   @type t :: %__MODULE__{}
@@ -43,5 +45,6 @@ defmodule CNC.Machine.State do
             tier: :normal,
             jog: {0, 0},
             travel: nil,
-            travel_source: :config
+            travel_source: :config,
+            travel_issues: []
 end

@@ -35,6 +35,15 @@ defmodule CNC.MachineTest do
                Machine.status(m)
     end
 
+    test "controller may narrow travel but never widen it", %{m: m} do
+      connect(m, "Alarm", {0, 0}, ["$130=12500.000", "$131=300.000", "$132=80.000"])
+
+      assert %State{
+               travel: {{+0.0, 1250.0}, {+0.0, 300.0}, {-80.0, +0.0}},
+               travel_issues: [{:x, 12500.0, 1250.0}]
+             } = Machine.status(m)
+    end
+
     test "keeps configured travel if the controller's is incomplete", %{m: m} do
       connect(m, "Alarm", {0, 0}, ["$130=500.000", "$131=0"])
       assert %State{travel_source: :config, travel: {{+0.0, 1250.0}, _, _}} = Machine.status(m)

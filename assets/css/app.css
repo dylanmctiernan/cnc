@@ -250,6 +250,11 @@ body {
   padding-left: 0.75rem;
 }
 
+.cnc-note--warn {
+  color: var(--alu);
+  border-left-color: var(--yellow);
+}
+
 .cnc-dro-row {
   display: grid;
   grid-template-columns: 1.75rem 1fr;

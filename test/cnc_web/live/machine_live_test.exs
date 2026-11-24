@@ -118,6 +118,16 @@ defmodule CNCWeb.MachineLiveTest do
     refute has_element?(view, "#console")
   end
 
+  test "warns when the controller claims more travel than the machine has", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    :ok = Machine.send_raw("$130=12500")
+    assert eventually(fn -> render(view) =~ "X travel of 12500 mm" end)
+
+    # Put it back for the other tests.
+    :ok = Machine.send_raw("$130=1250")
+    assert eventually(fn -> Machine.status().travel_issues == [] end)
+  end
+
   defp eventually(fun, timeout \\ 2000) do
     cond do
       fun.() -> true

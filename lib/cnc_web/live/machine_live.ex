@@ -190,6 +190,11 @@ defmodule CNCWeb.MachineLive do
 
           <p :if={note = error_text(@machine.last_error)} class="cnc-note">{note}</p>
 
+          <p :for={{axis, got, max} <- @machine.travel_issues} class="cnc-note cnc-note--warn">
+            The controller reports {axis_name(axis)} travel of {round(got)} mm, more than this
+            machine's {round(max)} mm. Using {round(max)} mm. Check ${travel_setting(axis)} with $$.
+          </p>
+
           <section class="cnc-dro" aria-label="Position">
             <div class="cnc-dro-row">
               <span class="cnc-axis">X</span>
@@ -543,6 +548,12 @@ defmodule CNCWeb.MachineLive do
 
   defp clock({{h, m, s}, ms}),
     do: :io_lib.format("~2..0B:~2..0B:~2..0B.~3..0B", [h, m, s, ms]) |> to_string()
+
+  defp axis_name(axis), do: axis |> to_string() |> String.upcase()
+
+  defp travel_setting(:x), do: 130
+  defp travel_setting(:y), do: 131
+  defp travel_setting(:z), do: 132
 
   defp busy_word(:jogging), do: "jogging"
   defp busy_word(:homing), do: "homing"
