@@ -9,7 +9,8 @@ defmodule CNC.Controllers.Config do
   are changed live; `save_running_as/2` writes it out.
 
   Settings can be changed live (`change/5`: FluidNC's `$/path=value`, read
-  back to confirm it took). What's not saved yet comes from the controller:
+  back to confirm it took), except wiring (`CNC.Boards.wiring?/1`: pins,
+  stepping engine, buses), which only changes in a file. What's not saved yet comes from the controller:
   the running config (`$CD`) against the file it loaded, so changes made any
   way (the console too) show. A file leaves defaults out, so for a setting
   it doesn't mention the app's own record of what it was (kept per
@@ -151,6 +152,41 @@ defmodule CNC.Controllers.Config do
 
   defp unquote_value(value), do: value
 
+  @doc """
+  The controller's wiring against its board's pin map (`CNC.Boards.config/1`):
+  how many wiring settings were compared (only ones both mention) and where
+  they differ, `[%{path, board, controller}]`. A difference usually means the
+  wrong board, or wiring changed on purpose.
+  """
+  @spec wiring_check(atom, [{String.t(), String.t()}]) ::
+          %{checked: non_neg_integer, differences: [map]}
+  def wiring_check(board, running_settings) do
+    running = Map.new(running_settings)
+
+    compared =
+      for {path, expected} <- parse(CNC.Boards.config(board)),
+          CNC.Boards.wiring?(path),
+          actual = running[path],
+          actual != nil,
+          do: {path, expected, actual}
+
+    %{
+      checked: length(compared),
+      differences:
+        for(
+          {path, expected, actual} <- compared,
+          not same_wiring?(path, expected, actual),
+          do: %{path: path, board: expected, controller: actual}
+        )
+    }
+  end
+
+  defp same_wiring?(path, a, b) do
+    if String.ends_with?(path, "_pin"),
+      do: CNC.Boards.normalize_pin(a) == CNC.Boards.normalize_pin(b),
+      else: same?(a, b)
+  end
+
   @doc "One setting's value on the controller now."
   @spec get(GenServer.server(), String.t()) :: {:ok, String.t()} | {:error, term}
   def get(machine, path) do
@@ -188,6 +224,7 @@ defmodule CNC.Controllers.Config do
           {:ok, String.t()} | {:error, term}
   def change(machine, db, id, path, value) do
     with :ok <- valid_path(path),
+         false <- CNC.Boards.wiring?(path) && {:error, :wiring},
          {:ok, before} <- get(machine, path),
          {:ok, now} <- set(machine, path, value) do
       path = String.downcase(path)

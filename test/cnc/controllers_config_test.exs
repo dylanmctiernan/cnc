@@ -5,6 +5,7 @@ defmodule CNC.Controllers.ConfigTest do
   alias CNC.Machine
 
   doctest Config
+  doctest CNC.Boards
 
   # A machine on the fake sim, which speaks FluidNC's config-file commands.
   setup do
@@ -131,6 +132,31 @@ defmodule CNC.Controllers.ConfigTest do
 
       assert {:ok, [%{path: "axes/z/max_rate_mm_per_min", from: "1000.000", to: "700"}]} =
                Config.changes(m, db, "c1")
+    end
+
+    @tag :tmp_dir
+    test "wiring isn't changed live; it's checked against the board's pin map", %{
+      machine: m,
+      db: db
+    } do
+      assert Config.change(m, db, "c1", "axes/x/motor0/standard_stepper/step_pin", "gpio.4") ==
+               {:error, :wiring}
+
+      board = Config.parse(CNC.Boards.config(:esp32_devkit))
+      assert %{checked: n, differences: []} = Config.wiring_check(:esp32_devkit, board)
+      assert n > 5
+
+      # Same pin, attributes in another order: no difference; another pin: one
+      moved =
+        Enum.map(board, fn
+          {"axes/x/motor0/hard_limits" = p, v} -> {p, v}
+          {"axes/x/motor0/limit_neg_pin" = p, "gpio.16:low:pu"} -> {p, "GPIO.16:pu:low"}
+          {"axes/y/motor0/standard_stepper/step_pin" = p, _} -> {p, "gpio.4"}
+          other -> other
+        end)
+
+      assert %{differences: [%{path: "axes/y/motor0/standard_stepper/step_pin"}]} =
+               Config.wiring_check(:esp32_devkit, moved)
     end
 
     @tag :tmp_dir

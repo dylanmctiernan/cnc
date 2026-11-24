@@ -45,6 +45,7 @@ defmodule CNCWeb.ConfigLive do
          |> assign(files: nil, active_file: nil, viewing: nil, text: nil, error: nil)
          |> assign(save_name: "", working: nil)
          |> assign(settings: %{}, paths: [], changes: [], history: [], showing: nil)
+         |> assign(wiring: %{checked: 0, differences: []})
          |> assign(other: %{"path" => "", "value" => ""}, field_errors: %{})
          |> refresh_active()
          |> maybe_load()}
@@ -321,6 +322,34 @@ defmodule CNCWeb.ConfigLive do
               </section>
 
               <section
+                :if={@wiring.checked > 0}
+                class="cnc-set-group"
+                aria-label="Wiring"
+                id="config-wiring"
+              >
+                <h2 class="cnc-h">Wiring</h2>
+                <p :if={@wiring.differences == []} class="cnc-sub" id="wiring-ok">
+                  Pins and stepping match the {CNC.Boards.label(@controller.board)} pin map
+                  ({@wiring.checked} settings). Wiring is set by the board: it changes in a
+                  config file, not here.
+                </p>
+                <div :if={@wiring.differences != []} id="wiring-differences">
+                  <p class="cnc-note cnc-note--warn">
+                    This controller's wiring differs from the {CNC.Boards.label(@controller.board)} pin map. Check that the board is right (Controllers page), or that the
+                    difference is on purpose.
+                  </p>
+                  <ul class="cnc-changes">
+                    <li :for={w <- @wiring.differences}>
+                      <code>{w.path}</code>
+                      <span class="cnc-change-vals">
+                        board {w.board}, controller <strong>{w.controller}</strong>
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+              </section>
+
+              <section
                 :if={@changes != []}
                 class="cnc-set-group"
                 aria-label="Changes not saved"
@@ -491,7 +520,8 @@ defmodule CNCWeb.ConfigLive do
           files: files,
           active_file: active,
           settings: Map.new(settings),
-          paths: Enum.map(settings, &elem(&1, 0)),
+          paths: for({p, _} <- settings, not CNC.Boards.wiring?(p), do: p),
+          wiring: Config.wiring_check(c.board, settings),
           changes: unsaved(cnc, c),
           history: Config.history(cnc.db, c.id)
         )
@@ -573,6 +603,9 @@ defmodule CNCWeb.ConfigLive do
 
   defp error_text({:not_applied, why}),
     do: "The controller didn't apply it (#{why}). Some settings only change in the file."
+
+  defp error_text(:wiring),
+    do: "That's wiring (pins, stepping): it's set by the board and only changes in a config file."
 
   defp error_text(:exists), do: "There's already a file with that name."
   defp error_text(:active), do: "That's the file the controller loads: switch to another first."

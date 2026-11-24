@@ -151,6 +151,35 @@ defmodule CNC.Boards do
   @doc "The kind of link a new controller on this board uses by default."
   def default_link(id), do: hd(links(id))
 
+  @doc """
+  Whether a config setting (a path like `axes/x/motor0/standard_stepper/step_pin`)
+  is wiring: fixed by the board (its pins, stepping engine, buses) rather
+  than tuned. FluidNC doesn't change these while running; they change in a
+  config file, after a restart.
+
+      iex> CNC.Boards.wiring?("axes/x/motor0/standard_stepper/step_pin")
+      true
+      iex> CNC.Boards.wiring?("stepping/engine")
+      true
+      iex> CNC.Boards.wiring?("axes/x/max_rate_mm_per_min")
+      false
+  """
+  @wiring_sections ~w(stepping i2so spi sdcard uart1 uart2 uart_channel1 uart_channel2)
+  def wiring?(path) do
+    path = String.downcase(path)
+    [section | _] = String.split(path, "/")
+    String.ends_with?(path, "_pin") or section in @wiring_sections
+  end
+
+  @doc """
+  A pin as FluidNC means it, for comparing: lower case, attributes in a
+  fixed order (`gpio.16:pu:low` and `GPIO.16:low:pu` are the same pin).
+  """
+  def normalize_pin(value) do
+    [pin | attrs] = value |> String.trim() |> String.downcase() |> String.split(":")
+    Enum.join([pin | Enum.sort(attrs)], ":")
+  end
+
   @doc "The starting config.yaml for a controller on this board."
   @spec config(id) :: String.t()
   def config(id) do
