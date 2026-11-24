@@ -24,8 +24,7 @@ The web layer can only reach `CNC.Machine`; protocol and transport stay private 
 ```sh
 mise install        # Erlang/Elixir from .mise.toml
 mix setup
-docker compose up -d grblhal-sim   # the dev default controller
-mix phx.server      # http://localhost:4000 (CNC_TRANSPORT=sim for the built-in simulator)
+mix phx.server      # http://localhost:4000, built-in simulator
 mix test            # excludes the grblHAL simulator tests
 ```
 

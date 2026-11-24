@@ -39,8 +39,7 @@ if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
   config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
 end
 
-# Controller link. Dev default (dev.exs) is the grblHAL simulator; tests use
-# the in-process Sim (config.exs).
+# Controller link. Dev and tests default to the built-in Sim (config.exs).
 #   CNC_TRANSPORT=sim mix phx.server             # built-in simulator
 #   CNC_TRANSPORT=grblhal_sim mix phx.server     # docker compose up grblhal-sim
 #   CNC_GRBLHAL=host:port                        # default localhost:2323

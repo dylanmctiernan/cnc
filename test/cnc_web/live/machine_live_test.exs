@@ -265,6 +265,10 @@ defmodule CNCWeb.MachineLiveTest do
     :ok = Machine.send_raw("$130=12500")
     assert eventually(fn -> render(view) =~ "X travel of 12500 mm" end)
 
+    # Notes can be closed.
+    view |> element("#note-travel button") |> render_click()
+    refute has_element?(view, "#note-travel")
+
     # Put it back for the other tests.
     :ok = Machine.send_raw("$130=1250")
     assert eventually(fn -> Machine.status().travel_issues == [] end)

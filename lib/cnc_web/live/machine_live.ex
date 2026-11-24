@@ -17,6 +17,7 @@ defmodule CNCWeb.MachineLive do
   @tiers [fine: {5, 1}, normal: {20, 5}, fast: {50, 10}]
   @steps [0.1, 1, 10, 50]
   @console_rows 200
+  @fade_ms 8_000
 
   @impl true
   def mount(_params, _session, socket) do
@@ -27,7 +28,7 @@ defmodule CNCWeb.MachineLive do
      socket
      |> assign(machine: machine, tier: :normal, step: 10)
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, step_axis: :x)
-     |> assign(more?: false)
+     |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
@@ -43,7 +44,19 @@ defmodule CNCWeb.MachineLive do
         do: push_event(socket, "travel", %{travel: travel_list(machine.travel)}),
         else: socket
 
+    socket =
+      if machine.last_error != socket.assigns.machine.last_error,
+        do: socket |> forget_note(:error) |> fade_later(:error),
+        else: socket
+
     {:noreply, socket |> assign(machine: machine) |> push_pos(machine)}
+  end
+
+  # A note fades on its own unless it changed since the timer was set.
+  def handle_info({:fade, key, ref}, socket) do
+    if socket.assigns.fades[key] == ref,
+      do: {:noreply, dismiss(socket, key)},
+      else: {:noreply, socket}
   end
 
   def handle_info({:machine_console, entry}, socket),
@@ -100,6 +113,15 @@ defmodule CNCWeb.MachineLive do
   def handle_event("toggle_more", _, socket), do: {:noreply, update(socket, :more?, &(!&1))}
   def handle_event("close_more", _, socket), do: {:noreply, assign(socket, more?: false)}
 
+  def handle_event("dismiss", %{"note" => "error"}, socket),
+    do: {:noreply, dismiss(socket, :error)}
+
+  def handle_event("dismiss", %{"note" => "action"}, socket),
+    do: {:noreply, dismiss(socket, :action)}
+
+  def handle_event("dismiss", %{"note" => "travel"}, socket),
+    do: {:noreply, dismiss(socket, :travel)}
+
   def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step zero),
     do: {:noreply, assign(socket, control_mode: String.to_existing_atom(mode))}
 
@@ -112,7 +134,7 @@ defmodule CNCWeb.MachineLive do
   def handle_event("zero", %{"axes" => axes}, socket) do
     axes = for c <- String.graphemes(axes), c in ~w(x y z), do: String.to_existing_atom(c)
     if axes != [], do: Machine.set_work_zero(axes)
-    {:noreply, assign(socket, action_error: nil)}
+    {:noreply, set_action_error(socket, nil)}
   end
 
   def handle_event("go_to_zero", _, socket) do
@@ -134,7 +156,7 @@ defmodule CNCWeb.MachineLive do
           nil
       end
 
-    {:noreply, assign(socket, action_error: error)}
+    {:noreply, set_action_error(socket, error)}
   end
 
   # Console traffic is only subscribed to while the panel is open. Subscribe
@@ -343,7 +365,11 @@ defmodule CNCWeb.MachineLive do
               </button>
             </div>
           </div>
-          <p :if={note = error_text(@machine.last_error)} class="cnc-note">
+          <.note
+            :if={note = not MapSet.member?(@dismissed, :error) && error_text(@machine.last_error)}
+            id="note-error"
+            key="error"
+          >
             {note}
             <span :if={
               @machine.last_error == {:link, :no_response} and
@@ -351,12 +377,19 @@ defmodule CNCWeb.MachineLive do
             }>
               The grblHAL simulator is known to stall now and then; it recovers on its own.
             </span>
-          </p>
-          <p :if={@action_error} class="cnc-note">{@action_error}</p>
-          <p :for={{axis, got, max} <- @machine.travel_issues} class="cnc-note cnc-note--warn">
-            The controller reports {axis_name(axis)} travel of {round(got)} mm, more than this
-            machine's {round(max)} mm. Using {round(max)} mm. Check ${travel_setting(axis)} with $$.
-          </p>
+          </.note>
+          <.note :if={@action_error} id="note-action" key="action">{@action_error}</.note>
+          <.note
+            :if={@machine.travel_issues != [] and not MapSet.member?(@dismissed, :travel)}
+            id="note-travel"
+            key="travel"
+            warn
+          >
+            <span :for={{axis, got, max} <- @machine.travel_issues}>
+              The controller reports {axis_name(axis)} travel of {round(got)} mm, more than this
+              machine's {round(max)} mm. Using {round(max)} mm. Check ${travel_setting(axis)} with $$.
+            </span>
+          </.note>
         </div>
 
         <section class="cnc-view" aria-label="Bed and Z">
@@ -768,6 +801,45 @@ defmodule CNCWeb.MachineLive do
     do: machine.state == :idle and not machine.moving? and not is_nil(machine.wco)
 
   ## Helpers
+
+  # Notes: errors and action messages fade after @fade_ms; any note can be
+  # closed. Closing only hides it on this screen; a new error shows again.
+  attr :id, :string, required: true
+  attr :key, :string, required: true
+  attr :warn, :boolean, default: false
+  slot :inner_block, required: true
+
+  defp note(assigns) do
+    ~H"""
+    <div id={@id} class={["cnc-note", @warn && "cnc-note--warn"]} role="status">
+      <p>{render_slot(@inner_block)}</p>
+      <button
+        type="button"
+        class="cnc-note-close"
+        phx-click="dismiss"
+        phx-value-note={@key}
+        aria-label="Close message"
+      >
+        <.icon name="hero-x-mark" class="size-4" />
+      </button>
+    </div>
+    """
+  end
+
+  defp set_action_error(socket, error) do
+    socket |> assign(action_error: error) |> fade_later(:action)
+  end
+
+  defp fade_later(socket, key) do
+    ref = make_ref()
+    Process.send_after(self(), {:fade, key, ref}, @fade_ms)
+    update(socket, :fades, &Map.put(&1, key, ref))
+  end
+
+  defp forget_note(socket, key), do: update(socket, :dismissed, &MapSet.delete(&1, key))
+
+  defp dismiss(socket, :action), do: assign(socket, action_error: nil)
+  defp dismiss(socket, key), do: update(socket, :dismissed, &MapSet.put(&1, key))
 
   defp tap_noreply(socket, fun) do
     fun.()

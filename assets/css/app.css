@@ -304,6 +304,41 @@ button {
   border-left-color: var(--yellow);
   color: var(--text);
 }
+.cnc-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  animation: cnc-note-in 160ms ease-out;
+}
+.cnc-note > p {
+  flex: 1;
+  min-width: 0;
+}
+.cnc-note-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin: -0.375rem -0.25rem -0.375rem 0;
+  border-radius: 0.375rem;
+  color: var(--text-dim);
+}
+.cnc-note-close:hover {
+  background: var(--line);
+  color: var(--text);
+}
+@keyframes cnc-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.25rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cnc-note {
+    animation: none;
+  }
+}
 
 .cnc-h {
   color: var(--text-dim);
