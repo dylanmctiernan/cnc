@@ -68,11 +68,11 @@ CNC_LAN=1 CNC_PIN=1234 mix phx.server     # 4 digits; then open http://<this-mac
 Dev only. `CNC_LAN=1` refuses to start without a PIN; each browser enters it
 once.
 
-For a name instead of an IP address, announce `cnc.local` over Bonjour in a
+For a name instead of an IP address, announce `cnc.local` over mDNS (Bonjour) in a
 second terminal (macOS; Ctrl-C withdraws it):
 
 ```sh
-mix cnc.announce          # then open http://cnc.local:4000 on any device
+mix cnc.mdns.announce          # then open http://cnc.local:4000 on any device
 ```
 
 It's its own site to browsers, so other apps on `localhost:4000` don't share

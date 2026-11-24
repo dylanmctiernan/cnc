@@ -1,13 +1,13 @@
-defmodule Mix.Tasks.Cnc.Announce do
-  @shortdoc "Announces this computer as cnc.local on the network (macOS, Bonjour)"
+defmodule Mix.Tasks.Cnc.Mdns.Announce do
+  @shortdoc "Announces this computer as cnc.local on the network (mDNS, macOS)"
   @moduledoc """
   Announces this computer as `cnc.local` over Bonjour (mDNS), so every
   device on the network (this Mac, phones, iPads) can open
   `http://cnc.local:4000` instead of an IP address or `localhost`.
 
-      mix cnc.announce                  # cnc.local -> this Mac, port 4000
-      mix cnc.announce --name shop      # shop.local
-      mix cnc.announce --port 4001
+      mix cnc.mdns.announce                  # cnc.local -> this Mac, port 4000
+      mix cnc.mdns.announce --name shop      # shop.local
+      mix cnc.mdns.announce --port 4001
 
   Runs until Ctrl-C, which withdraws the name, so nothing stale is left
   behind. Run it in its own terminal next to
