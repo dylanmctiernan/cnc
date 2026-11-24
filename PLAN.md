@@ -291,3 +291,14 @@ Open for the board:
 - **No CI:** all checks run locally via `mix precommit`.
 - **grblHAL simulator dropped (2026-11-24).** Dev and tests use the built-in Sim (now FakeSim); real-firmware checks use an ESP32 dev board running FluidNC. `CNC.Transport.TCP` stays for FluidNC over Wi-Fi.
 - **Native FluidNC is the dev controller (2026-11-24).** FluidNC builds as a Mac/Linux program (`env:macos`/`env:linux`): stock firmware at a pinned commit (`mix cnc.fluidnc.build`), run by `CNC.Transport.FluidNCSim` (renamed from NativeFluidNC) over stdin/stdout. Config per board: `priv/fluidnc/sim.yaml` (dev: `engine: timed`, no switches) and `priv/fluidnc/esp32_bench.yaml`. Telnet/HTTP are switched off through its settings store before start; an `sh` watchdog stops it if the app dies. Soak: 225 held jogs, 0 gaps, 0 errors. It answers §10's first question: FluidNC's `$$` does report `$130`–`$132`. No switches, so homing is set-position-only (`$22=0`): Unlock.
+
+---
+
+## 12. Backlog and ideas
+
+Not scheduled; kept so they aren't lost.
+
+- **Controller config from the app.** FluidNC's `$110`/`$130`-style settings are read-only proxies (`error:162`); its machine config is `config.yaml`. Running values change with `$/axes/x/max_rate_mm_per_min=2000` (immediate, in memory, validated by FluidNC) and persist with `$CD=config.yaml` (rewrites the file; comments are lost). Whole files go over serial with `$Xmodem/Receive`, then `$Bye` restarts. The Settings page writes Grbl `$` settings today, so on FluidNC its writes are refused: it needs a FluidNC mode. Design under discussion (2026-11-24).
+- **Upstream FluidNC fixes** (both in `FluidNC/posix/Console.cpp`, native build only): exit on stdin EOF (would retire the `sh` watchdog in `CNC.Transport.FluidNCSim`); read bytes as unsigned (so `0x85` jog cancel reaches the sim and it can test cancel).
+- **Jobs**, staged (design under discussion): upload and check G-code, 2D toolpath preview, run with hold/resume/stop, then multi-step jobs (tool changes, re-zero, flips) and a queue of parts. The 6x board has a micro SD socket, so long jobs could run from the controller (`$SD/Run`) with the host watching.
+- **Speed meter units:** mm/min (matches G-code and the header) vs mm/s (matches the tier definitions, shorter numbers).
