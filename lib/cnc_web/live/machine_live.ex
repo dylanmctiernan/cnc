@@ -96,7 +96,7 @@ defmodule CNCWeb.MachineLive do
 
   def handle_event("tier", %{"tier" => tier}, socket) do
     case tier(tier) do
-      {:ok, tier} -> {:noreply, assign(socket, tier: tier)}
+      {:ok, tier} -> {:noreply, socket |> assign(tier: tier) |> push_pos(socket.assigns.machine)}
       :error -> {:noreply, socket}
     end
   end
@@ -400,7 +400,7 @@ defmodule CNCWeb.MachineLive do
           >
             <canvas
               role="img"
-              aria-label="Top-down view of the bed with the tool position, and Z height"
+              aria-label="Top-down view of the bed with the tool position, Z height, and X/Y and Z speed"
             >
             </canvas>
           </div>
@@ -843,10 +843,33 @@ defmodule CNCWeb.MachineLive do
   defp push_pos(socket, %State{mpos: {x, y, z}} = m) do
     {jx, jy, jz} = m.jog
     wco = if m.wco, do: Tuple.to_list(m.wco)
-    push_event(socket, "pos", %{x: x, y: y, z: z, state: m.state, jog: [jx, jy, jz], wco: wco})
+
+    push_event(socket, "pos", %{
+      x: x,
+      y: y,
+      z: z,
+      state: m.state,
+      jog: [jx, jy, jz],
+      wco: wco,
+      speed: speed_payload(m, socket.assigns.tier)
+    })
   end
 
   defp push_pos(socket, _), do: socket
+
+  # Speed meters: current X/Y and Z speed against the machine's max rate,
+  # with each tier's full-deflection speed marked. All mm/min.
+  defp speed_payload(%State{speed: {xy, z}, max_rate: max_rate}, tier) do
+    {mx, my, mz} = max_rate || {3000.0, 3000.0, 1200.0}
+
+    %{
+      xy: xy,
+      z: z,
+      max: [min(mx, my), mz],
+      tiers: for({name, {txy, tz}} <- @tiers, do: %{name: name, xy: txy * 60, z: tz * 60}),
+      tier: tier
+    }
+  end
 
   # Joystick or keys: each component a number in -1..1.
   defp analog_vector(x, y, z) do

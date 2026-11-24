@@ -15,6 +15,31 @@ defmodule CNC.MachineTest do
       %{m: m, fake: fake, topic: topic}
     end
 
+    test "speed: the path feed split into X/Y (hypotenuse) and Z", %{m: m} do
+      idle(m)
+      assert Machine.status(m).speed == {0.0, 0.0}
+
+      # Diagonal in X/Y at 1200 mm/min: all of it is X/Y speed.
+      send(m, {:transport, :line, "<Jog|MPos:3.000,4.000,0.000|FS:1200,0>"})
+      assert {xy, z} = Machine.status(m).speed
+      assert_in_delta xy, 1200, 1.0e-6
+      assert_in_delta z, 0, 1.0e-6
+
+      # Moving X and Z equally (45° down): split evenly by direction.
+      send(m, {:transport, :line, "<Jog|MPos:4.000,4.000,-1.000|FS:600,0>"})
+      {xy, z} = Machine.status(m).speed
+      assert_in_delta xy, 600 / :math.sqrt(2), 1.0e-3
+      assert_in_delta z, 600 / :math.sqrt(2), 1.0e-3
+
+      send(m, {:transport, :line, "<Idle|MPos:4.000,4.000,-1.000|FS:0,0>"})
+      assert Machine.status(m).speed == {0.0, 0.0}
+    end
+
+    test "max rates come from $110-$112, else config", %{m: m} do
+      connect(m, "Alarm", {0, 0}, ["$110=2500.000", "$112=900.000"])
+      assert Machine.status(m).max_rate == {2500.0, 3000.0, 900.0}
+    end
+
     test "first status locks in :alarm, even if the controller is idle", %{m: m} do
       connect(m, "Idle", {0, 0})
 

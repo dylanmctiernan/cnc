@@ -43,6 +43,7 @@ defmodule CNC.Machine.Server do
     :adapter_opts,
     :travel,
     :config_travel,
+    :config_max_rate,
     :transport,
     :pubsub,
     :topic,
@@ -59,6 +60,9 @@ defmodule CNC.Machine.Server do
     # the reported position may not reflect it yet.
     motion_unsettled?: false,
     status_at: nil,
+    # Unit vector of the last movement between two reports, to split the
+    # controller's path feed (FS) into X/Y and Z speeds.
+    direction: {0.0, 0.0, 0.0},
     # $$ is only accepted when the controller is Idle or in Alarm: ask once
     # it is (and again if it said error:8, busy).
     settings_wanted?: false,
@@ -105,8 +109,13 @@ defmodule CNC.Machine.Server do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
-    travel =
-      Keyword.get_lazy(opts, :travel, fn -> Application.fetch_env!(:cnc, :machine)[:travel] end)
+    machine = Application.get_env(:cnc, :machine, [])
+    travel = Keyword.get_lazy(opts, :travel, fn -> Keyword.fetch!(machine, :travel) end)
+
+    max_rate =
+      Keyword.get_lazy(opts, :max_rate, fn ->
+        Keyword.get(machine, :max_rate, {3000.0, 3000.0, 1200.0})
+      end)
 
     {adapter, adapter_opts} =
       Keyword.get_lazy(opts, :transport, fn ->
@@ -120,6 +129,7 @@ defmodule CNC.Machine.Server do
        adapter_opts: adapter_opts,
        travel: travel,
        config_travel: travel,
+       config_max_rate: max_rate,
        pubsub: Keyword.get(opts, :pubsub, CNC.PubSub),
        topic: Keyword.get(opts, :topic, "machine"),
        watchdog_ms: Keyword.get(opts, :watchdog_ms, @watchdog_ms),
@@ -373,9 +383,11 @@ defmodule CNC.Machine.Server do
   # reconnect or controller reset.
   defp response({:status, status}, s, d) do
     status = Status.with_wco(status, d.status && d.status.wco)
+    prev_mpos = d.status && d.status.mpos
     # Output is ordered: a report after every ack reflects all sent motion.
     settled = if :queue.is_empty(d.pending), do: false, else: d.motion_unsettled?
     d = %{d | status: status, motion_unsettled?: settled, status_at: now()}
+    d = %{d | direction: direction(d.direction, prev_mpos, status.mpos)}
     d = if s == :connecting, do: d, else: maybe_read_settings(d, status.state)
     on_status(s, status.state, d)
   end
@@ -718,6 +730,8 @@ defmodule CNC.Machine.Server do
       wpos: d.status && d.status.wpos,
       wco: d.status && d.status.wco,
       feed: d.status && d.status.feed,
+      speed: speed(d),
+      max_rate: max_rate(d),
       buffer: d.status && d.status.buffer,
       awaiting_ack: :queue.len(d.pending),
       moving?: d.motion_unsettled? or (d.status != nil and d.status.state in [:run, :jog, :home]),
@@ -733,6 +747,44 @@ defmodule CNC.Machine.Server do
       settings_rev: d.settings_rev,
       settings_write: d.settings_write
     }
+  end
+
+  ## Speed
+
+  # Direction of travel between two reports; kept when the tool hasn't moved
+  # measurably (reports can be closer together than a step).
+  defp direction(dir, nil, _), do: dir
+  defp direction(dir, _, nil), do: dir
+
+  defp direction(dir, {x0, y0, z0}, {x1, y1, z1}) do
+    {dx, dy, dz} = {x1 - x0, y1 - y0, z1 - z0}
+    len = :math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 1.0e-6, do: dir, else: {dx / len, dy / len, dz / len}
+  end
+
+  # The controller reports one feed for the whole path (FS, mm/min, all axes
+  # together). Split along the direction of travel: X/Y is the speed across
+  # the bed (the hypotenuse of X and Y), Z the vertical speed.
+  defp speed(%{status: %{feed: feed}, direction: {ux, uy, uz}}) when is_number(feed) and feed > 0,
+    do: {feed * :math.sqrt(ux * ux + uy * uy), feed * abs(uz)}
+
+  defp speed(_), do: {0.0, 0.0}
+
+  # Max rates in mm/min: the controller's $110-$112 when it reports them,
+  # else the configured machine maximum.
+  defp max_rate(d) do
+    {cx, cy, cz} = d.config_max_rate
+
+    {rate(d.settings[110], cx), rate(d.settings[111], cy), rate(d.settings[112], cz)}
+  end
+
+  defp rate(nil, fallback), do: fallback
+
+  defp rate(value, fallback) do
+    case Float.parse(value) do
+      {mm_min, _} when mm_min > 0 -> mm_min
+      _ -> fallback
+    end
   end
 
   ## Helpers

@@ -22,6 +22,11 @@ defmodule CNC.Machine.State do
     * `last_error` — `{:error, code}` from a rejected line,
       `{:jog, :heartbeat_lost}`, or `{:link, :no_response}` (no status
       reports for a while: the link was dropped and is reconnecting)
+    * `speed` — `{xy, z}` in mm/min: the controller's reported feed split
+      along the direction of travel, X/Y across the bed (the hypotenuse) and
+      Z vertical. `{0.0, 0.0}` when stopped.
+    * `max_rate` — `{x, y, z}` max rates in mm/min, from the controller's
+      `$110`–`$112`, else the configured machine maximum
     * `jog` — current held-key vector `{dx, dy, dz}`, `{0, 0, 0}` when not jogging
     * `travel` — `{{x0, x1}, {y0, y1}, {z0, z1}}` in mm, the limits the host
       clamps jogs to (the controller's soft limits remain authoritative)
@@ -52,6 +57,8 @@ defmodule CNC.Machine.State do
             wpos: nil,
             wco: nil,
             feed: nil,
+            speed: {0.0, 0.0},
+            max_rate: nil,
             buffer: nil,
             awaiting_ack: 0,
             moving?: false,

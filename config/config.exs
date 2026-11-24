@@ -29,7 +29,10 @@ config :cnc, :transport, adapter: CNC.Transport.FakeSim, opts: []
 # after homing). After connecting, the Machine reads the controller's
 # $130-$132: they may narrow this but never widen it (wider values are capped
 # and flagged). Used as-is until then, or if they're missing.
-config :cnc, :machine, travel: {{0.0, 1250.0}, {0.0, 1250.0}, {-100.0, 0.0}}
+config :cnc, :machine,
+  travel: {{0.0, 1250.0}, {0.0, 1250.0}, {-100.0, 0.0}},
+  # Max rates in mm/min, until the controller reports its own ($110-$112).
+  max_rate: {3000.0, 3000.0, 1200.0}
 
 # Configure esbuild (the version is required)
 config :esbuild,

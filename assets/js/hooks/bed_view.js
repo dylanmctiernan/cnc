@@ -6,6 +6,8 @@ const TRAIL_BATCHES = 20
 const GRID_MM = 100
 const PAD = 40
 const GAUGE = 72 // px reserved on the right for the Z gauge
+const METERS = 72 // px reserved on the left for the X/Y and Z speed meters
+const METERS_COMPACT = 56
 const FONT = '"JetBrains Mono", ui-monospace, monospace'
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -32,6 +34,11 @@ export default {
     this.state = this.el.dataset.state
     this.jog = [0, 0, 0]
     this.wco = null
+    // Speed meters: target values from the server, shown values eased toward
+    // them each frame so 20 Hz reports don't make the bars jitter.
+    this.speed = null
+    this.speedShown = {xy: 0, z: 0}
+    this.lastFrame = 0
 
     this.trail = new Float32Array(TRAIL_MAX * 2)
     this.trailHead = 0
@@ -78,7 +85,7 @@ export default {
     this.resize.disconnect()
   },
 
-  sample({x, y, z, state, jog, wco}) {
+  sample({x, y, z, state, jog, wco, speed}) {
     const now = performance.now()
     // Glide from where the marker is drawn now to the new report, over
     // roughly the interval between reports.
@@ -90,6 +97,7 @@ export default {
     this.state = state
     this.jog = jog
     this.wco = wco
+    if (speed) this.speed = speed
     this.pushTrail(x, y)
   },
 
@@ -116,15 +124,17 @@ export default {
     // Drawn small (phone landscape, Split View): tighter margins, end labels only
     this.compact = !this.mini && (height < 300 || width < 380)
     const pad = this.mini ? 3 : this.compact ? 22 : PAD
-    const room = width - (this.mini ? 0 : this.compact ? 48 : GAUGE)
+    const meters = this.mini ? 0 : this.compact ? METERS_COMPACT : METERS
+    const room = width - meters - (this.mini ? 0 : this.compact ? 48 : GAUGE)
     const scale = Math.min((room - pad * 2) / (x1 - x0), (height - pad * 2) / (y1 - y0))
     const bedH = (y1 - y0) * scale
     this.view = {
       width, height, scale, x0, x1, y0, y1, z0, z1,
-      left: (room - (x1 - x0) * scale) / 2,
+      left: meters + (room - (x1 - x0) * scale) / 2,
       bottom: (height + bedH) / 2,
       top: (height - bedH) / 2,
-      gaugeX: room + 8,
+      gaugeX: meters + room + 8,
+      meters,
     }
   },
 
@@ -155,7 +165,10 @@ export default {
     this.drawWorkOrigin()
     this.drawTrail()
     this.drawTool(this.shown)
-    if (!this.mini) this.drawGauge(this.shown.z)
+    if (!this.mini) {
+      this.drawGauge(this.shown.z)
+      this.drawSpeed(now)
+    }
   },
 
   markerColor() {
@@ -303,6 +316,87 @@ export default {
     ctx.stroke()
 
     ctx.globalAlpha = 1
+  },
+
+  // X/Y and Z speed as two bullet graphs (Stephen Few): the scale runs from
+  // 0 to the machine's max rate, quiet ticks mark each tier's full-stick
+  // speed, the selected tier's tick is emphasised (where a full push lands),
+  // and the bar is the current speed in the same state colour as the tool.
+  drawSpeed(now) {
+    const {ctx, view: v, colors: c} = this
+    const sp = this.speed
+    if (!sp) return
+
+    // Ease toward the reported speeds (time constant ~80 ms)
+    const dt = Math.min(now - (this.lastFrame || now), 100)
+    this.lastFrame = now
+    const k = 1 - Math.exp(-dt / 80)
+    this.speedShown.xy += (sp.xy - this.speedShown.xy) * k
+    this.speedShown.z += (sp.z - this.speedShown.z) * k
+
+    const w = this.compact ? 8 : 10
+    const step = v.meters / 2
+    const meters = [
+      {label: "XY", color: c.dim, value: this.speedShown.xy, target: sp.xy, max: sp.max[0], key: "xy"},
+      {label: "Z", color: c.z, value: this.speedShown.z, target: sp.z, max: sp.max[1], key: "z"},
+    ]
+    const top = v.top, bottom = v.bottom, h = bottom - top
+    const vy = (mm, max) => bottom - (Math.min(Math.max(mm, 0), max) / max) * h
+
+    meters.forEach((m, i) => {
+      const x = step * i + (step - w) / 2 + 4
+
+      ctx.fillStyle = c.bed
+      ctx.fillRect(x, top, w, h)
+
+      // Tier ticks; the selected tier's is the comparative marker
+      for (const t of sp.tiers) {
+        const ty = vy(t[m.key], m.max)
+        const selected = t.name === sp.tier
+        ctx.strokeStyle = selected ? c.text : c.dim
+        ctx.lineWidth = selected ? 2 : 1
+        line(ctx, x, ty, x + w, ty)
+        if (selected) {
+          ctx.fillStyle = c.text
+          ctx.beginPath()
+          ctx.moveTo(x - 2, ty)
+          ctx.lineTo(x - 7, ty - 4)
+          ctx.lineTo(x - 7, ty + 4)
+          ctx.closePath()
+          ctx.fill()
+        }
+      }
+
+      // Current speed
+      if (m.value > 0.5) {
+        const y = vy(m.value, m.max)
+        ctx.fillStyle = this.markerColor()
+        ctx.fillRect(x + 2, y, w - 4, bottom - y)
+      }
+
+      ctx.strokeStyle = c.edge
+      ctx.lineWidth = 1.5
+      ctx.strokeRect(x, top, w, h)
+
+      // Label above, value (mm/min) below
+      ctx.textAlign = "center"
+      ctx.textBaseline = "bottom"
+      ctx.font = `700 11px ${FONT}`
+      ctx.fillStyle = m.color
+      ctx.fillText(m.label, x + w / 2, top - 6)
+      ctx.textBaseline = "top"
+      ctx.font = `${this.compact ? 10 : 11}px ${FONT}`
+      ctx.fillStyle = m.target > 0.5 ? c.text : c.dim
+      ctx.fillText(String(Math.round(m.target)), x + w / 2, bottom + 6)
+    })
+
+    if (!this.compact) {
+      ctx.fillStyle = c.dim
+      ctx.font = `10px ${FONT}`
+      ctx.textAlign = "center"
+      ctx.textBaseline = "top"
+      ctx.fillText("mm/min", v.meters / 2 + 4, bottom + 20)
+    }
   },
 
   drawGauge(z) {
