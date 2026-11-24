@@ -45,6 +45,7 @@ defmodule CNC.MachineTest do
 
     test "diagonal increments are normalised", %{m: m} do
       idle(m)
+      report(m, "Idle", {100, 100})
       :ok = Machine.jog(m, {-1, 1}, :fast)
       assert_receive {:line, "$J=G91 G21 X-1.768 Y1.768 F3000"}
     end
@@ -115,7 +116,7 @@ defmodule CNC.MachineTest do
 
     test "a rejected increment ends the session", %{m: m} do
       idle(m)
-      :ok = Machine.jog(m, {-1, 0}, :normal)
+      :ok = Machine.jog(m, {1, 0}, :normal)
       assert_receive {:line, "$J=" <> _}
       send(m, {:transport, :line, "error:15"})
       assert %State{state: :idle, last_error: {:error, 15}} = Machine.status(m)
@@ -198,13 +199,22 @@ defmodule CNC.MachineTest do
       assert_in_delta x, y, 0.01
     end
 
-    test "jog beyond travel is refused by the controller", %{m: m} do
+    test "holding a key into a limit slides up to it without errors" do
+      m = start_machine({CNC.Transport.Sim, pos: {1249.0, 600.0, 0.0}}, "sim-limit")
+      assert eventually(fn -> Machine.status(m).state == :alarm end)
       :ok = Machine.unlock(m)
       assert eventually(fn -> Machine.status(m).state == :idle end)
 
-      :ok = Machine.jog(m, {-1, 0}, :normal)
-      assert eventually(fn -> Machine.status(m).last_error == {:error, 15} end)
-      assert Machine.status(m).state == :idle
+      # 15 mm worth of pushing at the +X edge, 1 mm away.
+      :ok = Machine.jog(m, {1, 0}, :fast)
+      keep_alive(m, 300)
+      assert %State{state: :jogging, last_error: nil} = Machine.status(m)
+      :ok = Machine.jog_stop(m)
+
+      assert eventually(fn -> Machine.status(m).controller == :idle end)
+      %State{mpos: {x, _, _}} = Machine.status(m)
+      assert_in_delta x, 1249.999, 1.0e-6
+      assert Machine.jog_step(m, {1, 0}, 10) == {:error, :at_limit}
     end
 
     test "disconnect and reconnect lands in :alarm", %{m: m} do
@@ -220,7 +230,8 @@ defmodule CNC.MachineTest do
   ## Helpers
 
   defp start_machine(transport, topic) do
-    start_supervised!({Machine, name: nil, transport: transport, topic: topic})
+    spec = {Machine, name: nil, transport: transport, topic: topic}
+    start_supervised!(Supervisor.child_spec(spec, id: make_ref()))
   end
 
   defp report(m, state, {x, y}),

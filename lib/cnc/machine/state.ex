@@ -14,6 +14,8 @@ defmodule CNC.Machine.State do
     * `last_error` — `{:error, code}` from a rejected line, or
       `{:jog, :heartbeat_lost}`
     * `jog` — current held-key vector, `{0, 0}` when not jogging
+    * `travel` — `{{x0, x1}, {y0, y1}, {z0, z1}}` in mm, the limits the host
+      clamps jogs to (the controller's soft limits remain authoritative)
   """
 
   @type t :: %__MODULE__{}
@@ -27,5 +29,6 @@ defmodule CNC.Machine.State do
             alarm: nil,
             last_error: nil,
             tier: :normal,
-            jog: {0, 0}
+            jog: {0, 0},
+            travel: nil
 end

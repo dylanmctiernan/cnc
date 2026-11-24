@@ -25,6 +25,10 @@ config :cnc, CNCWeb.Endpoint,
 # Controller link. Dev/test default is the in-process simulator.
 config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []
 
+# Machine travel in mm (machine coordinates, origin front-left after homing).
+# Jogs are clamped to this; keep it equal to the controller's $130-$132.
+config :cnc, :machine, travel: {{0.0, 1250.0}, {0.0, 1250.0}, {-100.0, 0.0}}
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",

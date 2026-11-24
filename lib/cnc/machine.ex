@@ -58,7 +58,7 @@ defmodule CNC.Machine do
   def jog_stop(server \\ __MODULE__), do: call(server, :jog_stop)
 
   @doc "A single relative move of `mm` along each non-zero axis of `vector`."
-  @spec jog_step(server, Jog.vector(), number) :: reply
+  @spec jog_step(server, Jog.vector(), number) :: reply | {:error, :at_limit}
   def jog_step(server \\ __MODULE__, {dx, dy} = vector, mm)
       when dx in -1..1 and dy in -1..1 and vector != {0, 0} and mm > 0 and mm <= 50,
       do: call(server, {:jog_step, vector, mm})
