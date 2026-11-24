@@ -14,7 +14,7 @@ defmodule CNCWeb.MachineLive do
   alias CNC.Machine
   alias CNC.Machine.State
 
-  @tiers [fine: 5, normal: 20, fast: 50]
+  @tiers [fine: {5, 1}, normal: {20, 5}, fast: {50, 10}]
   @steps [0.1, 1, 10, 50]
   @console_rows 200
 
@@ -48,8 +48,8 @@ defmodule CNCWeb.MachineLive do
     do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
 
   @impl true
-  def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier}, socket) do
-    with {:ok, vector} <- vector(x, y), {:ok, tier} <- tier(tier) do
+  def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier} = params, socket) do
+    with {:ok, vector} <- vector(x, y, params["z"] || 0), {:ok, tier} <- tier(tier) do
       Machine.jog(vector, tier)
     end
 
@@ -72,8 +72,8 @@ defmodule CNCWeb.MachineLive do
   def handle_event("resume", _, socket), do: tap_noreply(socket, &Machine.resume/0)
   def handle_event("reset", _, socket), do: tap_noreply(socket, &Machine.reset/0)
 
-  def handle_event("step", %{"x" => x, "y" => y}, socket) do
-    with {:ok, vector} when vector != {0, 0} <- vector(x, y),
+  def handle_event("step", %{"x" => x, "y" => y} = params, socket) do
+    with {:ok, vector} when vector != {0, 0, 0} <- vector(x, y, params["z"] || 0),
          do: Machine.jog_step(vector, socket.assigns.step)
 
     {:noreply, socket}
@@ -150,17 +150,71 @@ defmodule CNCWeb.MachineLive do
     <Layouts.app flash={@flash}>
       <div id="jog-keys" phx-hook="JogKeys" data-tier={@tier} hidden></div>
 
-      <div class="cnc">
+      <div class={["cnc", @details? && "has-console"]}>
         <header class="cnc-bar">
-          <h1 class="cnc-title">CNC</h1>
-          <span class="cnc-meta">{adapter_label(@machine.adapter)}</span>
-          <span class={["cnc-meta", !@machine.connected? && "is-off"]}>
-            {if @machine.connected?, do: "Connected", else: "Not connected"}
-          </span>
-          <span class={"cnc-state cnc-state--#{@machine.state}"} role="status">
+          <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_label(@machine)}
-          </span>
+          </div>
+          <dl class="cnc-meta">
+            <div>
+              <dt>link</dt>
+              <dd class={!@machine.connected? && "is-off"}>
+                {adapter_label(@machine.adapter)} {if @machine.connected?,
+                  do: "connected",
+                  else: "not connected"}
+              </dd>
+            </div>
+            <div>
+              <dt>controller</dt>
+              <dd>{controller_label(@machine)}</dd>
+            </div>
+            <div>
+              <dt>feed</dt>
+              <dd>{if @machine.feed, do: "#{round(@machine.feed)} mm/min", else: "—"}</dd>
+            </div>
+          </dl>
+          <div class="cnc-actions">
+            <button
+              type="button"
+              class="cnc-btn"
+              phx-click="feed_hold"
+              disabled={!@machine.connected?}
+            >
+              Hold
+            </button>
+            <button type="button" class="cnc-btn" phx-click="resume" disabled={!@machine.connected?}>
+              Resume
+            </button>
+            <button type="button" class="cnc-btn" phx-click="reset" disabled={!@machine.connected?}>
+              Reset
+            </button>
+            <button
+              type="button"
+              class="cnc-btn"
+              phx-click="toggle_details"
+              aria-pressed={to_string(@details?)}
+              aria-controls="console"
+            >
+              Console
+            </button>
+          </div>
         </header>
+
+        <div class="cnc-messages">
+          <div :if={@machine.state == :alarm} class="cnc-lock" role="alert">
+            <span class="cnc-lock-tag">Locked</span>
+            <p>{alarm_text(@machine.alarm)}</p>
+            <div class="cnc-row">
+              <button type="button" class="cnc-btn cnc-btn--primary" phx-click="home">Home</button>
+              <button type="button" class="cnc-btn" phx-click="unlock">Unlock</button>
+            </div>
+          </div>
+          <p :if={note = error_text(@machine.last_error)} class="cnc-note">{note}</p>
+          <p :for={{axis, got, max} <- @machine.travel_issues} class="cnc-note cnc-note--warn">
+            The controller reports {axis_name(axis)} travel of {round(got)} mm, more than this
+            machine's {round(max)} mm. Using {round(max)} mm. Check ${travel_setting(axis)} with $$.
+          </p>
+        </div>
 
         <section
           id="bed"
@@ -170,9 +224,14 @@ defmodule CNCWeb.MachineLive do
           data-travel={travel_json(@machine.travel)}
           data-x={pos(@machine, 0)}
           data-y={pos(@machine, 1)}
+          data-z={pos(@machine, 2)}
           data-state={@machine.state}
         >
-          <canvas role="img" aria-label="Top-down view of the bed with the tool position"></canvas>
+          <canvas
+            role="img"
+            aria-label="Top-down view of the bed with the tool position, and Z height"
+          >
+          </canvas>
           <button
             type="button"
             class="cnc-btn cnc-btn--quiet cnc-clear"
@@ -183,55 +242,36 @@ defmodule CNCWeb.MachineLive do
         </section>
 
         <aside class="cnc-rail">
-          <div :if={@machine.state == :alarm} class="cnc-lock" role="alert">
-            <p class="cnc-lock-title">Locked</p>
-            <p>{alarm_text(@machine.alarm)}</p>
-            <div class="cnc-row">
-              <button type="button" class="cnc-btn cnc-btn--primary" phx-click="home">Home</button>
-              <button type="button" class="cnc-btn" phx-click="unlock">Unlock</button>
+          <section class="cnc-dro" aria-label="Machine position">
+            <h2 class="cnc-h">Machine position <span class="cnc-unit">mm</span></h2>
+            <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
+              <span class="cnc-axis">{axis}</span>
+              <span class="cnc-num">{fmt(pos(@machine, i))}</span>
             </div>
-          </div>
-
-          <p :if={note = error_text(@machine.last_error)} class="cnc-note">{note}</p>
-
-          <p :for={{axis, got, max} <- @machine.travel_issues} class="cnc-note cnc-note--warn">
-            The controller reports {axis_name(axis)} travel of {round(got)} mm, more than this
-            machine's {round(max)} mm. Using {round(max)} mm. Check ${travel_setting(axis)} with $$.
-          </p>
-
-          <section class="cnc-dro" aria-label="Position">
-            <div class="cnc-dro-row">
-              <span class="cnc-axis">X</span>
-              <span class="cnc-num">{fmt(pos(@machine, 0))}</span>
-            </div>
-            <div class="cnc-dro-row">
-              <span class="cnc-axis">Y</span>
-              <span class="cnc-num">{fmt(pos(@machine, 1))}</span>
-            </div>
-            <p class="cnc-sub">Machine position in mm</p>
             <p :if={@machine.wpos && @machine.wpos != @machine.mpos} class="cnc-sub">
-              Work position X {fmt(elem(@machine.wpos, 0))}, Y {fmt(elem(@machine.wpos, 1))}
+              work {xyz_label(@machine.wpos)}
             </p>
           </section>
 
           <section class="cnc-group">
-            <h2 class="cnc-h">Speed</h2>
+            <h2 class="cnc-h">Jog speed</h2>
             <div class="cnc-seg" role="group" aria-label="Jog speed">
               <button
-                :for={{tier, mm_s} <- @tiers}
+                :for={{tier, {xy, z}} <- @tiers}
                 type="button"
                 class="cnc-btn"
                 aria-pressed={to_string(@tier == tier)}
                 phx-click="tier"
                 phx-value-tier={tier}
               >
-                {String.capitalize(to_string(tier))} <span class="cnc-unit">{mm_s} mm/s</span>
+                {tier}<span class="cnc-unit">{xy}/{z}</span>
               </button>
             </div>
+            <p class="cnc-sub">X/Y and Z in mm/s</p>
           </section>
 
           <section class="cnc-group">
-            <h2 class="cnc-h">Step</h2>
+            <h2 class="cnc-h">Step <span class="cnc-unit">mm</span></h2>
             <div class="cnc-seg" role="group" aria-label="Step size">
               <button
                 :for={mm <- @steps}
@@ -245,81 +285,53 @@ defmodule CNCWeb.MachineLive do
               </button>
             </div>
             <div class="cnc-pad">
-              <.step_button x={0} y={1} label="Y+" idle?={@machine.state == :idle} />
-              <.step_button x={-1} y={0} label="X−" idle?={@machine.state == :idle} />
-              <span class="cnc-pad-mm">{@step} mm</span>
-              <.step_button x={1} y={0} label="X+" idle?={@machine.state == :idle} />
-              <.step_button x={0} y={-1} label="Y−" idle?={@machine.state == :idle} />
+              <.step_button x={0} y={1} z={0} label="Y+" area="yp" idle?={@machine.state == :idle} />
+              <.step_button x={-1} y={0} z={0} label="X−" area="xm" idle?={@machine.state == :idle} />
+              <span class="cnc-pad-mm">{@step}</span>
+              <.step_button x={1} y={0} z={0} label="X+" area="xp" idle?={@machine.state == :idle} />
+              <.step_button x={0} y={-1} z={0} label="Y−" area="ym" idle?={@machine.state == :idle} />
+              <.step_button x={0} y={0} z={1} label="Z+" area="zp" idle?={@machine.state == :idle} />
+              <.step_button x={0} y={0} z={-1} label="Z−" area="zm" idle?={@machine.state == :idle} />
             </div>
           </section>
 
-          <section class="cnc-group">
-            <h2 class="cnc-h">Controller</h2>
-            <div class="cnc-row">
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click="feed_hold"
-                disabled={!@machine.connected?}
-              >
-                Hold
-              </button>
-              <button type="button" class="cnc-btn" phx-click="resume" disabled={!@machine.connected?}>
-                Resume
-              </button>
-              <button type="button" class="cnc-btn" phx-click="reset" disabled={!@machine.connected?}>
-                Reset
-              </button>
-            </div>
-            <button
-              type="button"
-              class="cnc-btn cnc-btn--quiet"
-              phx-click="toggle_details"
-              aria-expanded={to_string(@details?)}
-              aria-controls="console"
-            >
-              {if @details?, do: "Hide details and console", else: "Details and console"}
-            </button>
-            <dl :if={@details?} class="cnc-facts">
-              <dt>Reports</dt>
-              <dd>{controller_label(@machine)}</dd>
-              <dt>Feed</dt>
-              <dd>{if @machine.feed, do: "#{round(@machine.feed)} mm/min", else: "—"}</dd>
-              <dt>Planner</dt>
-              <dd>{buffer_label(@machine.buffer, 0, "blocks")}</dd>
-              <dt>Serial buffer</dt>
-              <dd>{buffer_label(@machine.buffer, 1, "bytes")}</dd>
-              <dt>Awaiting ack</dt>
-              <dd>{pluralize(@machine.awaiting_ack, "line")}</dd>
-              <dt>Work offset</dt>
-              <dd>{xyz_label(@machine.wco)}</dd>
-              <dt>Travel</dt>
-              <dd>
-                {travel_label(@machine.travel)}
-                <span class="cnc-sub-inline">
-                  {if @machine.travel_source == :controller,
-                    do: "from the controller",
-                    else: "from config"}
-                </span>
-              </dd>
-              <dt :if={@machine.alarm}>Locked because</dt>
-              <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
-            </dl>
-          </section>
+          <dl :if={@details?} class="cnc-facts" aria-label="Controller details">
+            <dt>planner</dt>
+            <dd>{buffer_label(@machine.buffer, 0, "blocks")}</dd>
+            <dt>serial</dt>
+            <dd>{buffer_label(@machine.buffer, 1, "bytes")}</dd>
+            <dt>awaiting ack</dt>
+            <dd>{pluralize(@machine.awaiting_ack, "line")}</dd>
+            <dt>work offset</dt>
+            <dd>{xyz_label(@machine.wco)}</dd>
+            <dt>travel</dt>
+            <dd>
+              {travel_label(@machine.travel)}
+              <span class="cnc-sub-inline">
+                {if @machine.travel_source == :controller,
+                  do: "from the controller",
+                  else: "from config"}
+              </span>
+            </dd>
+            <dt :if={@machine.alarm}>locked because</dt>
+            <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
+          </dl>
 
           <section class="cnc-group">
             <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="toggle_help">
               {if @help?, do: "Hide keyboard shortcuts", else: "Keyboard shortcuts"}
             </button>
             <dl :if={@help?} class="cnc-keys">
-              <dt>Arrow keys</dt>
-              <dd>Jog while held</dd>
+              <dt>← → ↑ ↓</dt>
+              <dd>Jog X/Y while held</dd>
+              <dt>PgUp PgDn</dt>
+              <dd>Jog Z while held (fn+↑ fn+↓ on a Mac)</dd>
               <dt>Shift</dt>
               <dd>Fast while held</dd>
               <dt>Option</dt>
               <dd>Fine while held</dd>
               <dt>Esc</dt>
-              <dd>Stop and hold</dd>
+              <dd>Stop and hold, always</dd>
               <dt>?</dt>
               <dd>Show or hide this list</dd>
             </dl>
@@ -424,7 +436,9 @@ defmodule CNCWeb.MachineLive do
 
   attr :x, :integer, required: true
   attr :y, :integer, required: true
+  attr :z, :integer, required: true
   attr :label, :string, required: true
+  attr :area, :string, required: true
   attr :idle?, :boolean, required: true
 
   defp step_button(assigns) do
@@ -432,9 +446,11 @@ defmodule CNCWeb.MachineLive do
     <button
       type="button"
       class="cnc-btn"
+      style={"grid-area: #{@area}"}
       phx-click="step"
       phx-value-x={@x}
       phx-value-y={@y}
+      phx-value-z={@z}
       disabled={!@idle?}
     >
       {@label}
@@ -449,17 +465,18 @@ defmodule CNCWeb.MachineLive do
     {:noreply, socket}
   end
 
-  defp push_pos(socket, %State{mpos: {x, y, _}} = m) do
-    {jx, jy} = m.jog
-    push_event(socket, "pos", %{x: x, y: y, state: m.state, jog: [jx, jy]})
+  defp push_pos(socket, %State{mpos: {x, y, z}} = m) do
+    {jx, jy, jz} = m.jog
+    push_event(socket, "pos", %{x: x, y: y, z: z, state: m.state, jog: [jx, jy, jz]})
   end
 
   defp push_pos(socket, _), do: socket
 
-  defp vector(x, y) do
+  defp vector(x, y, z) do
     with {x, ""} when x in -1..1 <- Integer.parse(to_string(x)),
-         {y, ""} when y in -1..1 <- Integer.parse(to_string(y)) do
-      {:ok, {x, y}}
+         {y, ""} when y in -1..1 <- Integer.parse(to_string(y)),
+         {z, ""} when z in -1..1 <- Integer.parse(to_string(z)) do
+      {:ok, {x, y, z}}
     else
       _ -> :error
     end
@@ -480,8 +497,8 @@ defmodule CNCWeb.MachineLive do
 
   defp travel_json(travel), do: Jason.encode!(travel_list(travel))
 
-  defp travel_list({{x0, x1}, {y0, y1}, _z}), do: [[x0, x1], [y0, y1]]
-  defp travel_list(_), do: [[0, 1250], [0, 1250]]
+  defp travel_list({{x0, x1}, {y0, y1}, {z0, z1}}), do: [[x0, x1], [y0, y1], [z0, z1]]
+  defp travel_list(_), do: [[0, 1250], [0, 1250], [-100, 0]]
 
   defp adapter_label("Sim"), do: "Simulator"
   defp adapter_label(nil), do: ""
@@ -534,8 +551,9 @@ defmodule CNCWeb.MachineLive do
   defp xyz_label(nil), do: "Not reported yet"
   defp xyz_label({x, y, z}), do: "X #{fmt(x)}, Y #{fmt(y)}, Z #{fmt(z)}"
 
-  defp travel_label({{x0, x1}, {y0, y1}, _}),
-    do: "X #{round(x0)} to #{round(x1)}, Y #{round(y0)} to #{round(y1)} mm"
+  defp travel_label({{x0, x1}, {y0, y1}, {z0, z1}}),
+    do:
+      "X #{round(x0)} to #{round(x1)}, Y #{round(y0)} to #{round(y1)}, Z #{round(z0)} to #{round(z1)} mm"
 
   defp travel_label(_), do: "—"
 

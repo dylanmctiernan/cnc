@@ -49,7 +49,7 @@ defmodule CNC.Machine.Server do
     :published_at,
     connected?: false,
     tier: :normal,
-    vector: {0, 0},
+    vector: {0, 0, 0},
     in_flight: 0,
     pending: :queue.new(),
     console: Console.new(),
@@ -196,7 +196,7 @@ defmodule CNC.Machine.Server do
   defp event({:call, from}, :home, s, d) when s in [:alarm, :idle],
     do: {:homing, send_line(d, Command.home(), :home), [{:reply, from, :ok}]}
 
-  defp event({:call, from}, {:jog, {0, 0}, _tier}, s, d),
+  defp event({:call, from}, {:jog, {0, 0, 0}, _tier}, s, d),
     do: event({:call, from}, :jog_stop, s, d)
 
   defp event({:call, from}, {:jog, vector, tier}, :idle, d) do
@@ -404,18 +404,18 @@ defmodule CNC.Machine.Server do
   # Holding a key into a limit clamps the increment, so the tool slides up to
   # the edge (and along it on diagonals) and then just stops sending.
   defp maybe_increment(d) do
-    {delta, feed} = Jog.increment(d.vector, d.tier)
-    delta = Jog.clamp(d.target, delta, d.travel)
+    {raw, feed} = Jog.increment(d.vector, d.tier)
+    delta = Jog.clamp(d.target, raw, d.travel)
 
     if not Jog.zero?(delta) and d.in_flight < Jog.max_in_flight() and
-         Jog.room_ahead?(d.target, d.status.mpos, d.tier) do
+         Jog.room_ahead?(d.target, d.status.mpos, Jog.magnitude(raw)) do
       %{send_line(d, Command.jog(delta, feed), :jog) | target: Jog.add(d.target, delta)}
     else
       d
     end
   end
 
-  defp end_session(d), do: %{d | vector: {0, 0}, target: nil}
+  defp end_session(d), do: %{d | vector: {0, 0, 0}, target: nil}
 
   ## Transport
 

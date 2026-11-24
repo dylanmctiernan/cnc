@@ -1,9 +1,12 @@
-// Top-down bed view. Draws only positions the server reports ("pos" events),
-// interpolating between samples so the marker moves smoothly at frame rate.
+// Top-down bed view plus a Z gauge. Draws only positions the server reports
+// ("pos" events), interpolating between samples so the marker moves
+// smoothly at frame rate. Colour means state only: yellow moving, red alarm.
 const TRAIL_MAX = 2000
 const TRAIL_BATCHES = 20
 const GRID_MM = 100
-const PAD = 36
+const PAD = 40
+const GAUGE = 72 // px reserved on the right for the Z gauge
+const FONT = '"JetBrains Mono", ui-monospace, monospace'
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 
@@ -16,6 +19,7 @@ export default {
     const start = {
       x: parseFloat(this.el.dataset.x) || 0,
       y: parseFloat(this.el.dataset.y) || 0,
+      z: parseFloat(this.el.dataset.z) || 0,
     }
     this.from = {...start}
     this.to = {...start}
@@ -24,21 +28,22 @@ export default {
     this.dur = 1
     this.lastSample = performance.now()
     this.state = this.el.dataset.state
-    this.jog = [0, 0]
+    this.jog = [0, 0, 0]
 
     this.trail = new Float32Array(TRAIL_MAX * 2)
     this.trailHead = 0
     this.trailLen = 0
 
     this.colors = {
-      board: css("--board"),
-      boardLine: css("--board-line"),
-      boardLineMajor: css("--board-line-major"),
-      graphite: css("--graphite"),
-      steel: css("--steel"),
+      bed: css("--bed"),
+      grid: css("--grid"),
+      gridMajor: css("--grid-major"),
+      edge: css("--edge"),
+      dim: css("--text-dim"),
+      text: css("--text"),
+      bg: css("--bg"),
       yellow: css("--yellow"),
       red: css("--red"),
-      alu: css("--alu"),
     }
 
     this.handleEvent("pos", (p) => this.sample(p))
@@ -64,12 +69,12 @@ export default {
     this.resize.disconnect()
   },
 
-  sample({x, y, state, jog}) {
+  sample({x, y, z, state, jog}) {
     const now = performance.now()
-    // Glide from wherever the marker is drawn now to the new report, over
+    // Glide from where the marker is drawn now to the new report, over
     // roughly the interval between reports.
     this.from = {...this.shown}
-    this.to = {x, y}
+    this.to = {x, y, z}
     this.t0 = now
     this.dur = Math.min(Math.max(now - this.lastSample, 16), 250)
     this.lastSample = now
@@ -97,12 +102,16 @@ export default {
     this.canvas.height = Math.round(height * dpr)
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-    const [[x0, x1], [y0, y1]] = this.travel
-    const scale = Math.min((width - PAD * 2) / (x1 - x0), (height - PAD * 2) / (y1 - y0))
+    const [[x0, x1], [y0, y1], [z0, z1] = [-100, 0]] = this.travel
+    const room = width - GAUGE
+    const scale = Math.min((room - PAD * 2) / (x1 - x0), (height - PAD * 2) / (y1 - y0))
+    const bedH = (y1 - y0) * scale
     this.view = {
-      width, height, scale, x0, x1, y0, y1,
-      left: (width - (x1 - x0) * scale) / 2,
-      bottom: (height + (y1 - y0) * scale) / 2,
+      width, height, scale, x0, x1, y0, y1, z0, z1,
+      left: (room - (x1 - x0) * scale) / 2,
+      bottom: (height + bedH) / 2,
+      top: (height - bedH) / 2,
+      gaugeX: room + 8,
     }
   },
 
@@ -112,18 +121,32 @@ export default {
     return [v.left + (x - v.x0) * v.scale, v.bottom - (y - v.y0) * v.scale]
   },
 
+  // Z mm → canvas y on the gauge (top of travel at the top).
+  zy(z) {
+    const v = this.view
+    return v.bottom - ((z - v.z0) / (v.z1 - v.z0)) * (v.bottom - v.top)
+  },
+
   draw(now) {
     const k = Math.min((now - this.t0) / this.dur, 1)
+    const lerp = (a, b) => a + (b - a) * k
     this.shown = {
-      x: this.from.x + (this.to.x - this.from.x) * k,
-      y: this.from.y + (this.to.y - this.from.y) * k,
+      x: lerp(this.from.x, this.to.x),
+      y: lerp(this.from.y, this.to.y),
+      z: lerp(this.from.z, this.to.z),
     }
 
-    const {ctx, view: v, colors: c} = this
+    const {ctx, view: v} = this
     ctx.clearRect(0, 0, v.width, v.height)
     this.drawBed()
     this.drawTrail()
     this.drawTool(this.shown)
+    this.drawGauge(this.shown.z)
+  },
+
+  markerColor() {
+    const c = this.colors
+    return {jogging: c.yellow, homing: c.yellow, alarm: c.red}[this.state] || c.text
   },
 
   drawBed() {
@@ -131,29 +154,29 @@ export default {
     const [l, b] = this.px(v.x0, v.y0)
     const [r, t] = this.px(v.x1, v.y1)
 
-    ctx.fillStyle = c.board
+    ctx.fillStyle = c.bed
     ctx.fillRect(l, t, r - l, b - t)
 
     ctx.lineWidth = 1
     for (let mm = Math.ceil(v.x0 / GRID_MM) * GRID_MM; mm <= v.x1; mm += GRID_MM) {
       const [x] = this.px(mm, 0)
-      ctx.strokeStyle = mm % 500 === 0 ? c.boardLineMajor : c.boardLine
+      ctx.strokeStyle = mm % 500 === 0 ? c.gridMajor : c.grid
       line(ctx, x, t, x, b)
     }
     for (let mm = Math.ceil(v.y0 / GRID_MM) * GRID_MM; mm <= v.y1; mm += GRID_MM) {
       const [, y] = this.px(0, mm)
-      ctx.strokeStyle = mm % 500 === 0 ? c.boardLineMajor : c.boardLine
+      ctx.strokeStyle = mm % 500 === 0 ? c.gridMajor : c.grid
       line(ctx, l, y, r, y)
     }
 
     // Travel limits
-    ctx.strokeStyle = c.graphite
-    ctx.lineWidth = 2
+    ctx.strokeStyle = c.edge
+    ctx.lineWidth = 1.5
     ctx.strokeRect(l, t, r - l, b - t)
 
-    // Scale labels every 250 mm, outside the board
-    ctx.fillStyle = c.steel
-    ctx.font = '500 11px "Barlow Semi Condensed", system-ui, sans-serif'
+    // Scale every 250 mm, outside the bed
+    ctx.fillStyle = c.dim
+    ctx.font = `11px ${FONT}`
     ctx.textAlign = "center"
     ctx.textBaseline = "top"
     for (let mm = v.x0; mm <= v.x1; mm += 250) ctx.fillText(mm, this.px(mm, 0)[0], b + 6)
@@ -161,18 +184,18 @@ export default {
     ctx.textBaseline = "middle"
     for (let mm = v.y0; mm <= v.y1; mm += 250) ctx.fillText(mm, l - 6, this.px(0, mm)[1])
 
-    // Origin: short X and Y axes from front-left
+    // Origin axes, front-left
     const [ox, oy] = this.px(0, 0)
-    ctx.strokeStyle = c.graphite
+    ctx.strokeStyle = c.edge
     ctx.lineWidth = 2
-    line(ctx, ox, oy, ox + 22, oy)
-    line(ctx, ox, oy, ox, oy - 22)
-    ctx.fillStyle = c.graphite
-    ctx.font = '600 11px Barlow, system-ui, sans-serif'
+    line(ctx, ox, oy, ox + 24, oy)
+    line(ctx, ox, oy, ox, oy - 24)
+    ctx.fillStyle = c.dim
+    ctx.font = `500 11px ${FONT}`
     ctx.textAlign = "left"
     ctx.textBaseline = "bottom"
-    ctx.fillText("X", ox + 25, oy - 2)
-    ctx.fillText("Y", ox + 4, oy - 24)
+    ctx.fillText("X", ox + 27, oy - 1)
+    ctx.fillText("Y", ox + 4, oy - 26)
   },
 
   drawTrail() {
@@ -181,7 +204,7 @@ export default {
 
     const start = (this.trailHead - trailLen + TRAIL_MAX) % TRAIL_MAX
     const per = Math.ceil(trailLen / TRAIL_BATCHES)
-    ctx.strokeStyle = this.colors.graphite
+    ctx.strokeStyle = this.colors.dim
     ctx.lineWidth = 1.5
     ctx.lineJoin = "round"
 
@@ -202,17 +225,15 @@ export default {
   drawTool({x, y}) {
     const {ctx, colors: c} = this
     const [px, py] = this.px(x, y)
-    const fill = {jogging: c.yellow, alarm: c.red}[this.state] || c.alu
     const dim = ["disconnected", "connecting"].includes(this.state)
-
     ctx.globalAlpha = dim ? 0.4 : 1
 
-    // Commanded jog direction (what we asked for, not where it is)
-    const [jx, jy] = this.jog || [0, 0]
+    // Commanded X/Y jog direction (asked for, not where it is)
+    const [jx, jy] = this.jog || [0, 0, 0]
     if (jx || jy) {
       const n = Math.hypot(jx, jy)
       const ex = px + (jx / n) * 34, ey = py - (jy / n) * 34
-      ctx.strokeStyle = c.graphite
+      ctx.strokeStyle = c.bg
       ctx.lineWidth = 5
       line(ctx, px, py, ex, ey)
       ctx.strokeStyle = c.yellow
@@ -221,17 +242,72 @@ export default {
     }
 
     // Crosshair + ring at the reported position
-    ctx.strokeStyle = c.graphite
-    ctx.lineWidth = 1.5
-    line(ctx, px - 16, py, px + 16, py)
-    line(ctx, px, py - 16, px, py + 16)
+    ctx.strokeStyle = c.text
+    ctx.lineWidth = 1
+    line(ctx, px - 18, py, px - 10, py)
+    line(ctx, px + 10, py, px + 18, py)
+    line(ctx, px, py - 18, px, py - 10)
+    line(ctx, px, py + 10, px, py + 18)
     ctx.beginPath()
-    ctx.arc(px, py, 8, 0, Math.PI * 2)
-    ctx.fillStyle = fill
+    ctx.arc(px, py, 7, 0, Math.PI * 2)
+    ctx.fillStyle = this.markerColor()
     ctx.fill()
+    ctx.strokeStyle = c.bg
     ctx.lineWidth = 2
     ctx.stroke()
 
+    ctx.globalAlpha = 1
+  },
+
+  drawGauge(z) {
+    const {ctx, view: v, colors: c} = this
+    const x = v.gaugeX + 22, w = 14
+    const top = v.top, bottom = v.bottom
+
+    ctx.fillStyle = c.bed
+    ctx.fillRect(x, top, w, bottom - top)
+    ctx.strokeStyle = c.edge
+    ctx.lineWidth = 1.5
+    ctx.strokeRect(x, top, w, bottom - top)
+
+    // Ticks every 25 mm, labels at the ends and middle
+    ctx.fillStyle = c.dim
+    ctx.strokeStyle = c.grid
+    ctx.lineWidth = 1
+    ctx.font = `11px ${FONT}`
+    ctx.textAlign = "right"
+    ctx.textBaseline = "middle"
+    const span = v.z1 - v.z0
+    for (let mm = v.z1; mm >= v.z0 - 1e-6; mm -= 25) {
+      const y = this.zy(mm)
+      line(ctx, x, y, x + w, y)
+      if (mm === v.z1 || mm === v.z0 || Math.abs(mm - (v.z0 + span / 2)) < 1e-6) ctx.fillText(Math.round(mm), x - 4, y)
+    }
+    ctx.textAlign = "center"
+    ctx.textBaseline = "bottom"
+    ctx.font = `500 11px ${FONT}`
+    ctx.fillText("Z", x + w / 2, top - 6)
+
+    // Tool height: a bar across the gauge with a pointer
+    const dim = ["disconnected", "connecting"].includes(this.state)
+    ctx.globalAlpha = dim ? 0.4 : 1
+    const y = this.zy(Math.min(Math.max(z, v.z0), v.z1))
+    ctx.fillStyle = this.markerColor()
+    ctx.fillRect(x - 3, y - 2, w + 6, 4)
+    ctx.beginPath()
+    ctx.moveTo(x + w + 4, y)
+    ctx.lineTo(x + w + 12, y - 6)
+    ctx.lineTo(x + w + 12, y + 6)
+    ctx.closePath()
+    ctx.fill()
+
+    // Commanded Z direction
+    const jz = (this.jog || [0, 0, 0])[2]
+    if (jz) {
+      ctx.strokeStyle = c.yellow
+      ctx.lineWidth = 2.5
+      line(ctx, x + w / 2, y, x + w / 2, y - jz * 26)
+    }
     ctx.globalAlpha = 1
   },
 }

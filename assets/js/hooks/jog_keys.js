@@ -1,11 +1,13 @@
-// Keyboard jogging. Held arrow keys become a {x, y} vector sent to the
+// Keyboard jogging. Held arrow / Page keys become an {x, y, z} vector sent to the
 // server; while it's non-zero a heartbeat keeps the server-side dead-man
 // happy. Anything that might leave a key "stuck" stops the jog instead.
 const ARROWS = {
-  ArrowLeft: [-1, 0],
-  ArrowRight: [1, 0],
-  ArrowUp: [0, 1],
-  ArrowDown: [0, -1],
+  ArrowLeft: [-1, 0, 0],
+  ArrowRight: [1, 0, 0],
+  ArrowUp: [0, 1, 0],
+  ArrowDown: [0, -1, 0],
+  PageUp: [0, 0, 1],
+  PageDown: [0, 0, -1],
 }
 const HEARTBEAT_MS = 50
 
@@ -68,20 +70,22 @@ export default {
   },
 
   update(e) {
-    let x = 0, y = 0
+    let x = 0, y = 0, z = 0
     for (const key of this.held) {
       x += ARROWS[key][0]
       y += ARROWS[key][1]
+      z += ARROWS[key][2]
     }
     x = Math.sign(x)
     y = Math.sign(y)
+    z = Math.sign(z)
 
-    if (x === 0 && y === 0) return this.halt(true)
+    if (x === 0 && y === 0 && z === 0) return this.halt(true)
 
     const tier = e.shiftKey ? "fast" : e.altKey ? "fine" : this.el.dataset.tier
-    const key = `${x},${y},${tier}`
+    const key = `${x},${y},${z},${tier}`
     if (key !== this.sent) {
-      this.pushEvent("jog", {x, y, tier})
+      this.pushEvent("jog", {x, y, z, tier})
       this.sent = key
     }
     if (!this.beat) {

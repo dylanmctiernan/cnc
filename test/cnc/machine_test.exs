@@ -75,6 +75,31 @@ defmodule CNC.MachineTest do
       assert_receive {:line, "$J=G91 G21 X-1.768 Y1.768 F3000"}
     end
 
+    test "Z jogs at the Z tier speed", %{m: m} do
+      idle(m)
+      idle_at(m, {100, 100}, -50)
+      :ok = Machine.jog(m, {0, 0, -1}, :normal)
+      # normal Z = 5 mm/s → 0.25 mm per 50 ms tick at F300
+      assert_receive {:line, "$J=G91 G21 Z-0.250 F300"}
+    end
+
+    test "X+Z moves keep Z within its tier", %{m: m} do
+      idle(m)
+      idle_at(m, {100, 100}, -50)
+      :ok = Machine.jog(m, {1, 0, 1}, :fast)
+      # 45° in XZ: Z capped at 10 mm/s → path 14.14 mm/s (F849), so each axis
+      # moves 0.5 mm per 50 ms tick: Z at exactly its 10 mm/s.
+      assert_receive {:line, "$J=G91 G21 X0.500 Z0.500 F849"}
+    end
+
+    test "Z can't jog above the top of travel", %{m: m} do
+      idle(m)
+      :ok = Machine.jog(m, {0, 0, 1}, :normal)
+      refute_receive {:line, "$J=" <> _}, 200
+      :ok = Machine.jog_stop(m)
+      assert Machine.jog_step(m, {0, 0, 1}, 1) == {:error, :at_limit}
+    end
+
     test "at most 4 unacked jog lines", %{m: m} do
       idle(m)
       :ok = Machine.jog(m, {1, 0}, :normal)
@@ -111,7 +136,7 @@ defmodule CNC.MachineTest do
       :ok = Machine.jog(m, {1, 0}, :normal)
       assert_receive {:rt, @jog_cancel}, 300
 
-      assert %State{state: :idle, last_error: {:jog, :heartbeat_lost}, jog: {0, 0}} =
+      assert %State{state: :idle, last_error: {:jog, :heartbeat_lost}, jog: {0, 0, 0}} =
                Machine.status(m)
     end
 
@@ -151,7 +176,7 @@ defmodule CNC.MachineTest do
       idle(m)
       :ok = Machine.jog(m, {1, 0}, :normal)
       send(m, {:transport, :line, "ALARM:1"})
-      assert %State{state: :alarm, alarm: {:alarm, 1}, jog: {0, 0}} = Machine.status(m)
+      assert %State{state: :alarm, alarm: {:alarm, 1}, jog: {0, 0, 0}} = Machine.status(m)
     end
 
     test "controller reset (banner) re-syncs and locks", %{m: m} do
@@ -395,6 +420,12 @@ defmodule CNC.MachineTest do
     assert_receive {:line, "$X"}
     ok(m)
     assert Machine.status(m).state == :idle
+  end
+
+  # Already idle (unlocked); report a new position including Z.
+  defp idle_at(m, {x, y}, z) do
+    send(m, {:transport, :line, "<Idle|MPos:#{x}.000,#{y}.000,#{z}.000|FS:0,0>"})
+    Machine.status(m)
   end
 
   defp keep_alive(m, ms) when ms <= 0, do: Machine.status(m)

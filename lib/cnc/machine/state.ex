@@ -18,7 +18,7 @@ defmodule CNC.Machine.State do
       (controller `ALARM:N`), or `:reported` (status said Alarm)
     * `last_error` — `{:error, code}` from a rejected line, or
       `{:jog, :heartbeat_lost}`
-    * `jog` — current held-key vector, `{0, 0}` when not jogging
+    * `jog` — current held-key vector `{dx, dy, dz}`, `{0, 0, 0}` when not jogging
     * `travel` — `{{x0, x1}, {y0, y1}, {z0, z1}}` in mm, the limits the host
       clamps jogs to (the controller's soft limits remain authoritative)
     * `travel_source` — `:controller` once read from `$130`–`$132` after
@@ -43,7 +43,7 @@ defmodule CNC.Machine.State do
             alarm: nil,
             last_error: nil,
             tier: :normal,
-            jog: {0, 0},
+            jog: {0, 0, 0},
             travel: nil,
             travel_source: :config,
             travel_issues: []

@@ -87,6 +87,22 @@ defmodule CNC.GrblhalSimTest do
     assert elem(Machine.status(m).mpos, 0) == x0
   end
 
+  test "Z steps down and jogs back up, never above the top", %{m: m} do
+    unlock(m)
+    {_, _, z0} = Machine.status(m).mpos
+
+    :ok = Machine.jog_step(m, {0, 0, -1}, 10)
+    assert eventually(fn -> abs(elem(Machine.status(m).mpos, 2) - (z0 - 10)) < 0.001 end, 3000)
+
+    # Hold Z+ for longer than it takes to reach the top: the clamp stops it there.
+    :ok = Machine.jog(m, {0, 0, 1}, :fast)
+    keep_alive(m, 2000)
+    :ok = Machine.jog_stop(m)
+    assert eventually(fn -> Machine.status(m).controller == :idle end, 3000)
+    assert elem(Machine.status(m).mpos, 2) <= 0.0
+    assert elem(Machine.status(m).mpos, 2) > -0.01
+  end
+
   test "soft reset reboots the controller and the host relocks", %{m: m} do
     unlock(m)
     :ok = Machine.reset(m)

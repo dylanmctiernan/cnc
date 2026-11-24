@@ -39,8 +39,31 @@ defmodule CNC.Machine.JogTest do
   end
 
   test "increment normalises diagonals to tier speed" do
-    {{dx, dy, +0.0}, 3000} = Jog.increment({1, -1}, :fast)
+    {{dx, dy, +0.0}, 3000} = Jog.increment({1, -1, 0}, :fast)
     assert_in_delta :math.sqrt(dx * dx + dy * dy), 2.5, 1.0e-9
+  end
+
+  test "Z-only increments use the Z tier" do
+    assert {{+0.0, +0.0, dz}, 600.0} = Jog.increment({0, 0, 1}, :fast)
+    assert_in_delta dz, 0.5, 1.0e-9
+  end
+
+  property "the Z component never exceeds the Z tier speed" do
+    check all v <- tuple({member_of(-1..1), member_of(-1..1), member_of(-1..1)}),
+              v != {0, 0, 0},
+              tier <- member_of([:fine, :normal, :fast]) do
+      {{_, _, dz}, feed} = Jog.increment(v, tier)
+      assert abs(dz) / Jog.dt_ms() * 1000 <= Jog.z_speed(tier) + 1.0e-9
+
+      assert_in_delta Jog.magnitude(elem(Jog.increment(v, tier), 0)) / Jog.dt_ms() * 1000 * 60,
+                      feed,
+                      1.0e-6
+    end
+  end
+
+  test "steps on Z use the Z tier feed" do
+    assert Jog.step({0, 0, -1}, 10, :normal) == {{0, 0, -10}, 300}
+    assert Jog.step({1, 0, 0}, 10, :normal) == {{10, 0, 0}, 1200}
   end
 
   defp coord, do: float(min: -20.0, max: 120.0)

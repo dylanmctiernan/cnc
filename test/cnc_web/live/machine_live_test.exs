@@ -36,7 +36,7 @@ defmodule CNCWeb.MachineLiveTest do
 
     render_hook(view, "jog", %{"x" => 1, "y" => 1, "tier" => "fast"})
     assert Machine.status().state == :jogging
-    assert_push_event(view, "pos", %{state: :jogging, jog: [1, 1]})
+    assert_push_event(view, "pos", %{state: :jogging, jog: [1, 1, 0]})
 
     for _ <- 1..4 do
       Process.sleep(50)
@@ -48,6 +48,23 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> elem(Machine.status().mpos, 0) > 0 end)
   end
 
+  test "Z: Page key jogs and Z steps", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> render(view) =~ "Ready" end)
+    {_, _, z0} = Machine.status().mpos
+
+    # At the top of Z travel already: down works, up is clamped.
+    view |> element("button[phx-value-mm='1']") |> render_click()
+    view |> element("button", "Z−") |> render_click()
+    assert eventually(fn -> abs(elem(Machine.status().mpos, 2) - (z0 - 1)) < 0.001 end)
+
+    render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => -1, "tier" => "fast"})
+    assert Machine.status().jog == {0, 0, -1}
+    assert_push_event(view, "pos", %{jog: [0, 0, -1]})
+    render_hook(view, "jog_stop", %{})
+  end
+
   test "rejects malformed jog input", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
@@ -55,6 +72,7 @@ defmodule CNCWeb.MachineLiveTest do
 
     render_hook(view, "jog", %{"x" => 5, "y" => 0, "tier" => "fast"})
     render_hook(view, "jog", %{"x" => 1, "y" => 0, "tier" => "ludicrous"})
+    render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => 2, "tier" => "fast"})
     assert Machine.status().state == :idle
   end
 
@@ -85,7 +103,7 @@ defmodule CNCWeb.MachineLiveTest do
     {:ok, view, _} = live(conn, ~p"/")
     refute has_element?(view, "#console")
 
-    view |> element("button", "Details and console") |> render_click()
+    view |> element(".cnc-actions button", "Console") |> render_click()
     assert has_element?(view, "#console")
     assert render(view) =~ "Controller restarted"
 
@@ -114,7 +132,7 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element("button", "Hide commands") |> render_click()
     refute has_element?(view, "#console-help")
 
-    view |> element("button", "Hide details and console") |> render_click()
+    view |> element(".cnc-actions button", "Console") |> render_click()
     refute has_element?(view, "#console")
   end
 

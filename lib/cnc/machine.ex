@@ -61,13 +61,18 @@ defmodule CNC.Machine do
   def reset(server \\ __MODULE__), do: call(server, :reset)
 
   @doc """
-  Start or update a continuous jog. `vector` is `{dx, dy}` with each in
-  `-1..1` (held arrow keys); `{0, 0}` stops. Must be kept alive with
-  `jog_heartbeat/1` at least every 250 ms, or the jog is cancelled.
+  Start or update a continuous jog. `vector` is `{dx, dy, dz}` (or `{dx, dy}`
+  for X/Y only) with each in `-1..1`: the held keys. All zeros stops. Must be
+  kept alive with `jog_heartbeat/1` at least every 250 ms, or the jog is
+  cancelled.
   """
-  @spec jog(server, Jog.vector(), Jog.tier()) :: reply
-  def jog(server \\ __MODULE__, {dx, dy} = vector, tier)
-      when dx in -1..1 and dy in -1..1 and tier in [:fine, :normal, :fast],
+  @spec jog(server, Jog.vector() | {-1..1, -1..1}, Jog.tier()) :: reply
+  def jog(server \\ __MODULE__, vector, tier)
+
+  def jog(server, {dx, dy}, tier), do: jog(server, {dx, dy, 0}, tier)
+
+  def jog(server, {dx, dy, dz} = vector, tier)
+      when dx in -1..1 and dy in -1..1 and dz in -1..1 and tier in [:fine, :normal, :fast],
       do: call(server, {:jog, vector, tier})
 
   @spec jog_heartbeat(server) :: reply
@@ -77,10 +82,15 @@ defmodule CNC.Machine do
   @spec jog_stop(server) :: :ok
   def jog_stop(server \\ __MODULE__), do: call(server, :jog_stop)
 
-  @doc "A single relative move of `mm` along each non-zero axis of `vector`."
-  @spec jog_step(server, Jog.vector(), number) :: reply | {:error, :at_limit}
-  def jog_step(server \\ __MODULE__, {dx, dy} = vector, mm)
-      when dx in -1..1 and dy in -1..1 and vector != {0, 0} and mm > 0 and mm <= 50,
+  @doc "A single relative move of `mm` along each non-zero axis of `vector` (`{dx, dy, dz}` or `{dx, dy}`)."
+  @spec jog_step(server, Jog.vector() | {-1..1, -1..1}, number) :: reply | {:error, :at_limit}
+  def jog_step(server \\ __MODULE__, vector, mm)
+
+  def jog_step(server, {dx, dy}, mm), do: jog_step(server, {dx, dy, 0}, mm)
+
+  def jog_step(server, {dx, dy, dz} = vector, mm)
+      when dx in -1..1 and dy in -1..1 and dz in -1..1 and vector != {0, 0, 0} and mm > 0 and
+             mm <= 50,
       do: call(server, {:jog_step, vector, mm})
 
   @doc """
