@@ -238,7 +238,7 @@ Hook rules:
 **Phase 1 ends at M5.** Status (2026-11-23): M0–M4 done. M5 done except `$H` and the soft-limit error, which the grblHAL simulator can't do (no limit-switch simulation, so no homing, so no soft limits); those move to Phase 2 on the real board. Travel limits against grblHAL are enforced by the host clamp. See §11.
 
 ### Next phases (not planned in detail)
-- **Phase 2 — real board:** `CNC.Transport.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view). Carries over from M5: homing and soft-limit tests. See §11 for what to verify on FluidNC.
+- **Phase 2 — real board:** `CNC.Transport.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view). Carries over from M5: homing and soft-limit tests. See §11 for what to verify on FluidNC. **Settings from the app:** a `CNC.Settings` boundary to read the controller's configuration (grblHAL `$$`; FluidNC `$CD` / `config.yaml`) and edit it with names, units and ranges, showing a diff and confirming before writing, only when Idle/Locked, then re-reading to verify.
 - **Phase 3 — Pi:** `cnc_firmware` Nerves project, `http://cnc.local`, phone jog pad.
 - Later: job streaming, toolpath preview + progress, storage, conversational ops, kiosk + HDMI touch, config sync, probing.
 

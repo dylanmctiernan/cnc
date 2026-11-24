@@ -59,6 +59,13 @@ export default {
       ),
     ]
 
+    // Locking mid-drag must stop at once. Watch the attribute directly:
+    // hooks on phx-update="ignore" elements may not get updated().
+    this.enabledObserver = new MutationObserver(() => {
+      if (!this.enabled()) this.releaseAll(true)
+    })
+    this.enabledObserver.observe(this.el, {attributes: true, attributeFilter: ["data-enabled"]})
+
     this.onLeave = () => this.releaseAll(true)
     this.onVisibility = () => document.hidden && this.releaseAll(true)
     window.addEventListener("blur", this.onLeave)
@@ -66,7 +73,17 @@ export default {
     document.addEventListener("visibilitychange", this.onVisibility)
   },
 
+  // LiveView updates data-* here; locking mid-drag must stop at once.
+  updated() {
+    if (!this.enabled()) this.releaseAll(true)
+  },
+
+  enabled() {
+    return this.el.dataset.enabled !== "false"
+  },
+
   destroyed() {
+    this.enabledObserver.disconnect()
     window.removeEventListener("blur", this.onLeave)
     window.removeEventListener("pagehide", this.onLeave)
     document.removeEventListener("visibilitychange", this.onVisibility)
@@ -90,7 +107,7 @@ export default {
     }
 
     el.addEventListener("pointerdown", (e) => {
-      if (pointer !== null || this.el.classList.contains("is-off")) return
+      if (pointer !== null || !this.enabled()) return
       e.preventDefault()
       pointer = e.pointerId
       el.setPointerCapture(pointer)
@@ -140,8 +157,7 @@ export default {
       return
     }
 
-    // The tier lives on the keyboard hook's element, which LiveView keeps current.
-    const tier = document.getElementById("jog-keys")?.dataset.tier || "normal"
+    const tier = this.el.dataset.tier || "normal"
     const key = `${v.join(",")},${tier}`
     if (key !== this.sent) {
       const [x, y, z] = v

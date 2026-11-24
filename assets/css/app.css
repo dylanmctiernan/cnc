@@ -414,7 +414,9 @@ button {
   gap: 0.75rem;
   align-items: stretch;
 }
-.cnc-joy.is-off {
+/* Enabled state is a data attribute: LiveView only updates data-* on
+   phx-update="ignore" elements, so a class would stick from first render. */
+.cnc-joy[data-enabled="false"] {
   opacity: 0.35;
   pointer-events: none;
 }

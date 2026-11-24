@@ -380,10 +380,11 @@ defmodule CNCWeb.MachineLive do
             <h2 class="cnc-h">Joystick</h2>
             <div
               id="joystick"
-              class={["cnc-joy", @machine.state not in [:idle, :jogging] && "is-off"]}
+              class="cnc-joy"
               phx-hook="Joystick"
               phx-update="ignore"
               data-tier={@tier}
+              data-enabled={to_string(@machine.state in [:idle, :jogging])}
             >
               <div
                 class="cnc-joy-pad"
