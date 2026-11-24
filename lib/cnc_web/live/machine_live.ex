@@ -659,13 +659,17 @@ defmodule CNCWeb.MachineLive do
             >
               Zero Z
             </button>
+            <%!-- Moves the machine, unlike the zeroing beside it: set apart,
+                 with a motion icon --%>
             <button
               type="button"
-              class="cnc-btn"
+              id="go-to-zero"
+              class="cnc-btn cnc-btn--motion"
               phx-click="go_to_zero"
               disabled={not can_go_to_zero?(@machine)}
+              title="Moves the machine: rapid to X0 Y0 at a safe height"
             >
-              Go to X0 Y0
+              <.icon name="hero-arrow-down-left" class="ui-btn-icon" /> Go to X0 Y0
             </button>
           </div>
         </section>
@@ -837,6 +841,7 @@ defmodule CNCWeb.MachineLive do
               </button>
             </div>
           </section>
+          <h2 class="cnc-h">Controller</h2>
           <dl class="cnc-facts" aria-label="Controller details">
             <dt>planner</dt>
             <dd>{buffer_label(@machine.buffer, 0, "blocks")}</dd>
@@ -858,6 +863,7 @@ defmodule CNCWeb.MachineLive do
             <dt :if={@machine.alarm}>locked because</dt>
             <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
           </dl>
+          <h2 class="cnc-h">Keyboard</h2>
           <dl class="cnc-keys" aria-label="Keyboard">
             <dt>← → ↑ ↓</dt>
             <dd>Jog X/Y while held</dd>
@@ -871,6 +877,7 @@ defmodule CNCWeb.MachineLive do
             <dd>Stop and hold, always</dd>
           </dl>
           <button
+            :if={@view_mode == :top}
             type="button"
             class="cnc-btn cnc-btn--quiet"
             phx-click={JS.dispatch("bed:clear-trail", to: "#bed")}

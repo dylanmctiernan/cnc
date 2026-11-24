@@ -1639,9 +1639,6 @@ body {
     --joy: min(13rem, calc(100dvh - 30rem));
     border-top: 1px solid var(--line);
   }
-  .cnc-speed .cnc-unit {
-    display: none;
-  }
   .cnc-joy {
     grid-template-columns: var(--joy) 4rem;
   }
@@ -3303,3 +3300,117 @@ body {
   background: var(--surface-3);
 }
 
+/* Selection: clear without being loud. The chosen option is raised and
+   outlined, in full-strength text; the others recede. Never colour alone. */
+.cnc-seg .cnc-btn {
+  background: var(--surface-1);
+  border-color: var(--border-faint);
+  color: var(--text-muted);
+}
+.cnc-seg .cnc-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.cnc-seg .cnc-btn[aria-pressed="true"],
+.ui-seg.is-on {
+  position: relative;
+  z-index: 1;
+  border-color: var(--text-muted);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+.cnc-seg .cnc-btn.is-x[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--x); color: var(--x); }
+.cnc-seg .cnc-btn.is-y[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--y); color: var(--y); }
+.cnc-seg .cnc-btn.is-z[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--z); color: var(--z); }
+.cnc-seg .cnc-unit {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.ui-seg {
+  background: var(--surface-1);
+  border-color: var(--border-faint);
+}
+
+/* Commands that move the machine look different from ones that only set
+   a value: set apart, with a motion icon */
+.cnc-dro-tools {
+  align-items: center;
+}
+.cnc-btn--motion {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* The workstation's panels: one rhythm of padding, borders and headings */
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) {
+  .cnc-dro,
+  .cnc-ctl,
+  .cnc-side {
+    padding: var(--space-3) var(--space-4);
+    border-left-color: var(--border-faint);
+    background: var(--surface-1);
+  }
+  .cnc-ctl,
+  .cnc-side {
+    border-top-color: var(--border-faint);
+  }
+  .cnc-dro-tools {
+    margin-top: var(--space-1);
+  }
+  .cnc-side {
+    gap: var(--space-2);
+  }
+  .cnc-side > .cnc-h:not(:first-child) {
+    margin-top: var(--space-3);
+  }
+  .cnc-file-side {
+    border-bottom-color: var(--border-faint);
+  }
+  .cnc-facts,
+  .cnc-keys {
+    font-size: var(--text-sm);
+  }
+  .cnc-facts dt,
+  .cnc-keys dd {
+    color: var(--text-muted);
+  }
+  .cnc-keys dt {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text);
+  }
+}
+
+
+/* A note inside the file summary: a stacked callout, not a banner */
+.cnc-file-summary .cnc-note {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-faint);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface-1));
+  font-size: var(--text-sm);
+  animation: none;
+}
+.cnc-file-summary .cnc-fit-issues {
+  color: var(--text-muted);
+}
+
+/* The map's own toggles (2D/3D, the zoom) select the same way */
+.cnc-view-switch .ui-btn[aria-pressed="true"],
+.cnc-view-switch .cnc-btn[aria-pressed="true"],
+.cnc-zoom[aria-pressed="true"] {
+  border-color: var(--text-muted);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+.cnc-view-switch [aria-pressed="false"],
+.cnc-zoom[aria-pressed="false"] {
+  background: var(--surface-1);
+  color: var(--text-muted);
+}
