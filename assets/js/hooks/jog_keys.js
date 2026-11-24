@@ -35,7 +35,6 @@ export default {
         if (!e.repeat) this.held.add(e.key)
         return this.update(e)
       }
-      if (e.key === "?") return this.pushEvent("toggle_help", {})
       if (e.key === "Shift" || e.key === "Alt") this.update(e)
     }
 

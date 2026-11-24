@@ -56,7 +56,8 @@ defmodule CNCWeb.MachineLiveTest do
     # At the top of Z travel already: down works, up is clamped.
     view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
-    view |> element("button", "Z−") |> render_click()
+    view |> element("button[phx-value-axis=z]") |> render_click()
+    view |> element(".cnc-pendant-btn", "Z−") |> render_click()
     assert eventually(fn -> abs(elem(Machine.status().mpos, 2) - (z0 - 1)) < 0.001 end)
 
     render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => -1, "tier" => "fast"})
@@ -95,7 +96,7 @@ defmodule CNCWeb.MachineLiveTest do
 
     view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='10']") |> render_click()
-    view |> element("button", "X+") |> render_click()
+    view |> element(".cnc-pendant-btn", "X+") |> render_click()
     # Work = machine - offset, in floats: compare with a tolerance.
     assert eventually(
              fn ->
@@ -143,23 +144,37 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element(".cnc-dock button", "Stop") |> render_click()
     assert Machine.status().state == :idle
 
-    view |> element(".cnc-more > button", "More") |> render_click()
+    view |> element(".cnc-more > button", "Menu") |> render_click()
     assert has_element?(view, ".cnc-more a", "Settings")
-    assert has_element?(view, ".cnc-more button", "Reset controller")
+    assert has_element?(view, ".cnc-more button", "Clear trail")
     view |> element(".cnc-more button", "Reset controller") |> render_click()
     refute has_element?(view, "#more-menu")
-    view |> element(".cnc-dro button", "Zero…") |> render_click()
-    assert has_element?(view, ".cnc-dro.is-zeroing")
   end
 
-  test "phones: More holds zeroing, work/machine and clear trail", %{conn: conn} do
+  test "controller: Zero mode zeroes axes and switches work/machine", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    view |> element(".cnc-more > button", "More") |> render_click()
-    view |> element(".cnc-more button", "Zero…") |> render_click()
-    view |> element(".cnc-more > button", "More") |> render_click()
-    assert has_element?(view, ".cnc-dro.is-zeroing")
-    assert has_element?(view, ".cnc-more button", "Done zeroing")
-    assert has_element?(view, ".cnc-more button", "Clear trail")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> Machine.status().state == :idle end)
+
+    assert eventually(fn -> render(view) =~ "Work position" end)
+    view |> element("button[phx-value-mode=zero]") |> render_click()
+
+    assert eventually(fn ->
+             not has_element?(view, ".cnc-zero button[phx-value-axes=x][disabled]")
+           end)
+
+    view |> element(".cnc-zero button[phx-value-axes=x]") |> render_click()
+
+    assert eventually(fn ->
+             match?({wx, _, _} when abs(wx) < 0.001, Machine.status().wpos)
+           end)
+
+    view |> element(".cnc-zero button[phx-value-frame=machine]") |> render_click()
+    assert has_element?(view, ".cnc-zero button[phx-value-frame=machine][aria-pressed=true]")
+
+    view |> element("button[phx-value-mode=joystick]") |> render_click()
+    refute has_element?(view, ".cnc-zero")
+    assert has_element?(view, "#joystick")
   end
 
   test "Add to Home Screen: manifest and Apple tags", %{conn: conn} do
@@ -193,7 +208,8 @@ defmodule CNCWeb.MachineLiveTest do
 
     view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
-    view |> element("button", "Y+") |> render_click()
+    view |> element("button[phx-value-axis=y]") |> render_click()
+    view |> element(".cnc-pendant-btn", "Y+") |> render_click()
 
     assert eventually(fn ->
              {x, y, _} = Machine.status().mpos
@@ -201,11 +217,9 @@ defmodule CNCWeb.MachineLiveTest do
            end)
   end
 
-  test "Esc stops and holds; help toggles", %{conn: conn} do
+  test "Esc stops and holds; keyboard listed", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    refute render(view) =~ "Stop and hold"
-    render_hook(view, "toggle_help", %{})
-    assert render(view) =~ "Stop and hold"
+    assert has_element?(view, ".cnc-keys dd", "Stop and hold")
     assert render_hook(view, "stop", %{})
   end
 
