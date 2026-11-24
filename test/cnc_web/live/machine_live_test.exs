@@ -209,7 +209,7 @@ defmodule CNCWeb.MachineLiveTest do
     assert Machine.status(m).state == :idle
 
     view |> element(".cnc-more > button", "Menu") |> render_click()
-    assert has_element?(view, ".cnc-more a", "Settings")
+    assert has_element?(view, ".cnc-more a", "Controller:")
     assert has_element?(view, ".cnc-more button", "Clear trail")
     view |> element(".cnc-more button", "Reset controller") |> render_click()
     refute has_element?(view, "#more-menu")

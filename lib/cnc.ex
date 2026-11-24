@@ -22,7 +22,6 @@ defmodule CNC do
     exports: [
       Machine,
       Machine.State,
-      Settings,
       Program,
       GCode.Program,
       Controllers,

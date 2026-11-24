@@ -88,13 +88,6 @@ defmodule CNC.Machine.FakeSimTest do
       assert eventually(fn -> Machine.status(m).mpos == {10.0, 10.0, -1.0} end, 3000)
     end
 
-    test "write a setting and see it take effect", %{m: m} do
-      :ok = Machine.write_settings(m, [{130, "800"}])
-      assert eventually(fn -> Machine.status(m).settings_write == %{130 => :ok} end)
-      assert eventually(fn -> Machine.settings(m)[130] == "800.000" end)
-      assert match?({{+0.0, 800.0}, _, _}, Machine.status(m).travel)
-    end
-
     test "disconnect and reconnect lands in :alarm", %{m: m} do
       :ok = Machine.unlock(m)
       assert eventually(fn -> Machine.status(m).state == :idle end)

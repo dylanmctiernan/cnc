@@ -101,27 +101,12 @@ defmodule CNC.Machine do
 
   @doc """
   The controller's settings from the last read: `%{n => value}` (values as
-  the controller printed them). Re-read after every connect and after
-  `write_settings/2`; `State.settings_rev` changes when they do.
+  the controller printed them). Re-read after every connect and after a
+  setting typed in the console; `State.settings_rev` changes when they do.
+  (Changing the configuration is `CNC.Controllers.Config`.)
   """
   @spec settings(server) :: %{non_neg_integer => String.t()}
   def settings(server \\ __MODULE__), do: call(server, :settings)
-
-  @doc """
-  Write settings to the controller: `[{n, value}]`, values already checked
-  with `CNC.Settings.validate/2`. Only when `:idle` or `:alarm` and not
-  moving. Results arrive in `State.settings_write`; when all are answered
-  the settings are read back.
-  """
-  @spec write_settings(server, [{non_neg_integer, String.t()}]) ::
-          reply | {:error, :moving | :invalid_value}
-  def write_settings(server \\ __MODULE__, changes) when is_list(changes) do
-    if Enum.all?(changes, fn {n, v} ->
-         is_integer(n) and n >= 0 and v =~ ~r/\A[0-9A-Za-z.\-]+\z/
-       end),
-       do: call(server, {:write_settings, changes}),
-       else: {:error, :invalid_value}
-  end
 
   @doc """
   Make the current position the work zero (G54) on the given axes, e.g.
