@@ -103,7 +103,12 @@ defmodule CNC.Controllers do
      run_dir: Path.join([data_dir, "controllers", p.id, "fluidnc"]), config: Board.config(p.board)}
   end
 
-  def link_spec(%Controller{link: %{type: :fake_sim}}, _), do: {CNC.Link.FakeSim, []}
+  # Like the FluidNC sim: its own folder (its flash), starting from its
+  # board's config.
+  def link_spec(%Controller{link: %{type: :fake_sim}} = c, data_dir) do
+    {CNC.Link.FakeSim,
+     run_dir: Path.join([data_dir, "controllers", c.id, "fake"]), config: Board.config(c.board)}
+  end
 
   def link_spec(%Controller{link: %{type: :serial, port: port, speed: speed}}, _),
     do: {CNC.Link.UART, port: port, speed: speed}
@@ -188,7 +193,7 @@ defmodule CNC.Controllers do
     end
   end
 
-  # A FluidNC sim's folder is its flash: nothing else can use it, so it goes
+  # A sim's folder is its flash: nothing else can use it, so it goes
   # with the controller. A board keeps its config (it's on the board).
   def handle_call({:remove, id}, _from, s) do
     ctl = find(s, id)
@@ -201,7 +206,7 @@ defmodule CNC.Controllers do
         {:reply, {:error, :active}, s}
 
       true ->
-        if ctl.link.type == :fluidnc_sim,
+        if ctl.link.type in [:fluidnc_sim, :fake_sim],
           do: File.rm_rf(Path.join([s.data_dir, "controllers", id]))
 
         CNC.Controllers.Config.forget(s.db, id)

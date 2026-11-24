@@ -268,7 +268,7 @@ defmodule CNC.Machine.Server do
     # the controller prints (other than reports, acks, alarms, a reboot) is
     # its answer.
     collect? =
-      match?({:value, {:request, _}}, :queue.peek(d.pending)) and
+      match?({:value, {:request, _, _}}, :queue.peek(d.pending)) and
         not (status? or parsed == :ok or
                match?({tag, _} when tag in [:error, :alarm, :banner], parsed))
 
@@ -475,7 +475,7 @@ defmodule CNC.Machine.Server do
 
   # A command whose reply we want whole: answered when its ok/error arrives.
   defp event({:call, from}, {:request, line}, s, d) when s in [:alarm, :idle],
-    do: {s, send_line(d, line, {:request, from}), []}
+    do: {s, send_line(d, line, {:request, from, line}), []}
 
   defp event({:call, from}, _request, s, d),
     do: {s, d, [{:reply, from, {:error, {:invalid_state, s}}}]}
@@ -588,10 +588,19 @@ defmodule CNC.Machine.Server do
     end
   end
 
-  defp on_ack({:request, from}, result, s, d) do
+  defp on_ack({:request, from, line}, result, s, d) do
     lines = Enum.reverse(d.request_lines)
     reply = if result == :ok, do: {:ok, lines}, else: result
-    {s, %{d | request_lines: []}, [{:reply, from, reply}]}
+    d = %{d | request_lines: []}
+
+    # A config setting changed live ($/axes/x/max_travel_mm=...) can change
+    # what $$ reports (travel): read the settings again.
+    d =
+      if result == :ok and Regex.match?(~r{\A\$/[^=]+=}, line),
+        do: maybe_read_settings(%{d | settings_wanted?: true}, d.status && d.status.state),
+        else: d
+
+    {s, d, [{:reply, from, reply}]}
   end
 
   defp on_ack(:settings, :ok, s, d),
@@ -932,7 +941,9 @@ defmodule CNC.Machine.Server do
 
   # Requests whose acks will never come (reset, lost link) are answered now.
   defp fail_requests(pending) do
-    for {:request, from} <- :queue.to_list(pending), do: :gen_statem.reply(from, {:error, :reset})
+    for {:request, from, _} <- :queue.to_list(pending),
+        do: :gen_statem.reply(from, {:error, :reset})
+
     :queue.new()
   end
 

@@ -59,6 +59,9 @@ defmodule CNC.Boards do
   @boards %{
     fake_sim: %{
       label: "Fake sim",
+      # The fake sim models only travel and speed: its config holds just the
+      # settings it takes.
+      takes: ~w(name board axes/*/max_rate_mm_per_min axes/*/max_travel_mm),
       firmware: :fluidnc,
       links: [:fake_sim],
       engine: "timed",
@@ -185,15 +188,63 @@ defmodule CNC.Boards do
   def config(id) do
     board = get!(id)
 
-    EEx.eval_file(template(),
-      assigns: [
-        board: board.label,
-        engine: board.engine,
-        switches?: board.switches?,
-        pins: board.pins,
-        extra: Map.get(board, :extra)
-      ]
-    )
+    text =
+      EEx.eval_file(template(),
+        assigns: [
+          board: board.label,
+          engine: board.engine,
+          switches?: board.switches?,
+          pins: board.pins,
+          extra: Map.get(board, :extra)
+        ]
+      )
+
+    case Map.get(board, :takes) do
+      nil -> text
+      takes -> only(text, takes, board.label)
+    end
+  end
+
+  # The template cut down to the settings a board takes (paths, * for any
+  # key), with the maps that hold them.
+  defp only(text, takes, label) do
+    patterns =
+      for t <- takes,
+          do: Regex.compile!("^" <> String.replace(Regex.escape(t), "\\*", "[^/]+") <> "$")
+
+    {kept, _} =
+      text
+      |> String.split("\n")
+      |> Enum.reduce({[], []}, fn line, {kept, stack} ->
+        case Regex.run(~r/^(\s*)([^:#\s][^:]*):\s?(.*)$/, line) do
+          [_, indent, key, value] ->
+            depth = String.length(indent)
+            stack = Enum.drop_while(stack, fn {d, _, _} -> d >= depth end)
+            keys = Enum.reverse([String.downcase(key) | for({_, k, _} <- stack, do: k)])
+
+            cond do
+              String.trim(value) == "" ->
+                {kept, [{depth, String.downcase(key), line} | stack]}
+
+              Enum.any?(patterns, &Regex.match?(&1, Enum.join(keys, "/"))) ->
+                # The maps above it, each once
+                parents = for {_, _, l} <- Enum.reverse(stack), l not in kept, do: l
+                {[line | Enum.reverse(parents)] ++ kept, stack}
+
+              true ->
+                {kept, stack}
+            end
+
+          nil ->
+            {kept, stack}
+        end
+      end)
+
+    """
+    # #{label}: the app's built-in imitation of a controller. It takes only
+    # these settings: the machine's name, and each axis's max rate and travel.
+
+    """ <> Enum.join(Enum.reverse(kept), "\n") <> "\n"
   end
 
   defp template, do: Application.app_dir(:cnc, "priv/fluidnc/config.yaml.eex")

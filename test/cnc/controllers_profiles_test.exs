@@ -47,14 +47,11 @@ defmodule CNC.Controllers.ProfilesTest do
     refute Map.has_key?(values, "stepping/engine")
     assert %{name: "Default"} = Profiles.selected(db, "c1")
 
-    # A file the app didn't write differs from what the profile would write
-    # (it leaves settings out), until the profile is written
-    assert {:ok, %{matches?: false, loaded: "config.yaml", written_by_app?: false}} =
+    # Its file holds what the profile would write: it matches, though the
+    # app didn't write it
+    assert {:ok, %{matches?: true, loaded: "config.yaml", written_by_app?: false}} =
              Profiles.check(m, db, ctl)
 
-    assert Profiles.last_seen(db, "c1") == %{name: "Default", matches?: false}
-    :ok = Profiles.switch(m, db, ctl, Profiles.selected(db, "c1").id)
-    assert eventually(fn -> match?({:ok, %{matches?: true}}, Profiles.check(m, db, ctl)) end)
     assert Profiles.last_seen(db, "c1") == %{name: "Default", matches?: true}
   end
 

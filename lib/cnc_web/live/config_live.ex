@@ -1214,7 +1214,7 @@ defmodule CNCWeb.ConfigLive do
         </tr>
       </thead>
       <tbody>
-        <tr :for={{field, label} <- axis_fields()}>
+        <tr :for={{field, label} <- axis_rows(@values)}>
           <th scope="row">{label}</th>
           <td :for={a <- axes(@values)} class={[not @editable && "cnc-axes-value"]}>
             <%= if @editable do %>
@@ -1443,11 +1443,19 @@ defmodule CNCWeb.ConfigLive do
   defp selected?(%{profile: %{id: id}}, %{id: id}), do: true
   defp selected?(_, _), do: false
 
-  defp axis_fields, do: @axis_fields
-
   # Axes that have the usual settings, in the config's order.
+  # Axes with any of the usual settings, and the rows any of them has (a
+  # controller shows only what its config holds: the fake sim has no steps).
   defp axes(settings) do
-    for a <- ~w(x y z a b c), Map.has_key?(settings, "axes/#{a}/steps_per_mm"), do: a
+    for a <- ~w(x y z a b c),
+        Enum.any?(@axis_fields, fn {f, _} -> Map.has_key?(settings, "axes/#{a}/#{f}") end),
+        do: a
+  end
+
+  defp axis_rows(settings) do
+    for {f, _} = row <- @axis_fields,
+        Enum.any?(axes(settings), &Map.has_key?(settings, "axes/#{&1}/#{f}")),
+        do: row
   end
 
   defp clean_path(path),

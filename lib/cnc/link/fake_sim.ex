@@ -10,6 +10,9 @@ defmodule CNC.Link.FakeSim do
     * `:latency` — ms delay before each reply line reaches the owner (default 0)
     * `:drop_acks` — swallow `ok` replies (default false)
     * `:name` — process registration
+    * `:run_dir` — keeps its config files there, like a board's flash
+      (`localfs/`, and the file loaded at power-up); with `:config` as the
+      first `config.yaml`. Without it they live in memory only.
   """
   @behaviour CNC.Link
   use GenServer
@@ -53,12 +56,26 @@ defmodule CNC.Link.FakeSim do
 
   ## Server
 
-  defstruct [:owner, :model, :tick_at, latency: 0, drop_acks: false, outbox: :queue.new()]
+  defstruct [
+    :owner,
+    :model,
+    :tick_at,
+    :run_dir,
+    latency: 0,
+    drop_acks: false,
+    outbox: :queue.new()
+  ]
 
   @impl GenServer
   def init({owner, opts}) do
+    run_dir = Keyword.get(opts, :run_dir)
+
+    opts =
+      if run_dir, do: Keyword.merge(opts, load(run_dir, Keyword.get(opts, :config))), else: opts
+
     s = %__MODULE__{
       owner: owner,
+      run_dir: run_dir,
       model: Model.new(opts),
       latency: Keyword.get(opts, :latency, 0),
       drop_acks: Keyword.get(opts, :drop_acks, false)
@@ -81,8 +98,11 @@ defmodule CNC.Link.FakeSim do
   def handle_call({:alarm, code}, _from, s), do: {:reply, :ok, step(s, &Model.alarm(&1, code))}
   def handle_call(:model, _from, s), do: {:reply, s.model, s}
 
-  def handle_call({:upload, name, data}, _from, s),
-    do: {:reply, {:ok, byte_size(data)}, %{s | model: Model.put_file(s.model, name, data)}}
+  def handle_call({:upload, name, data}, _from, s) do
+    model = Model.put_file(s.model, name, data)
+    persist(s, model)
+    {:reply, {:ok, byte_size(data)}, %{s | model: model}}
+  end
 
   def handle_call(:disconnect, _from, s) do
     send(s.owner, {:link, :disconnected})
@@ -101,6 +121,7 @@ defmodule CNC.Link.FakeSim do
   # Apply a model transition, deliver its replies, keep the clock running if busy.
   defp step(s, fun) do
     {model, lines} = fun.(s.model)
+    persist(s, model)
     s |> Map.put(:model, model) |> emit(lines) |> schedule_tick()
   end
 
@@ -141,6 +162,51 @@ defmodule CNC.Link.FakeSim do
       :empty ->
         s
     end
+  end
+
+  ## Flash (run_dir)
+
+  # Files from the folder; the first time, the given config as config.yaml.
+  defp load(dir, config) do
+    fs = Path.join(dir, "localfs")
+    File.mkdir_p!(fs)
+
+    if config && Path.wildcard(Path.join(fs, "*")) == [],
+      do: File.write!(Path.join(fs, "config.yaml"), config)
+
+    files =
+      for path <- Path.wildcard(Path.join(fs, "*")),
+          into: %{},
+          do: {Path.basename(path), File.read!(path)}
+
+    file =
+      case File.read(Path.join(dir, "config_filename")) do
+        {:ok, name} -> String.trim(name)
+        _ -> "config.yaml"
+      end
+
+    [files: files, config_file: file]
+  end
+
+  # What changed in the files, or which one loads, goes to the folder.
+  defp persist(%{run_dir: nil}, _model), do: :ok
+
+  defp persist(%{run_dir: dir, model: old}, new) do
+    fs = Path.join(dir, "localfs")
+
+    if new.files != old.files do
+      for {name, text} <- new.files, Map.get(old.files, name) != text do
+        File.write!(Path.join(fs, name <> ".part"), text)
+        File.rename!(Path.join(fs, name <> ".part"), Path.join(fs, name))
+      end
+
+      for name <- Map.keys(old.files) -- Map.keys(new.files), do: File.rm(Path.join(fs, name))
+    end
+
+    if new.config_file != old.config_file,
+      do: File.write!(Path.join(dir, "config_filename"), new.config_file)
+
+    :ok
   end
 
   defp now, do: System.monotonic_time(:millisecond)

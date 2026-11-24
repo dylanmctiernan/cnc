@@ -25,7 +25,8 @@ defmodule CNC.Link.FakeSim.Model do
   boot; not checked, like FluidNC), `$LocalFS/List|Show|Delete`, `$CD`
   (the running config), `$CD=<file>` (save it as a file), `$Bye`
   (restart: the chosen file becomes the running config) and `$/path` /
-  `$/path=value` on the running config. Like FluidNC, a bad number or the
+  `$/path=value` on the running config. It takes travel and max rate from
+  its config (at power-up, on restart, and when set live). Like FluidNC, a bad number or the
   stepping engine answer `ok` without changing anything, and an unknown
   path is `error:3` followed by a message.
 
@@ -90,16 +91,51 @@ defmodule CNC.Link.FakeSim.Model do
             running: @config
 
   @doc """
-  Options: `:travel`, `:max_feed` (mm/min), `:homing_ms`, `:pos`, and
-  `:config` (the text of `config.yaml`, also what's running at power-up).
+  Options: `:travel`, `:max_feed` (mm/min), `:homing_ms`, `:pos`, and the
+  config: `:config` (the text of `config.yaml`), or `:files` (name => text)
+  with `:config_file` (the one loaded at power-up, default `config.yaml`).
+  Given a config, the fake sim takes its travel and max rate from it.
   """
   def new(opts \\ []) do
     m = struct!(__MODULE__, Keyword.take(opts, [:travel, :max_feed, :homing_ms, :pos]))
 
-    case Keyword.get(opts, :config) do
-      nil -> m
-      text -> %{m | files: %{"config.yaml" => text}, running: text}
+    case {Keyword.get(opts, :files), Keyword.get(opts, :config)} do
+      {nil, nil} ->
+        m
+
+      {nil, text} ->
+        take(%{m | files: %{"config.yaml" => text}, running: text})
+
+      {files, _} ->
+        file = Keyword.get(opts, :config_file, "config.yaml")
+        take(%{m | files: files, config_file: file, running: Map.get(files, file, "")})
     end
+  end
+
+  # What the fake sim takes from its running config: each axis's travel
+  # (X/Y 0..mm, Z -mm..0) and max rate (the fastest is its feed limit).
+  defp take(m) do
+    travel =
+      ~w(x y z)
+      |> Enum.with_index()
+      |> Enum.reduce(m.travel, fn {axis, i}, travel ->
+        case number(m.running, "axes/#{axis}/max_travel_mm") do
+          mm when is_float(mm) and mm > 0 -> put_travel(travel, i, mm)
+          _ -> travel
+        end
+      end)
+
+    rates =
+      for a <- ~w(x y z),
+          r = number(m.running, "axes/#{a}/max_rate_mm_per_min"),
+          is_float(r) and r > 0,
+          do: r
+
+    %{m | travel: travel, max_feed: if(rates == [], do: m.max_feed, else: Enum.max(rates))}
+  end
+
+  defp number(text, path) do
+    with {:ok, v} <- setting(text, path), {n, _} <- Float.parse(v), do: n * 1.0, else: (_ -> nil)
   end
 
   @doc "Lines a controller prints on power-up."
@@ -192,7 +228,7 @@ defmodule CNC.Link.FakeSim.Model do
             {m, ["[MSG:ERR: Bad numeric value]", "ok"]}
 
           true ->
-            {%{m | running: put_setting(m.running, path, value)}, ["ok"]}
+            {take(%{m | running: put_setting(m.running, path, value)}), ["ok"]}
         end
     end
   end
@@ -200,7 +236,7 @@ defmodule CNC.Link.FakeSim.Model do
   # Restart: boots the chosen file (nothing if it's missing), locked.
   def line(m, "$Bye") do
     running = Map.get(m.files, m.config_file, "")
-    m = %{stop(m, :alarm) | running: running, wco: {0.0, 0.0, 0.0}}
+    m = take(%{stop(m, :alarm) | running: running, wco: {0.0, 0.0, 0.0}})
     {m, ["[MSG:INFO: Restarting]", "ok", @banner, @locked]}
   end
 

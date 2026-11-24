@@ -26,11 +26,10 @@ defmodule CNCWeb.ConfigLiveTest do
   test "first visit: the Default profile, in use; change a setting", %{conn: conn, id: id} do
     {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
     assert has_element?(view, "#in-use", "Default")
-    # The controller's own file isn't what the app writes (it leaves settings out)
-    assert has_element?(view, "#check-differs", "wasn't written by the app")
-    view |> element("#write-profile") |> render_click()
-    approve(view)
-    assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
+    # A fresh sim runs its board's config: the Default made from it matches
+    assert has_element?(view, "#check-ok")
+    # Only the settings the fake sim takes: no steps per mm
+    refute has_element?(view, "#current-x-steps_per_mm")
     assert has_element?(view, "#current", "Default")
     assert has_element?(view, "#current-x-max_rate_mm_per_min", "3000")
     refute has_element?(view, "#axes-form")
@@ -42,7 +41,7 @@ defmodule CNCWeb.ConfigLiveTest do
     |> form("#axes-form",
       set: %{
         "axes/x/max_rate_mm_per_min" => "2500",
-        "axes/y/acceleration_mm_per_sec2" => "fast"
+        "axes/y/max_travel_mm" => "far"
       }
     )
     |> render_submit()
@@ -52,7 +51,7 @@ defmodule CNCWeb.ConfigLiveTest do
     approve(view)
 
     assert has_element?(view, "#set-x-max_rate_mm_per_min[value='2500']")
-    assert has_element?(view, "#set-y-acceleration_mm_per_sec2.is-error")
+    assert has_element?(view, "#set-y-max_travel_mm.is-error")
 
     view
     |> form("#other-form", other: %{path: "stepping/engine", value: "RMT"})

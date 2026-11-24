@@ -49,6 +49,51 @@ defmodule CNC.Controllers.ConfigTest do
     assert eventually(fn -> match?({:ok, %{active: "other.yaml"}}, Config.files(m)) end, 3000)
   end
 
+  test "the fake sim's config holds only what it takes" do
+    paths = Enum.map(Config.parse(CNC.Boards.config(:fake_sim)), &elem(&1, 0))
+    assert "name" in paths and "board" in paths
+    rest = paths -- ["name", "board"]
+    assert length(rest) == 6
+    assert Enum.all?(rest, &(&1 =~ ~r{^axes/[xyz]/(max_rate_mm_per_min|max_travel_mm)$}))
+  end
+
+  @tag :tmp_dir
+  test "the fake sim takes its travel from its config, live too, and keeps its files",
+       %{tmp_dir: dir} do
+    id = System.unique_integer([:positive])
+    m = :"fake_takes_#{id}"
+    link = {CNC.Link.FakeSim, run_dir: dir, config: CNC.Boards.config(:fake_sim)}
+
+    start_supervised!(
+      Supervisor.child_spec({Machine, name: m, topic: "ft-#{id}", link: link}, id: m)
+    )
+
+    assert eventually(fn -> Machine.status(m).state == :alarm end, 5000)
+
+    assert eventually(
+             fn -> match?({{+0.0, 1250.0}, _, {-100.0, +0.0}}, Machine.status(m).travel) end,
+             3000
+           )
+
+    # Set live: the controller takes it, and the machine reads it again
+    {:ok, _} = Config.set(m, "axes/x/max_travel_mm", "900")
+    assert eventually(fn -> match?({{+0.0, 900.0}, _, _}, Machine.status(m).travel) end, 3000)
+
+    # Its files are kept in its folder, like flash
+    {:ok, _} = Config.save_running_as(m, "kept.yaml")
+    assert File.read!(Path.join([dir, "localfs", "kept.yaml"])) =~ "max_travel_mm: 900"
+    :ok = Config.activate(m, "kept.yaml")
+    assert File.read!(Path.join(dir, "config_filename")) == "kept.yaml"
+
+    model =
+      CNC.Link.FakeSim.Model.new(
+        files: %{"kept.yaml" => File.read!(Path.join([dir, "localfs", "kept.yaml"]))},
+        config_file: "kept.yaml"
+      )
+
+    assert {{+0.0, 900.0}, _, _} = model.travel
+  end
+
   describe "settings" do
     setup %{tmp_dir: dir} do
       db = :"config_db_#{System.unique_integer([:positive])}"
