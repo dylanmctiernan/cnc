@@ -174,6 +174,10 @@ defmodule CNC.Transport.Sim.ModelTest do
     end
   end
 
+  test "$ lists the commands it understands" do
+    assert {_, ["[HLP:" <> _, "ok"]} = Model.new() |> line("$")
+  end
+
   test "malformed or unsupported lines" do
     m = idle()
     assert {_, ["error:20"]} = line(m, "G0 X10")

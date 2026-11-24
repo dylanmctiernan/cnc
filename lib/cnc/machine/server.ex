@@ -228,6 +228,10 @@ defmodule CNC.Machine.Server do
   # covered by the jog dead-man or the travel clamp (controller limits apply).
   defp event({:call, from}, {:raw, line}, s, d) when s in [:alarm, :idle, :busy] do
     case String.upcase(line) do
+      # Real-time characters go out as bytes, unacked, like the buttons.
+      "?" -> {s, realtime(d, Realtime.status()), [{:reply, from, :ok}]}
+      "!" -> event({:call, from}, :feed_hold, s, d)
+      "~" -> event({:call, from}, :resume, s, d)
       "$X" -> event({:call, from}, :unlock, s, d)
       "$H" -> event({:call, from}, :home, s, d)
       "$$" -> {s, send_line(d, line, :settings), [{:reply, from, :ok}]}

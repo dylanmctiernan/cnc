@@ -69,6 +69,8 @@ defmodule CNC.Transport.Sim.Model do
 
   def line(m, "$" <> cmd) when cmd in ["X", "H"], do: {m, ["error:8"]}
 
+  def line(m, "$"), do: {m, ["[HLP:$$ $X $H $J=line $130=mm $131=mm $132=mm ~ ! ? ctrl-x]", "ok"]}
+
   def line(%{state: s} = m, "$$") when s in [:alarm, :idle], do: {m, settings(m) ++ ["ok"]}
   def line(m, "$$"), do: {m, ["error:8"]}
 

@@ -22,7 +22,8 @@ defmodule CNCWeb.MachineLive do
     {:ok,
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
-     |> assign(details?: false, polls?: false, raw_error: nil)
+     |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
+     |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
      |> stream_configure(:console, dom_id: &"log-#{&1.id}")
      |> stream(:console, [])
@@ -129,6 +130,12 @@ defmodule CNCWeb.MachineLive do
 
     {:noreply, assign(socket, raw_error: error)}
   end
+
+  def handle_event("toggle_commands", _, socket),
+    do: {:noreply, update(socket, :commands?, &(!&1))}
+
+  def handle_event("ask_controller", _, socket),
+    do: handle_event("send_raw", %{"line" => "$"}, socket)
 
   def handle_event("clear_console", _, socket),
     do: {:noreply, stream(socket, :console, [], reset: true)}
@@ -319,6 +326,50 @@ defmodule CNCWeb.MachineLive do
             <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_console">
               Clear
             </button>
+            <button
+              type="button"
+              class="cnc-btn cnc-btn--quiet"
+              phx-click="toggle_commands"
+              aria-expanded={to_string(@commands?)}
+              aria-controls="console-help"
+            >
+              {if @commands?, do: "Hide commands", else: "Commands"}
+            </button>
+          </div>
+          <div :if={@commands?} id="console-help" class="cnc-help">
+            <p class="cnc-help-lead">
+              Click a command to put it in the input below; nothing is sent until you press Enter.
+              <button type="button" class="cnc-link" phx-click="ask_controller">
+                Ask the controller for its own list
+              </button>
+            </p>
+            <p :if={@machine.adapter == "Sim"} class="cnc-help-note">
+              The built-in simulator understands $, $$, $X, $H, $J=, $130–$132, ?, ! and ~.
+              Connect the grblHAL simulator to try the rest.
+            </p>
+            <section :for={section <- @command_help} class="cnc-help-section">
+              <h3 class="cnc-help-title">{section.title}</h3>
+              <p :if={section.note} class="cnc-help-note">{section.note}</p>
+              <dl class="cnc-help-list">
+                <%= for item <- section.items do %>
+                  <dt>
+                    <button
+                      type="button"
+                      class="cnc-help-cmd"
+                      phx-click={
+                        JS.dispatch("console:insert", to: "#console-input", detail: %{text: item.cmd})
+                      }
+                    >
+                      {item.cmd}
+                    </button>
+                  </dt>
+                  <dd>
+                    {item.desc}
+                    <span :if={item.firmware} class="cnc-help-tag">{item.firmware}</span>
+                  </dd>
+                <% end %>
+              </dl>
+            </section>
           </div>
           <ol id="console-log" class="cnc-log" phx-update="stream" phx-hook="ConsoleScroll">
             <li

@@ -19,6 +19,11 @@ export default {
     this.beat = null
 
     this.onKeyDown = (e) => {
+      // Esc always stops, even while typing in the console.
+      if (e.key === "Escape") {
+        this.releaseAll()
+        return this.pushEvent("stop", {})
+      }
       if (typingIn(e.target)) return
       // macOS drops keyup for other keys while ⌘ is down: never jog with it.
       if (e.metaKey || e.ctrlKey) return this.releaseAll()
@@ -27,10 +32,6 @@ export default {
         e.preventDefault()
         if (!e.repeat) this.held.add(e.key)
         return this.update(e)
-      }
-      if (e.key === "Escape") {
-        this.releaseAll()
-        return this.pushEvent("stop", {})
       }
       if (e.key === "?") return this.pushEvent("toggle_help", {})
       if (e.key === "Shift" || e.key === "Alt") this.update(e)

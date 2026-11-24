@@ -14,6 +14,13 @@ export default {
       setTimeout(() => (this.input.value = ""))
     })
 
+    // From the command help: fill the input, never send.
+    this.el.addEventListener("console:insert", (e) => {
+      this.input.value = e.detail.text
+      this.input.focus()
+      this.input.setSelectionRange(this.input.value.length, this.input.value.length)
+    })
+
     this.input.addEventListener("keydown", (e) => {
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return
       e.preventDefault()

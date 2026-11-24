@@ -276,6 +276,18 @@ defmodule CNC.MachineTest do
       assert %State{travel: {{+0.0, 500.0}, _, _}, travel_source: :controller} = Machine.status(m)
     end
 
+    test "?, ! and ~ go out as real-time bytes, not lines", %{m: m} do
+      idle(m)
+
+      for {typed, byte} <- [{"?", ??}, {"!", ?!}, {"~", ?~}] do
+        assert :ok = Machine.send_raw(m, typed)
+        assert_receive {:rt, ^byte}
+      end
+
+      refute_received {:line, _}
+      assert Machine.status(m).awaiting_ack == 0
+    end
+
     test "refused while jogging, and for blank or multi-line input", %{m: m} do
       idle(m)
       :ok = Machine.jog(m, {1, 0}, :normal)

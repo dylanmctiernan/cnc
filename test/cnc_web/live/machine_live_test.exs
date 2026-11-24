@@ -104,6 +104,16 @@ defmodule CNCWeb.MachineLiveTest do
     assert render(view) =~ "Can&#39;t send while jogging."
     Machine.jog_stop()
 
+    view |> element("button", "Commands") |> render_click()
+    assert has_element?(view, "#console-help button", "G10 L20 P1 X0 Y0")
+    assert render(view) =~ "The built-in simulator understands"
+
+    view |> element("#console-help button", "Ask the controller") |> render_click()
+    assert eventually(fn -> has_element?(view, "#console-log li", "[HLP:") end)
+
+    view |> element("button", "Hide commands") |> render_click()
+    refute has_element?(view, "#console-help")
+
     view |> element("button", "Hide details and console") |> render_click()
     refute has_element?(view, "#console")
   end
