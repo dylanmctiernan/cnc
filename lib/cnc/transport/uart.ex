@@ -32,6 +32,9 @@ defmodule CNC.Transport.UART do
   @impl CNC.Transport
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:write, <<byte>>})
 
+  @impl CNC.Transport
+  def close(pid), do: GenServer.cast(pid, :close)
+
   @doc "Serial ports present on this computer, with whatever the OS knows about them."
   def ports, do: Circuits.UART.enumerate()
 
@@ -58,6 +61,11 @@ defmodule CNC.Transport.UART do
   end
 
   @impl GenServer
+  def handle_cast(:close, s) do
+    Circuits.UART.close(s.uart)
+    {:stop, {:shutdown, :closed}, s}
+  end
+
   def handle_cast({:write, data}, s) do
     case Circuits.UART.write(s.uart, data) do
       :ok -> {:noreply, s}

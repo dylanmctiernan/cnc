@@ -60,6 +60,14 @@ defmodule CNC.Transport.UARTTest do
     refute_receive {:transport, :line, "[MSG:partial"}, 100
   end
 
+  test "close delivers queued writes first, then closes", %{board: board} = ctx do
+    pid = open(ctx)
+    UART.write_realtime(pid, 0x85)
+    UART.close(pid)
+    assert board_received(board, 1) == <<0x85>>
+    assert_receive {:EXIT, ^pid, {:shutdown, :closed}}
+  end
+
   test "pulling the cable disconnects and exits", %{board: board} = ctx do
     pid = open(ctx)
     Port.close(board)

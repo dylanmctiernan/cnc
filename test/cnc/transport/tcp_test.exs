@@ -36,6 +36,15 @@ defmodule CNC.Transport.TCPTest do
     assert_receive {:transport, :line, "error:15"}
   end
 
+  test "close delivers queued writes first, then closes", ctx do
+    {pid, server} = connect(ctx)
+    TCP.write_realtime(pid, 0x85)
+    TCP.close(pid)
+    assert {:ok, <<0x85>>} = :gen_tcp.recv(server, 0, 1000)
+    assert {:error, :closed} = :gen_tcp.recv(server, 0, 1000)
+    assert_receive {:EXIT, ^pid, {:shutdown, :closed}}
+  end
+
   test "controller closing the socket disconnects and exits", ctx do
     {pid, server} = connect(ctx)
     :gen_tcp.close(server)

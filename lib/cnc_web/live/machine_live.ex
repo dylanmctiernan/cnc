@@ -585,7 +585,15 @@ defmodule CNCWeb.MachineLive do
 
   defp error_text(nil), do: nil
   defp error_text({:jog, :heartbeat_lost}), do: "Jog stopped: the keyboard stopped responding."
+
+  defp error_text({:link, :no_response}),
+    do: "The controller stopped answering, so the link was dropped and is reconnecting."
+
   defp error_text({:error, 15}), do: "Stopped: that move would leave the travel area."
   defp error_text({:error, 8}), do: "The controller wasn't ready for that command."
+
+  defp error_text({:error, 5}),
+    do: "Homing isn't enabled on this controller ($22). Unlock to jog from here."
+
   defp error_text({:error, code}), do: "The controller rejected the last command (error #{code})."
 end

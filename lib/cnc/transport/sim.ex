@@ -28,6 +28,9 @@ defmodule CNC.Transport.Sim do
   @impl CNC.Transport
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:realtime, byte})
 
+  @impl CNC.Transport
+  def close(pid), do: GenServer.cast(pid, :close)
+
   ## Test hooks
 
   @doc "Change `:latency` / `:drop_acks` at runtime."
@@ -63,6 +66,7 @@ defmodule CNC.Transport.Sim do
   @impl GenServer
   def handle_cast({:line, line}, s), do: {:noreply, step(s, &Model.line(&1, line))}
   def handle_cast({:realtime, byte}, s), do: {:noreply, step(s, &Model.realtime(&1, byte))}
+  def handle_cast(:close, s), do: {:stop, {:shutdown, :closed}, s}
 
   @impl GenServer
   def handle_call({:configure, opts}, _from, s),

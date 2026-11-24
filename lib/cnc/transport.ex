@@ -14,4 +14,6 @@ defmodule CNC.Transport do
   @callback start_link(owner :: pid, opts :: keyword) :: GenServer.on_start()
   @callback write_line(pid, iodata) :: :ok
   @callback write_realtime(pid, byte) :: :ok
+  @doc "Finish writes already queued, then disconnect (and exit)."
+  @callback close(pid) :: :ok
 end

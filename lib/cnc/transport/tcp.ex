@@ -24,6 +24,9 @@ defmodule CNC.Transport.TCP do
   @impl CNC.Transport
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:send, <<byte>>})
 
+  @impl CNC.Transport
+  def close(pid), do: GenServer.cast(pid, :close)
+
   @impl GenServer
   def init({owner, opts}),
     do: {:ok, %{owner: owner, opts: opts, socket: nil}, {:continue, :connect}}
@@ -49,6 +52,11 @@ defmodule CNC.Transport.TCP do
   end
 
   @impl GenServer
+  def handle_cast(:close, s) do
+    if s.socket, do: :gen_tcp.close(s.socket)
+    {:stop, {:shutdown, :closed}, s}
+  end
+
   def handle_cast({:send, data}, s) do
     case :gen_tcp.send(s.socket, data) do
       :ok -> {:noreply, s}

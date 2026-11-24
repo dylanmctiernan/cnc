@@ -29,6 +29,11 @@ defmodule CNC.Machine.Server do
   @poll_ms 200
   @poll_jog_ms 50
   @deadman_ms 250
+  # No status report for this long means the link is dead even if the socket
+  # or port looks open. Longer while connecting: an ESP32 may reboot when the
+  # USB port opens and needs a few seconds to boot.
+  @watchdog_ms 1_500
+  @connect_watchdog_ms 6_000
   @publish_ms 50
   @backoff_min 100
   @backoff_max 5_000
@@ -47,6 +52,8 @@ defmodule CNC.Machine.Server do
     :target,
     :published,
     :published_at,
+    :watchdog_ms,
+    :connect_watchdog_ms,
     connected?: false,
     tier: :normal,
     vector: {0, 0, 0},
@@ -92,7 +99,9 @@ defmodule CNC.Machine.Server do
        travel: travel,
        config_travel: travel,
        pubsub: Keyword.get(opts, :pubsub, CNC.PubSub),
-       topic: Keyword.get(opts, :topic, "machine")
+       topic: Keyword.get(opts, :topic, "machine"),
+       watchdog_ms: Keyword.get(opts, :watchdog_ms, @watchdog_ms),
+       connect_watchdog_ms: Keyword.get(opts, :connect_watchdog_ms, @connect_watchdog_ms)
      }}
   end
 
@@ -129,16 +138,22 @@ defmodule CNC.Machine.Server do
     }
 
     {:disconnected, d,
-     [{:state_timeout, delay, :reconnect}, cancel(:poll), cancel(:jog_tick), cancel(:deadman)]}
+     [{:state_timeout, delay, :reconnect}, cancel(:poll), cancel(:jog_tick), cancel(:deadman)] ++
+       [cancel(:watchdog)]}
   end
 
   defp event(:enter, _old, :jogging, d),
-    do: {:jogging, d, [poll(@poll_jog_ms), {{:timeout, :jog_tick}, 0, :tick}, deadman()]}
+    do:
+      {:jogging, d,
+       [poll(@poll_jog_ms), {{:timeout, :jog_tick}, 0, :tick}, deadman(), watchdog(d, :jogging)]}
+
+  # grblHAL doesn't answer status polls while homing: silence is expected.
+  defp event(:enter, _old, :homing, d), do: {:homing, d, [poll(@poll_ms), cancel(:watchdog)]}
 
   defp event(:enter, :jogging, s, d),
-    do: {s, end_session(d), [poll(@poll_ms), cancel(:jog_tick), cancel(:deadman)]}
+    do: {s, end_session(d), [poll(@poll_ms), cancel(:jog_tick), cancel(:deadman), watchdog(d, s)]}
 
-  defp event(:enter, _old, s, d), do: {s, d, [poll(@poll_ms)]}
+  defp event(:enter, _old, s, d), do: {s, d, [poll(@poll_ms), watchdog(d, s)]}
 
   ## Connection
 
@@ -162,8 +177,15 @@ defmodule CNC.Machine.Server do
 
   defp event(:info, {:transport, :line, line}, s, d) do
     parsed = Response.parse(line)
-    kind = if match?({:status, _}, parsed), do: :poll, else: :line
-    response(parsed, s, log(d, :in, kind, line))
+    status? = match?({:status, _}, parsed)
+
+    {next, d, actions} =
+      response(parsed, s, log(d, :in, if(status?, do: :poll, else: :line), line))
+
+    # Every status report proves the link is alive.
+    if status? and next not in [:disconnected, :homing],
+      do: {next, d, [watchdog(d, next) | actions]},
+      else: {next, d, actions}
   end
 
   ## Timers
@@ -179,6 +201,17 @@ defmodule CNC.Machine.Server do
   defp event({:timeout, :deadman}, :expired, :jogging, d) do
     d = realtime(d, Realtime.jog_cancel())
     {:idle, %{d | last_error: {:jog, :heartbeat_lost}}, []}
+  end
+
+  defp event({:timeout, :watchdog}, :expired, s, d) when s not in [:disconnected, :homing] do
+    Logger.warning("no status from the controller in #{s}; dropping the link and reconnecting")
+    # Best effort: if the link is half-alive, stop any motion. close/1 runs
+    # after the queued jog cancel; the timer is the backstop for a transport
+    # that is itself hung.
+    d = if d.connected?, do: realtime(d, Realtime.jog_cancel()), else: d
+    :ok = d.adapter.close(d.transport)
+    :timer.exit_after(1_000, d.transport, {:shutdown, :watchdog})
+    {:disconnected, %{d | last_error: {:link, :no_response}}, []}
   end
 
   defp event({:timeout, _}, _, s, d), do: {s, d, []}
@@ -488,6 +521,9 @@ defmodule CNC.Machine.Server do
 
   defp poll(ms), do: {{:timeout, :poll}, ms, :poll}
   defp deadman, do: {{:timeout, :deadman}, @deadman_ms, :expired}
+
+  defp watchdog(d, :connecting), do: {{:timeout, :watchdog}, d.connect_watchdog_ms, :expired}
+  defp watchdog(d, _state), do: {{:timeout, :watchdog}, d.watchdog_ms, :expired}
   defp cancel(name), do: {{:timeout, name}, :cancel}
 
   # d.backoff is the reconnect delay to use next: 0 at start and after a good

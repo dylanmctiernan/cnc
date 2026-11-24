@@ -18,6 +18,9 @@ defmodule CNC.FakeTransport do
   @impl CNC.Transport
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:rt, byte})
 
+  @impl CNC.Transport
+  def close(pid), do: GenServer.cast(pid, :close)
+
   @impl GenServer
   def init({owner, test}) do
     send(test, {:fake_transport, self(), owner})
@@ -26,6 +29,8 @@ defmodule CNC.FakeTransport do
   end
 
   @impl GenServer
+  def handle_cast(:close, test), do: {:stop, {:shutdown, :closed}, test}
+
   def handle_cast(write, test) do
     send(test, write)
     {:noreply, test}
