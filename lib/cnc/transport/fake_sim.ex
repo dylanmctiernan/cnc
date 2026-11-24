@@ -1,12 +1,12 @@
-defmodule CNC.Transport.Sim do
+defmodule CNC.Transport.FakeSim do
   @moduledoc """
   In-process fake controller implementing the `CNC.Transport` port.
 
-  A thin GenServer around `CNC.Transport.Sim.Model` (the pure core). The process
+  A thin GenServer around `CNC.Transport.FakeSim.Model` (the pure core). The process
   owns only the side effects: a 10 ms tick while the model is busy, delivery
   of reply lines to the owner, and fault-injection hooks for tests.
 
-  Options (plus the model's, see `CNC.Transport.Sim.Model.new/1`):
+  Options (plus the model's, see `CNC.Transport.FakeSim.Model.new/1`):
     * `:latency` — ms delay before each reply line reaches the owner (default 0)
     * `:drop_acks` — swallow `ok` replies (default false)
     * `:name` — process registration
@@ -14,7 +14,7 @@ defmodule CNC.Transport.Sim do
   @behaviour CNC.Transport
   use GenServer
 
-  alias CNC.Transport.Sim.Model
+  alias CNC.Transport.FakeSim.Model
 
   @tick_ms 10
 

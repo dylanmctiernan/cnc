@@ -1,5 +1,5 @@
 defmodule CNCWeb.MachineLiveTest do
-  # Drives the application's Machine (Sim-backed), so not async.
+  # Drives the application's Machine (fake-sim-backed), so not async.
   use CNCWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
@@ -129,7 +129,7 @@ defmodule CNCWeb.MachineLiveTest do
   test "shows that it's a simulator, and which firmware", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     assert eventually(fn -> has_element?(view, ".cnc-sim", "Simulator") end)
-    assert eventually(fn -> render(view) =~ "CNC Sim 1.1h.cnc-sim" end)
+    assert eventually(fn -> render(view) =~ "CNC FakeSim 1.1h.cnc-sim" end)
   end
 
   test "touch layouts: the dock's Stop cancels a jog; More holds the secondary actions", %{
@@ -248,7 +248,7 @@ defmodule CNCWeb.MachineLiveTest do
 
     view |> element("button", "Commands") |> render_click()
     assert has_element?(view, "#console-help button", "G10 L20 P1 X0 Y0")
-    assert render(view) =~ "The built-in simulator understands"
+    assert render(view) =~ "The fake sim understands"
 
     view |> element("#console-help button", "Ask the controller") |> render_click()
     assert eventually(fn -> has_element?(view, "#console-log li", "[HLP:") end)

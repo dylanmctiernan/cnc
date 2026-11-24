@@ -1,10 +1,10 @@
-defmodule CNC.FakeTransport do
+defmodule CNC.ScriptedTransport do
   @moduledoc """
   Transport adapter for tests. Every write is forwarded to the test process
   as `{:line, binary}` or `{:rt, byte}`; the test plays controller by sending
   `{:transport, :line, "..."}` to the owner directly.
 
-  On start it sends the test `{:fake_transport, pid, owner}`.
+  On start it sends the test `{:scripted_transport, pid, owner}`.
   """
   @behaviour CNC.Transport
   use GenServer
@@ -23,7 +23,7 @@ defmodule CNC.FakeTransport do
 
   @impl GenServer
   def init({owner, test}) do
-    send(test, {:fake_transport, self(), owner})
+    send(test, {:scripted_transport, self(), owner})
     send(owner, {:transport, :connected})
     {:ok, test}
   end

@@ -1,7 +1,7 @@
-# Tests tagged :native_fluidnc run real FluidNC firmware natively; they need
+# Tests tagged :fluidnc_sim run real FluidNC firmware natively; they need
 # it built first (fluidnc/build.sh) and are skipped until then.
-unless CNC.Transport.NativeFluidNC.available?() do
-  ExUnit.configure(exclude: [:native_fluidnc])
+unless CNC.Transport.FluidNCSim.available?() do
+  ExUnit.configure(exclude: [:fluidnc_sim])
 end
 
 ExUnit.start()

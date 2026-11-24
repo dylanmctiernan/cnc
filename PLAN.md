@@ -30,7 +30,7 @@ Browser: arrow keys + bed view
         ▼
 CNC host (Phoenix + OTP)
         │ CNC.Transport port, Grbl 1.1 text protocol
-        ├──► CNC.Transport.Sim  (in-process fake, unit tests + default dev)
+        ├──► CNC.Transport.FakeSim  (in-process fake, unit tests + default dev)
         └──► CNC.Transport.TCP  ──► grblHAL_sim (real Grbl firmware logic, Docker on Linux)
 
 Later: CNC.Transport.UART ──► 6x board (FluidNC) ──► DM542T ──► NEMA 23
@@ -105,7 +105,7 @@ Two layers, different jobs.
 
 | Layer | What | Used for |
 |---|---|---|
-| `CNC.Transport.Sim` (Elixir) | Small in-process fake. Not a faithful firmware | Unit tests of `CNC.Machine`; fault injection; default `mix phx.server` with zero setup |
+| `CNC.Transport.FakeSim` (Elixir) | Small in-process fake. Not a faithful firmware | Unit tests of `CNC.Machine`; fault injection; default `mix phx.server` with zero setup |
 | grblHAL simulator via `CNC.Transport.TCP` | Real grblHAL core compiled for Linux/Windows; `grblHAL_sim -p 2323` exposes a raw TCP (telnet) port | Integration tests and dev UI against real Grbl behaviour: planner, acceleration, jog cancel, status reports, alarms, soft limits |
 
 **Dropped 2026-11-24:** the grblHAL simulator served M5, then went: it leaked a socket per reconnect, served one client at a time and stalled intermittently under our traffic. Real-firmware checks move to an ESP32 dev board flashed with FluidNC (no motors needed; see Phase 2). Kept for the record:
@@ -117,7 +117,7 @@ Two layers, different jobs.
 - No FluidNC host simulator exists; grblHAL speaks the same Grbl 1.1 protocol, which covers everything Phase 1 uses. FluidNC-specific commands (`$Config/...`) are a later-phase concern on the real board.
 - Configure via `$` settings at container start: steps/mm, max rate, accel, travel (`$130/$131` = 1250), soft limits on (`$20=1`), homing on (`$22=1`).
 
-**`CNC.Transport.Sim` behaviour:**
+**`CNC.Transport.FakeSim` behaviour:**
 - Boots into `Alarm`; `$X` → `Idle`; `$H` → `Home` then `Idle` at origin.
 - `$J=` queues a relative move; position integrates at the given feed (10 ms tick, constant velocity is fine — no accel model needed).
 - `0x85` clears queued jogs and stops; `!`/`~` hold/resume.
@@ -132,7 +132,7 @@ Two layers, different jobs.
 ### CNC.Grbl (pure)
 - `Response.parse(line) :: :ok | {:error, code} | {:alarm, code} | {:status, Status.t()} | {:msg, binary} | {:banner, binary} | {:unknown, binary}`
 - `Status` struct: `state`, `substate`, `mpos {x,y,z}`, `wco`, `feed`, `spindle`, `buffer`. Derive `wpos` when `wco` known.
-- `Status.encode/1` — used by `Transport.Sim`.
+- `Status.encode/1` — used by `Transport.FakeSim`.
 - `Command.jog({dx, dy, dz}, feed_mm_min) :: iodata` — omits zero axes, fixed decimals.
 - `Command.unlock/0`, `Command.home/0`.
 - `Realtime.status/0, feed_hold/0, resume/0, reset/0, jog_cancel/0`.
@@ -147,9 +147,9 @@ defmodule CNC.Transport do
   # Adapter sends owner: {:transport, :connected} | {:transport, :line, binary} | {:transport, :disconnected}
 end
 ```
-- `CNC.Transport.Sim` — see §5.
+- `CNC.Transport.FakeSim` — see §5.
 - `CNC.Transport.TCP` — `:gen_tcp`, `packet: :line`, `active: :once`. Exits on socket close; supervisor restarts with backoff. Also usable later for FluidNC's Wi-Fi telnet channel.
-- Config: `config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []` (dev default); `adapter: CNC.Transport.TCP` via `CNC_TRANSPORT=tcp CNC_TCP=<host>[:port]` (FluidNC Wi-Fi telnet, port 23); `CNC.Transport.UART` via `CNC_TRANSPORT=uart CNC_UART=<device>`.
+- Config: `config :cnc, :transport, adapter: CNC.Transport.FakeSim, opts: []` (dev default); `adapter: CNC.Transport.TCP` via `CNC_TRANSPORT=tcp CNC_TCP=<host>[:port]` (FluidNC Wi-Fi telnet, port 23); `CNC.Transport.UART` via `CNC_TRANSPORT=uart CNC_UART=<device>`.
 
 ### CNC.Machine (state + jogging)
 `gen_statem`, single owner of the Transport process.
@@ -229,7 +229,7 @@ Hook rules:
 |---|---|---|
 | M0 | Scaffold `cnc` (no Ecto/mailer/gettext), Boundary compiler, mise | `mix precommit` green; a deliberate cross-boundary call fails compile |
 | M1 | `CNC.Grbl` parse + encode | Table tests pass on real status/ok/error/alarm/banner/msg samples; round-trip properties pass |
-| M2 | `CNC.Transport.Sim` | Responds to `?`, `$X`, `$H`, `$J=`, `0x85`, `!`, `~`; position integrates; soft-limit `error:15` |
+| M2 | `CNC.Transport.FakeSim` | Responds to `?`, `$X`, `$H`, `$J=`, `0x85`, `!`, `~`; position integrates; soft-limit `error:15` |
 | M3 | `CNC.Machine` + jogging (vs Sim) | Tests: state transitions; ≤4 outstanding jogs; heartbeat loss → `0x85` within 300 ms; `jog_stop` → immediate `0x85`; jog rejected in `:alarm` |
 | M4 | `MachineLive` + `JogKeys` + `BedView` (vs Sim) | `mix phx.server`: arrows move the marker live; diagonals; tiers; trail draws; tab blur stops motion; Unlock/Home work |
 | M5 | `CNC.Transport.TCP` + grblHAL sim in Docker | `@tag :grblhal_sim` tests pass (connect, `$X`, `$H`, jog + `0x85`, status, soft-limit error); same UI drives grblHAL sim with visible acceleration and stops at travel limits |
@@ -285,5 +285,5 @@ Open for Phase 2 (verify on the board, don't assume):
 - **Controller details and console:** raw traffic both ways (status polls opt-in), controller facts, a terminal (`Machine.send_raw/2`) and a command reference.
 - **LAN access with a PIN** (`CNC_LAN=1 CNC_PIN=…`).
 - **No CI:** all checks run locally via `mix precommit`.
-- **grblHAL simulator dropped (2026-11-24).** Dev and tests use the built-in Sim; real-firmware checks use an ESP32 dev board running FluidNC. `CNC.Transport.TCP` stays for FluidNC over Wi-Fi.
-- **Native FluidNC is the dev controller (2026-11-24).** FluidNC builds as a Mac/Linux program (`env:macos`/`env:linux`): stock firmware at a pinned commit (`fluidnc/build.sh`), run by `CNC.Transport.NativeFluidNC` over stdin/stdout. Config per board: `fluidnc/native.yaml` (dev: `engine: timed`, no switches) and `fluidnc/esp32_bench.yaml`. Telnet/HTTP are switched off through its settings store before start; an `sh` watchdog stops it if the app dies. Soak: 225 held jogs, 0 gaps, 0 errors. It answers §10's first question: FluidNC's `$$` does report `$130`–`$132`. It can't home (no switches).
+- **grblHAL simulator dropped (2026-11-24).** Dev and tests use the built-in Sim (now FakeSim); real-firmware checks use an ESP32 dev board running FluidNC. `CNC.Transport.TCP` stays for FluidNC over Wi-Fi.
+- **Native FluidNC is the dev controller (2026-11-24).** FluidNC builds as a Mac/Linux program (`env:macos`/`env:linux`): stock firmware at a pinned commit (`fluidnc/build.sh`), run by `CNC.Transport.FluidNCSim` (renamed from NativeFluidNC) over stdin/stdout. Config per board: `fluidnc/native.yaml` (dev: `engine: timed`, no switches) and `fluidnc/esp32_bench.yaml`. Telnet/HTTP are switched off through its settings store before start; an `sh` watchdog stops it if the app dies. Soak: 225 held jogs, 0 gaps, 0 errors. It answers §10's first question: FluidNC's `$$` does report `$130`–`$132`. It can't home (no switches).

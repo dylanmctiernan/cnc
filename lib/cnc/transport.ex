@@ -2,7 +2,7 @@ defmodule CNC.Transport do
   @moduledoc """
   Transport port: line-level link to a Grbl-speaking controller.
 
-  Adapters: `CNC.Transport.Sim` (in-process fake), `CNC.Transport.NativeFluidNC`
+  Adapters: `CNC.Transport.FakeSim` (in-process fake), `CNC.Transport.FluidNCSim`
   (FluidNC as a local program), `CNC.Transport.UART` and `CNC.Transport.TCP`
   (a real controller)
   send their owner:
@@ -11,7 +11,7 @@ defmodule CNC.Transport do
     * `{:transport, :line, binary}`
     * `{:transport, :disconnected}`
   """
-  use Boundary, deps: [CNC.Grbl], exports: [NativeFluidNC, Sim, TCP, UART]
+  use Boundary, deps: [CNC.Grbl], exports: [FakeSim, FluidNCSim, TCP, UART]
 
   @callback start_link(owner :: pid, opts :: keyword) :: GenServer.on_start()
   @callback write_line(pid, iodata) :: :ok

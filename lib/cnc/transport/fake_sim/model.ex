@@ -1,7 +1,7 @@
-defmodule CNC.Transport.Sim.Model do
+defmodule CNC.Transport.FakeSim.Model do
   @moduledoc """
   Pure model of a small Grbl-ish controller: the functional core of
-  `CNC.Transport.Sim`. Every function returns `{model, lines}`, where `lines`
+  `CNC.Transport.FakeSim`. Every function returns `{model, lines}`, where `lines`
   are the controller's replies (no newlines). Time only moves via
   `advance/2`, so tests are deterministic.
 
@@ -77,7 +77,7 @@ defmodule CNC.Transport.Sim.Model do
   def line(m, "$" <> cmd) when cmd in ["X", "H"], do: {m, ["error:8"]}
 
   def line(m, "$I"),
-    do: {m, ["[VER:1.1h.cnc-sim:]", "[FIRMWARE:CNC Sim]", "[DRIVER:Simulator]", "ok"]}
+    do: {m, ["[VER:1.1h.cnc-sim:]", "[FIRMWARE:CNC FakeSim]", "[DRIVER:Simulator]", "ok"]}
 
   def line(m, "$"), do: {m, ["[HLP:$$ $X $H $J=line $130=mm $131=mm $132=mm ~ ! ? ctrl-x]", "ok"]}
 

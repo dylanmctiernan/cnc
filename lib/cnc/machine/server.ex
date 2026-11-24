@@ -468,7 +468,7 @@ defmodule CNC.Machine.Server do
   ## Settings
 
   # What's on the other end, from $I (VER/FIRMWARE/DRIVER), the boot banner,
-  # and the transport (the built-in Sim is always simulated).
+  # and the transport (sims say so via CNC.Transport.simulated?/1).
   defp identify(%{info: info, banner: banner, adapter: adapter}) do
     ver = info["VER"] || ""
     text = ver <> " " <> (banner || "")

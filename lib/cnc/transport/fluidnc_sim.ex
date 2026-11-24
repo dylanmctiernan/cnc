@@ -1,4 +1,4 @@
-defmodule CNC.Transport.NativeFluidNC do
+defmodule CNC.Transport.FluidNCSim do
   @moduledoc """
   Link to FluidNC running natively on this computer (see `fluidnc/build.sh`):
   the real firmware as a child program, spoken to over its stdin/stdout.

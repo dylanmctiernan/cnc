@@ -6,12 +6,12 @@ defmodule CNC.MachineTest do
 
   @jog_cancel 0x85
 
-  # Against CNC.FakeTransport: the test plays controller and sees every write.
+  # Against CNC.ScriptedTransport: the test plays controller and sees every write.
   describe "protocol (fake controller)" do
     setup do
       topic = "machine-#{System.unique_integer([:positive])}"
-      m = start_machine({CNC.FakeTransport, test: self()}, topic)
-      assert_receive {:fake_transport, fake, ^m}
+      m = start_machine({CNC.ScriptedTransport, test: self()}, topic)
+      assert_receive {:scripted_transport, fake, ^m}
       %{m: m, fake: fake, topic: topic}
     end
 
@@ -289,7 +289,7 @@ defmodule CNC.MachineTest do
     test "transport loss disconnects, then reconnects", %{m: m, fake: fake} do
       idle(m)
       Process.exit(fake, :kill)
-      assert_receive {:fake_transport, _new, ^m}, 500
+      assert_receive {:scripted_transport, _new, ^m}, 500
       assert Machine.status(m).state == :connecting
       connect(m, "Idle", {5, 5})
       assert %State{state: :alarm, alarm: :connect, mpos: {5.0, 5.0, +0.0}} = Machine.status(m)
@@ -309,8 +309,8 @@ defmodule CNC.MachineTest do
 
   describe "work coordinates" do
     setup do
-      m = start_machine({CNC.FakeTransport, test: self()}, "work-#{System.unique_integer()}")
-      assert_receive {:fake_transport, _fake, ^m}
+      m = start_machine({CNC.ScriptedTransport, test: self()}, "work-#{System.unique_integer()}")
+      assert_receive {:scripted_transport, _fake, ^m}
       %{m: m}
     end
 
@@ -386,8 +386,13 @@ defmodule CNC.MachineTest do
 
   describe "settings" do
     setup do
-      m = start_machine({CNC.FakeTransport, test: self()}, "settings-#{System.unique_integer()}")
-      assert_receive {:fake_transport, _fake, ^m}
+      m =
+        start_machine(
+          {CNC.ScriptedTransport, test: self()},
+          "settings-#{System.unique_integer()}"
+        )
+
+      assert_receive {:scripted_transport, _fake, ^m}
       %{m: m}
     end
 
@@ -430,13 +435,13 @@ defmodule CNC.MachineTest do
       spec =
         {Machine,
          name: nil,
-         transport: {CNC.FakeTransport, test: self()},
+         transport: {CNC.ScriptedTransport, test: self()},
          topic: topic,
          watchdog_ms: 200,
          connect_watchdog_ms: 400}
 
       m = start_supervised!(Supervisor.child_spec(spec, id: make_ref()))
-      assert_receive {:fake_transport, fake, ^m}
+      assert_receive {:scripted_transport, fake, ^m}
       %{m: m, fake: fake}
     end
 
@@ -451,7 +456,7 @@ defmodule CNC.MachineTest do
 
       assert_receive {:rt, 0x85}, 300
       assert_receive {:DOWN, ^ref, :process, ^fake, {:shutdown, _}}
-      assert_receive {:fake_transport, _new, ^m}, 500
+      assert_receive {:scripted_transport, _new, ^m}, 500
       assert %State{state: :connecting, last_error: {:link, :no_response}} = Machine.status(m)
     end
 
@@ -486,8 +491,8 @@ defmodule CNC.MachineTest do
   describe "console" do
     setup do
       topic = "console-#{System.unique_integer([:positive])}"
-      m = start_machine({CNC.FakeTransport, test: self()}, topic)
-      assert_receive {:fake_transport, _fake, ^m}
+      m = start_machine({CNC.ScriptedTransport, test: self()}, topic)
+      assert_receive {:scripted_transport, _fake, ^m}
       Machine.subscribe_console(topic)
       %{m: m, topic: topic}
     end
@@ -531,8 +536,8 @@ defmodule CNC.MachineTest do
 
   describe "terminal (send_raw)" do
     setup do
-      m = start_machine({CNC.FakeTransport, test: self()}, "raw-#{System.unique_integer()}")
-      assert_receive {:fake_transport, _fake, ^m}
+      m = start_machine({CNC.ScriptedTransport, test: self()}, "raw-#{System.unique_integer()}")
+      assert_receive {:scripted_transport, _fake, ^m}
       %{m: m}
     end
 
@@ -588,9 +593,9 @@ defmodule CNC.MachineTest do
   end
 
   # Against the in-process simulator, end to end.
-  describe "with Sim" do
+  describe "with FakeSim" do
     setup do
-      m = start_machine({CNC.Transport.Sim, homing_ms: 50}, "sim-#{System.unique_integer()}")
+      m = start_machine({CNC.Transport.FakeSim, homing_ms: 50}, "sim-#{System.unique_integer()}")
       assert eventually(fn -> Machine.status(m).state == :alarm end)
       %{m: m}
     end
@@ -629,7 +634,7 @@ defmodule CNC.MachineTest do
     end
 
     test "holding a key into a limit slides up to it without errors" do
-      m = start_machine({CNC.Transport.Sim, pos: {1249.0, 600.0, 0.0}}, "sim-limit")
+      m = start_machine({CNC.Transport.FakeSim, pos: {1249.0, 600.0, 0.0}}, "sim-limit")
       assert eventually(fn -> Machine.status(m).state == :alarm end)
       :ok = Machine.unlock(m)
       assert eventually(fn -> Machine.status(m).state == :idle end)
@@ -646,9 +651,9 @@ defmodule CNC.MachineTest do
       assert Machine.jog_step(m, {1, 0}, 10) == {:error, :at_limit}
     end
 
-    test "travel comes from the Sim's settings" do
+    test "travel comes from the fake sim's settings" do
       sim_travel = {{0.0, 400.0}, {0.0, 300.0}, {-50.0, 0.0}}
-      m = start_machine({CNC.Transport.Sim, travel: sim_travel}, "sim-travel")
+      m = start_machine({CNC.Transport.FakeSim, travel: sim_travel}, "sim-travel")
       assert eventually(fn -> Machine.status(m).travel_source == :controller end)
       assert Machine.status(m).travel == sim_travel
     end
@@ -687,7 +692,7 @@ defmodule CNC.MachineTest do
       assert eventually(fn -> Machine.status(m).state == :idle end)
 
       {_, data} = :sys.get_state(m)
-      :ok = CNC.Transport.Sim.disconnect(data.transport)
+      :ok = CNC.Transport.FakeSim.disconnect(data.transport)
       assert eventually(fn -> Machine.status(m).alarm == :connect end)
     end
   end

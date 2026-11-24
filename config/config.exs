@@ -23,7 +23,7 @@ config :cnc, CNCWeb.Endpoint,
   live_view: [signing_salt: "resrjewd"]
 
 # Controller link. Dev/test default is the in-process simulator.
-config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []
+config :cnc, :transport, adapter: CNC.Transport.FakeSim, opts: []
 
 # The machine's physical travel in mm (machine coordinates, origin front-left
 # after homing). After connecting, the Machine reads the controller's

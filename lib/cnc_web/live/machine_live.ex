@@ -686,8 +686,8 @@ defmodule CNCWeb.MachineLive do
                 Ask the controller for its own list
               </button>
             </p>
-            <p :if={@machine.adapter == "Sim"} class="cnc-help-note">
-              The built-in simulator understands $, $$, $X, $H, $J=, $130–$132, ?, ! and ~.
+            <p :if={@machine.adapter == "FakeSim"} class="cnc-help-note">
+              The fake sim understands $, $$, $X, $H, $J=, $130–$132, ?, ! and ~.
               A real controller answers the rest.
             </p>
             <section :for={section <- @command_help} class="cnc-help-section">
@@ -904,8 +904,8 @@ defmodule CNCWeb.MachineLive do
   defp travel_list({{x0, x1}, {y0, y1}, {z0, z1}}), do: [[x0, x1], [y0, y1], [z0, z1]]
   defp travel_list(_), do: [[0, 1250], [0, 1250], [-100, 0]]
 
-  defp adapter_label("Sim"), do: "Simulator"
-  defp adapter_label("NativeFluidNC"), do: "FluidNC on this computer"
+  defp adapter_label("FakeSim"), do: "Fake sim"
+  defp adapter_label("FluidNCSim"), do: "FluidNC sim"
   defp adapter_label(nil), do: ""
   defp adapter_label(name), do: name
 

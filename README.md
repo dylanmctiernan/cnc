@@ -31,8 +31,8 @@ mix test
 
 `mix phx.server` drives FluidNC running natively on this computer (the real
 firmware with `fluidnc/native.yaml`; nothing physical moves). Without the
-build it falls back to the built-in simulator; `CNC_TRANSPORT=sim` forces
-that. Tests use the built-in simulator; `test/cnc/native_fluidnc_test.exs`
+build it falls back to the fake sim (a simple imitation built into the app);
+`CNC_TRANSPORT=fake` forces that. Tests use the fake sim; `test/cnc/fluidnc_sim_test.exs`
 runs against native FluidNC when it's built.
 
 Native FluidNC can't home (there are no switches), so Unlock instead. Its

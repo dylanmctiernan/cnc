@@ -1,14 +1,14 @@
-defmodule CNC.NativeFluidNCTest do
+defmodule CNC.FluidNCSimTest do
   @moduledoc """
   CNC.Machine against real FluidNC firmware running natively
-  (`CNC.Transport.NativeFluidNC`), with this machine's `fluidnc/native.yaml`.
+  (`CNC.Transport.FluidNCSim`), with this machine's `fluidnc/native.yaml`.
 
   Runs when FluidNC has been built (`fluidnc/build.sh`); skipped otherwise
   (see test_helper.exs). Each test starts its own FluidNC in a temporary
   directory, at machine position 0,0,0.
   """
   use ExUnit.Case, async: true
-  @moduletag :native_fluidnc
+  @moduletag :fluidnc_sim
   @moduletag :tmp_dir
 
   alias CNC.Machine
@@ -16,7 +16,7 @@ defmodule CNC.NativeFluidNCTest do
 
   setup %{tmp_dir: dir} do
     transport =
-      {CNC.Transport.NativeFluidNC,
+      {CNC.Transport.FluidNCSim,
        executable: Path.expand(".fluidnc/bin/fluidnc"),
        config: Path.expand("fluidnc/native.yaml"),
        run_dir: dir}

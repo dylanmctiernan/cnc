@@ -29,7 +29,7 @@ defmodule CNC.Machine.State do
       connecting, otherwise `:config` (the fallback)
     * `controller_info` — `%{firmware: "grblHAL" | "FluidNC" | "Grbl" | ...,
       version: binary | nil, simulated?: boolean}` from `$I` and the boot
-      banner; `simulated?` is true for the built-in Sim and for controllers
+      banner; `simulated?` is true for the sims (FakeSim, FluidNCSim) and for controllers
       reporting `[DRIVER:Simulator]` (the grblHAL simulator)
     * `settings_rev` — increases each time the settings are (re)read; fetch
       them with `CNC.Machine.settings/1`
