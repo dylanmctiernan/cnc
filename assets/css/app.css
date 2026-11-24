@@ -264,7 +264,9 @@ code,
 pre,
 kbd,
 .num,
-.cnc-dro,
+.cnc-num,
+.cnc-zero-val,
+.cnc-dro-other,
 .cnc-meta dd,
 .cnc-axes td,
 .cnc-change-vals,
@@ -1823,17 +1825,17 @@ body {
 }
 
 /* Narrower workstations: the header keeps state, reports and the actions */
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 80rem) {
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 100rem) {
   .cnc-meta .cnc-meta-firmware {
     display: none;
   }
 }
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 76rem) {
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 86rem) {
   .cnc-meta .cnc-meta-linkinfo {
     display: none;
   }
 }
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 72rem) {
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 76rem) {
   .cnc-meta div:has(> dd.is-on),
   .cnc-meta div:has(> dd.is-off) {
     display: none;
@@ -2875,6 +2877,15 @@ body {
   font-weight: 600;
   white-space: nowrap;
 }
+.ui-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.ui-dot--ok {
+  background: var(--ok);
+}
 .ui-pill--ok {
   background: color-mix(in srgb, var(--ok) 22%, transparent);
   color: var(--ok);
@@ -3095,5 +3106,200 @@ body {
   top: var(--space-2);
   left: var(--space-2);
   z-index: 2;
+}
+
+/* =====================================================================
+   The machine screen on the design system.
+   High-performance HMI (ISA-101): grey is normal, colour means
+   attention, and states are coded by icon and words as well as colour.
+   The position readout is the hero; controls are grouped by task.
+   ===================================================================== */
+
+/* Status bar */
+.cnc-bar {
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-faint);
+  background: var(--surface-1);
+}
+.cnc-state {
+  grid-auto-flow: column;
+  gap: var(--space-2);
+  min-height: 2.5rem;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.cnc-state-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+/* Normal: calm. A small green mark, no loud block. */
+.cnc-state--idle {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.cnc-state--idle .cnc-state-icon {
+  color: var(--ok);
+}
+/* Moving: informative, not alarming */
+.cnc-state--jogging,
+.cnc-state--homing,
+.cnc-state--busy,
+.cnc-state--uploading {
+  background: color-mix(in srgb, var(--move) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--move) 60%, transparent);
+  color: var(--text);
+}
+.cnc-state--jogging .cnc-state-icon,
+.cnc-state--homing .cnc-state-icon,
+.cnc-state--busy .cnc-state-icon,
+.cnc-state--uploading .cnc-state-icon {
+  color: var(--move);
+}
+/* Needs you: on hold (amber), locked (red) */
+.cnc-state--hold {
+  background: color-mix(in srgb, var(--warn) 20%, var(--surface-2));
+  border-color: var(--warn);
+  color: var(--text);
+}
+.cnc-state--hold .cnc-state-icon {
+  color: var(--warn);
+}
+.cnc-state--alarm {
+  background: color-mix(in srgb, var(--danger) 24%, var(--surface-2));
+  border-color: var(--danger);
+  color: var(--text);
+}
+.cnc-state--alarm .cnc-state-icon {
+  color: var(--danger-text);
+}
+.cnc-state--disconnected,
+.cnc-state--connecting {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.cnc-meta dt {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+.cnc-actions {
+  align-items: center;
+  gap: var(--space-3);
+}
+/* Phones: the shell's top bar already shows the state and Stop */
+@media (max-width: 48rem) {
+  .cnc-bar > .cnc-state {
+    display: none;
+  }
+  .cnc-bar {
+    padding-block: var(--space-1);
+  }
+}
+.cnc-run-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.cnc-run-group + .cnc-run-group {
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border-faint);
+}
+.ui-btn-icon {
+  width: 1rem;
+  height: 1rem;
+  margin-left: -0.15rem;
+}
+
+/* Buttons: the kit's look for the screen's own buttons */
+.cnc-btn {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.cnc-btn:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--surface-3);
+}
+.cnc-btn:focus-visible,
+.cnc-link:focus-visible,
+.cnc-help-cmd:focus-visible {
+  outline-color: var(--info);
+}
+.cnc-btn[aria-pressed="true"],
+.cnc-btn--primary {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--surface-0);
+}
+.cnc-btn--quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+.cnc-seg .cnc-btn:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.cnc-seg .cnc-btn:last-child {
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+/* Section headings: sentence case, quiet */
+.cnc-h {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* Position readout: the hero */
+.cnc-dro-row {
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+}
+.cnc-dro-row:has(.cnc-axis--x) { box-shadow: inset 3px 0 0 var(--x); border-left-color: var(--border-faint); }
+.cnc-dro-row:has(.cnc-axis--y) { box-shadow: inset 3px 0 0 var(--y); border-left-color: var(--border-faint); }
+.cnc-dro-row:has(.cnc-axis--z) { box-shadow: inset 3px 0 0 var(--z); border-left-color: var(--border-faint); }
+.cnc-axis {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+.cnc-num {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Messages: what happened and what to do */
+.cnc-lock {
+  border-bottom: 1px solid var(--border-faint);
+  border-left: 4px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-0));
+}
+.cnc-note {
+  border-bottom: 1px solid var(--border-faint);
+  border-left: 4px solid var(--border);
+  background: var(--surface-1);
+}
+.cnc-note--warn {
+  border-left-color: var(--warn);
+}
+.cnc-note-close {
+  border-radius: var(--radius);
+}
+.cnc-note-close:hover {
+  background: var(--surface-3);
 }
 

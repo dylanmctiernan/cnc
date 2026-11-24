@@ -143,14 +143,26 @@ defmodule CNCWeb.UI do
   attr :machine, :map, required: true
   attr :id, :string, default: nil
 
-  @doc "What the machine is doing, as a pill: Ready, Locked, Jogging..."
+  @doc """
+  What the machine is doing, as a pill: Ready, On hold, Locked, Jogging...
+  Grey is normal and colour means attention (ISA-101): Ready is a quiet
+  pill with a green dot; on hold is amber, locked red, moving blue.
+  """
   def machine_state(assigns) do
+    assigns = assign(assigns, :held, held(assigns.machine))
+
     ~H"""
-    <.pill tone={state_tone(@machine.state)} id={@id} role="status">
-      {state_word(@machine.state)}
+    <.pill tone={if(@held, do: "warn", else: state_tone(@machine.state))} id={@id} role="status">
+      <span :if={@machine.state == :idle} class="ui-dot ui-dot--ok" aria-hidden="true"></span>
+      {@held || state_word(@machine.state)}
     </.pill>
     """
   end
+
+  # Busy because it's held (or the door is open): the controller's own word
+  defp held(%{state: :busy, controller: :hold}), do: "On hold"
+  defp held(%{state: :busy, controller: :door}), do: "Door open"
+  defp held(_), do: nil
 
   @doc "A machine state in words."
   def state_word(state) do
@@ -166,7 +178,7 @@ defmodule CNCWeb.UI do
     }[state] || to_string(state)
   end
 
-  defp state_tone(:idle), do: "ok"
+  defp state_tone(:idle), do: "neutral"
   defp state_tone(:alarm), do: "danger"
   defp state_tone(s) when s in [:jogging, :homing, :busy], do: "move"
   defp state_tone(s) when s in [:connecting, :uploading], do: "info"

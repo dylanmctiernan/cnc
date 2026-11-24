@@ -363,8 +363,15 @@ defmodule CNCWeb.MachineLive do
            readout and jog panel, details, docked console, Stop in the bar). --%>
       <div class={["cnc", @details? && "has-console"]} data-mode={@control_mode}>
         <header class="cnc-bar">
-          <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
-            {state_label(@machine)}
+          <%!-- Coded by icon and words as well as colour (ISA-101): calm when
+               normal, coloured when the machine needs attention. --%>
+          <div
+            class={"cnc-state cnc-state--#{state_class(@machine)}"}
+            role="status"
+            id="machine-state"
+          >
+            <.icon name={state_icon(@machine)} class="cnc-state-icon" />
+            <span>{state_label(@machine)}</span>
           </div>
           <dl class="cnc-meta">
             <div>
@@ -392,42 +399,48 @@ defmodule CNCWeb.MachineLive do
               <dd>{controller_label(@machine)}</dd>
             </div>
           </dl>
+          <%!-- Grouped as on a machine's operator panel: running the machine,
+               the job, the console; Stop last, always the same place. --%>
           <div class="cnc-actions">
-            <button
-              type="button"
-              class="cnc-btn cnc-stop"
-              phx-click="stop"
-              disabled={!@machine.connected?}
-              title="Cancel any jog and hold (Esc)"
-            >
-              Stop
-            </button>
-            <button
-              type="button"
-              class="cnc-btn"
-              phx-click="feed_hold"
-              disabled={!@machine.connected?}
-            >
-              Hold
-            </button>
-            <button type="button" class="cnc-btn" phx-click="resume" disabled={!@machine.connected?}>
-              Resume
-            </button>
-            <button type="button" class="cnc-btn" phx-click="reset" disabled={!@machine.connected?}>
-              Reset
-            </button>
-            <button type="button" id="open-file" class="cnc-btn" phx-click="open_file">
-              Open file
-            </button>
-            <button
-              type="button"
-              class="cnc-btn"
-              phx-click="toggle_details"
-              aria-pressed={to_string(@details?)}
-              aria-controls="console"
-            >
-              Console
-            </button>
+            <div class="cnc-run-group" role="group" aria-label="Run">
+              <UI.button
+                phx-click="feed_hold"
+                disabled={!@machine.connected?}
+                title="Pause motion (feed hold)"
+              >
+                <.icon name="hero-pause" class="ui-btn-icon" /> Hold
+              </UI.button>
+              <UI.button
+                phx-click="resume"
+                disabled={!@machine.connected?}
+                title="Continue (cycle start)"
+              >
+                <.icon name="hero-play" class="ui-btn-icon" /> Resume
+              </UI.button>
+              <UI.button
+                variant="quiet"
+                phx-click="reset"
+                disabled={!@machine.connected?}
+                title="Soft reset: stops and clears the controller; it comes back locked"
+              >
+                Reset
+              </UI.button>
+            </div>
+            <div class="cnc-run-group" role="group" aria-label="Job">
+              <UI.button id="open-file" phx-click="open_file">
+                <.icon name="hero-document-arrow-up" class="ui-btn-icon" /> Open file
+              </UI.button>
+              <UI.button
+                phx-click="toggle_details"
+                aria-pressed={to_string(@details?)}
+                aria-controls="console"
+              >
+                <.icon name="hero-command-line" class="ui-btn-icon" /> Console
+              </UI.button>
+            </div>
+            <span title="Stops any jog and holds (Esc). A software stop: the e-stop must be wired on the machine.">
+              <UI.stop_button id="bar-stop" />
+            </span>
           </div>
           <%!-- Controller: the rarely used things live in a menu --%>
           <div class="cnc-more">
@@ -1571,6 +1584,24 @@ defmodule CNCWeb.MachineLive do
   defp adapter_label("FluidNCSim"), do: "FluidNC sim"
   defp adapter_label(nil), do: ""
   defp adapter_label(name), do: name
+
+  # Attention states get colour; normal ones stay calm (see the CSS).
+  defp state_class(%State{state: :busy, controller: c}) when c in [:hold, :door], do: "hold"
+  defp state_class(%State{state: state}), do: state
+
+  defp state_icon(%State{state: :busy, controller: c}) when c in [:hold, :door],
+    do: "hero-pause-circle"
+
+  defp state_icon(%State{state: :idle}), do: "hero-check-circle"
+  defp state_icon(%State{state: :alarm}), do: "hero-lock-closed"
+  defp state_icon(%State{state: :jogging}), do: "hero-arrows-pointing-out"
+  defp state_icon(%State{state: :homing}), do: "hero-home"
+  defp state_icon(%State{state: :uploading}), do: "hero-arrow-up-tray"
+
+  defp state_icon(%State{state: s}) when s in [:disconnected, :connecting],
+    do: "hero-signal-slash"
+
+  defp state_icon(_), do: "hero-arrow-path"
 
   defp state_label(%State{state: :busy, controller: :door}), do: "Door open"
   defp state_label(%State{state: :busy, controller: :hold}), do: "On hold"
