@@ -18,7 +18,7 @@ defmodule CNCWeb do
   """
   use Boundary, deps: [CNC], exports: [Endpoint, Telemetry]
 
-  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
+  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt manifest.webmanifest)
 
   def router do
     quote do

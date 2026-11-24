@@ -26,7 +26,7 @@ defmodule CNCWeb.MachineLive do
     {:ok,
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
-     |> assign(frame: :work, action_error: nil, control_mode: :joystick)
+     |> assign(frame: :work, action_error: nil, control_mode: :joystick, zeroing?: false)
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
@@ -93,6 +93,9 @@ defmodule CNCWeb.MachineLive do
       step -> {:noreply, assign(socket, step: step)}
     end
   end
+
+  # Phones: zero buttons are tucked away until asked for.
+  def handle_event("toggle_zeroing", _, socket), do: {:noreply, update(socket, :zeroing?, &(!&1))}
 
   def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step),
     do: {:noreply, assign(socket, control_mode: String.to_existing_atom(mode))}
@@ -206,7 +209,7 @@ defmodule CNCWeb.MachineLive do
                   else: "not connected"}
               </dd>
             </div>
-            <div>
+            <div class="cnc-meta-wide">
               <dt>firmware</dt>
               <dd>{firmware_label(@machine.controller_info)}</dd>
             </div>
@@ -214,12 +217,21 @@ defmodule CNCWeb.MachineLive do
               <dt>reports</dt>
               <dd>{controller_label(@machine)}</dd>
             </div>
-            <div>
+            <div class="cnc-meta-wide">
               <dt>feed</dt>
               <dd>{if @machine.feed, do: "#{round(@machine.feed)} mm/min", else: "—"}</dd>
             </div>
           </dl>
           <div class="cnc-actions">
+            <button
+              type="button"
+              class="cnc-btn cnc-stop"
+              phx-click="stop"
+              disabled={!@machine.connected?}
+              title="Cancel any jog and hold (Esc)"
+            >
+              Stop
+            </button>
             <button
               type="button"
               class="cnc-btn"
@@ -245,6 +257,28 @@ defmodule CNCWeb.MachineLive do
               Console
             </button>
           </div>
+          <%!-- Phones: secondary actions behind a menu (Stop and Resume live in the dock) --%>
+          <details class="cnc-more">
+            <summary class="cnc-btn">More</summary>
+            <div class="cnc-more-menu">
+              <p class="cnc-sub">{firmware_label(@machine.controller_info)}</p>
+              <.link navigate={~p"/settings"} class="cnc-btn">Settings</.link>
+              <button type="button" class="cnc-btn" phx-click="toggle_details">
+                {if @details?, do: "Hide console", else: "Console"}
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click="feed_hold"
+                disabled={!@machine.connected?}
+              >
+                Hold
+              </button>
+              <button type="button" class="cnc-btn" phx-click="reset" disabled={!@machine.connected?}>
+                Reset controller
+              </button>
+            </div>
+          </details>
         </header>
 
         <div class="cnc-messages">
@@ -321,7 +355,7 @@ defmodule CNCWeb.MachineLive do
         </section>
 
         <aside class="cnc-rail cnc-rail--main" aria-label="Position and jog">
-          <section class="cnc-dro" aria-label="Position">
+          <section class={["cnc-dro", @zeroing? && "is-zeroing"]} aria-label="Position">
             <div class="cnc-dro-head">
               <h2 class="cnc-h">
                 {if frame(@machine, @frame) == :work, do: "Work", else: "Machine"} position
@@ -340,6 +374,14 @@ defmodule CNCWeb.MachineLive do
                   {f}
                 </button>
               </div>
+              <button
+                type="button"
+                class="cnc-btn cnc-zero-toggle"
+                phx-click="toggle_zeroing"
+                aria-pressed={to_string(@zeroing?)}
+              >
+                {if @zeroing?, do: "Done", else: "Zero…"}
+              </button>
             </div>
             <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
               <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
@@ -626,6 +668,20 @@ defmodule CNCWeb.MachineLive do
               "Typed moves skip the jog safety stop and the travel limit. ↑ and ↓ recall earlier commands."}
           </p>
         </section>
+        <%!-- Touch layouts: Stop always in reach, at the bottom (thumb zone) --%>
+        <nav class="cnc-dock" aria-label="Stop and resume">
+          <button
+            type="button"
+            class="cnc-btn cnc-stop"
+            phx-click="stop"
+            disabled={!@machine.connected?}
+          >
+            Stop
+          </button>
+          <button type="button" class="cnc-btn" phx-click="resume" disabled={!@machine.connected?}>
+            Resume
+          </button>
+        </nav>
       </div>
     </Layouts.app>
     """

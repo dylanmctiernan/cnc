@@ -131,6 +131,34 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> render(view) =~ "CNC Sim 1.1h.cnc-sim" end)
   end
 
+  test "touch layouts: the dock's Stop cancels a jog; More holds the secondary actions", %{
+    conn: conn
+  } do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> Machine.status().state == :idle end)
+
+    render_hook(view, "jog", %{"x" => 1, "y" => 0, "tier" => "normal"})
+    assert Machine.status().state == :jogging
+    view |> element(".cnc-dock button", "Stop") |> render_click()
+    assert Machine.status().state == :idle
+
+    assert has_element?(view, ".cnc-more a", "Settings")
+    assert has_element?(view, ".cnc-more button", "Reset controller")
+    view |> element(".cnc-dro button", "Zero…") |> render_click()
+    assert has_element?(view, ".cnc-dro.is-zeroing")
+  end
+
+  test "Add to Home Screen: manifest and Apple tags", %{conn: conn} do
+    html = conn |> get(~p"/") |> html_response(200)
+    assert html =~ ~s(rel="manifest")
+    assert html =~ "viewport-fit=cover"
+    assert html =~ ~s(name="apple-mobile-web-app-capable" content="yes")
+
+    assert conn |> recycle() |> get("/manifest.webmanifest") |> response(200) =~
+             ~s("display": "standalone")
+  end
+
   test "rejects malformed jog input", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
