@@ -1,15 +1,15 @@
-defmodule CNC.Transport do
+defmodule CNC.Link do
   @moduledoc """
-  Transport port: line-level link to a Grbl-speaking controller.
+  Link port: a line-level connection to a Grbl-speaking controller.
 
-  Adapters: `CNC.Transport.FakeSim` (in-process fake), `CNC.Transport.FluidNCSim`
-  (FluidNC as a local program), `CNC.Transport.UART` and `CNC.Transport.TCP`
+  Adapters: `CNC.Link.FakeSim` (in-process fake), `CNC.Link.FluidNCSim`
+  (FluidNC as a local program), `CNC.Link.UART` and `CNC.Link.TCP`
   (a real controller)
   send their owner:
 
-    * `{:transport, :connected}`
-    * `{:transport, :line, binary}`
-    * `{:transport, :disconnected}`
+    * `{:link, :connected}`
+    * `{:link, :line, binary}`
+    * `{:link, :disconnected}`
   """
   use Boundary, deps: [CNC.Grbl], exports: [FakeSim, FluidNCSim, TCP, UART]
 

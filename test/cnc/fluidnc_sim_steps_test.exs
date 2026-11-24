@@ -1,7 +1,7 @@
 defmodule CNC.FluidNCSim.StepsTest do
   @moduledoc """
   CNC.Machine against real FluidNC firmware running natively
-  (`CNC.Transport.FluidNCSim`), with this machine's `priv/fluidnc/sim.yaml`.
+  (`CNC.Link.FluidNCSim`), with this machine's `priv/fluidnc/sim.yaml`.
 
   Runs when FluidNC has been built (`mix cnc.fluidnc.build`); skipped otherwise
   (see test_helper.exs). Each test starts its own FluidNC in a temporary

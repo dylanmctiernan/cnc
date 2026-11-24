@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Cnc.Ports do
 
       mix cnc.ports
 
-  Use the device for `CNC_TRANSPORT=uart CNC_UART=<device> mix phx.server`.
+  Use the device for `CNC_LINK=uart CNC_UART=<device> mix phx.server`.
   On macOS prefer the `/dev/cu.*` device over `/dev/tty.*`.
   """
   use Mix.Task

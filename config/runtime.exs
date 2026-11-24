@@ -41,26 +41,26 @@ end
 
 # Controller link. Dev uses native FluidNC once built (mix cnc.fluidnc.build),
 # else the fake sim; tests always use the fake sim (config.exs).
-#   CNC_TRANSPORT=fluidnc mix phx.server         # native FluidNC, priv/fluidnc/sim.yaml
-#   CNC_TRANSPORT=fake mix phx.server            # fake sim (built in)
-#   CNC_TRANSPORT=tcp CNC_TCP=fluidnc.local:23 mix phx.server   # FluidNC over Wi-Fi (telnet)
-#   CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
+#   CNC_LINK=fluidnc mix phx.server         # native FluidNC, priv/fluidnc/sim.yaml
+#   CNC_LINK=fake mix phx.server            # fake sim (built in)
+#   CNC_LINK=tcp CNC_TCP=fluidnc.local:23 mix phx.server   # FluidNC over Wi-Fi (telnet)
+#   CNC_LINK=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
 #   CNC_UART_SPEED=115200                        # default; see `mix cnc.ports`
 fluidnc_built? = File.exists?(Path.expand("../.fluidnc/bin/fluidnc", __DIR__))
 
-transport =
-  System.get_env("CNC_TRANSPORT") ||
+link =
+  System.get_env("CNC_LINK") ||
     if(config_env() == :dev and fluidnc_built?, do: "fluidnc")
 
-case transport do
+case link do
   nil ->
     :ok
 
   "fluidnc" ->
     root = Path.expand("..", __DIR__)
 
-    config :cnc, :transport,
-      adapter: CNC.Transport.FluidNCSim,
+    config :cnc, :link,
+      adapter: CNC.Link.FluidNCSim,
       opts: [
         executable: Path.join(root, ".fluidnc/bin/fluidnc"),
         config: Path.join(root, "priv/fluidnc/sim.yaml"),
@@ -68,28 +68,28 @@ case transport do
       ]
 
   "fake" ->
-    config :cnc, :transport, adapter: CNC.Transport.FakeSim, opts: []
+    config :cnc, :link, adapter: CNC.Link.FakeSim, opts: []
 
   "tcp" ->
-    target = System.get_env("CNC_TCP") || raise "CNC_TRANSPORT=tcp needs CNC_TCP=<host>[:port]"
+    target = System.get_env("CNC_TCP") || raise "CNC_LINK=tcp needs CNC_TCP=<host>[:port]"
     [host | port] = String.split(target, ":")
     port = List.first(port, "23")
 
-    config :cnc, :transport,
-      adapter: CNC.Transport.TCP,
+    config :cnc, :link,
+      adapter: CNC.Link.TCP,
       opts: [host: host, port: String.to_integer(port)]
 
   "uart" ->
     port =
       System.get_env("CNC_UART") ||
-        raise "CNC_TRANSPORT=uart needs CNC_UART=<device> (see mix cnc.ports)"
+        raise "CNC_LINK=uart needs CNC_UART=<device> (see mix cnc.ports)"
 
-    config :cnc, :transport,
-      adapter: CNC.Transport.UART,
+    config :cnc, :link,
+      adapter: CNC.Link.UART,
       opts: [port: port, speed: String.to_integer(System.get_env("CNC_UART_SPEED", "115200"))]
 
   other ->
-    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected fluidnc, fake, tcp or uart)"
+    raise "unknown CNC_LINK #{inspect(other)} (expected fluidnc, fake, tcp or uart)"
 end
 
 if config_env() == :prod do

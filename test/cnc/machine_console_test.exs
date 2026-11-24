@@ -4,8 +4,8 @@ defmodule CNC.Machine.ConsoleTest do
   describe "console" do
     setup do
       topic = "console-#{System.unique_integer([:positive])}"
-      m = start_machine({CNC.ScriptedTransport, test: self()}, topic)
-      assert_receive {:scripted_transport, _fake, ^m}
+      m = start_machine({CNC.ScriptedLink, test: self()}, topic)
+      assert_receive {:scripted_link, _fake, ^m}
       Machine.subscribe_console(topic)
       %{m: m, topic: topic}
     end
@@ -49,8 +49,8 @@ defmodule CNC.Machine.ConsoleTest do
 
   describe "terminal (send_raw)" do
     setup do
-      m = start_machine({CNC.ScriptedTransport, test: self()}, "raw-#{System.unique_integer()}")
-      assert_receive {:scripted_transport, _fake, ^m}
+      m = start_machine({CNC.ScriptedLink, test: self()}, "raw-#{System.unique_integer()}")
+      assert_receive {:scripted_link, _fake, ^m}
       %{m: m}
     end
 
@@ -59,7 +59,7 @@ defmodule CNC.Machine.ConsoleTest do
       assert :ok = Machine.send_raw(m, "  $G  ")
       assert_receive {:line, "$G"}
       assert Machine.status(m).awaiting_ack == 1
-      send(m, {:transport, :line, "error:20"})
+      send(m, {:link, :line, "error:20"})
       assert %State{awaiting_ack: 0, last_error: {:error, 20}} = Machine.status(m)
     end
 
@@ -79,7 +79,7 @@ defmodule CNC.Machine.ConsoleTest do
       assert_receive {:line, "$$"}
 
       for l <- ["$130=500.000", "$131=1250.000", "$132=100.000", "ok"],
-          do: send(m, {:transport, :line, l})
+          do: send(m, {:link, :line, l})
 
       assert %State{travel: {{+0.0, 500.0}, _, _}, travel_source: :controller} = Machine.status(m)
     end

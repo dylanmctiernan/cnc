@@ -1,37 +1,37 @@
-defmodule CNC.Transport.FakeSim do
+defmodule CNC.Link.FakeSim do
   @moduledoc """
-  In-process fake controller implementing the `CNC.Transport` port.
+  In-process fake controller implementing the `CNC.Link` port.
 
-  A thin GenServer around `CNC.Transport.FakeSim.Model` (the pure core). The process
+  A thin GenServer around `CNC.Link.FakeSim.Model` (the pure core). The process
   owns only the side effects: a 10 ms tick while the model is busy, delivery
   of reply lines to the owner, and fault-injection hooks for tests.
 
-  Options (plus the model's, see `CNC.Transport.FakeSim.Model.new/1`):
+  Options (plus the model's, see `CNC.Link.FakeSim.Model.new/1`):
     * `:latency` — ms delay before each reply line reaches the owner (default 0)
     * `:drop_acks` — swallow `ok` replies (default false)
     * `:name` — process registration
   """
-  @behaviour CNC.Transport
+  @behaviour CNC.Link
   use GenServer
 
-  alias CNC.Transport.FakeSim.Model
+  alias CNC.Link.FakeSim.Model
 
   @tick_ms 10
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def start_link(owner, opts \\ []),
     do: GenServer.start_link(__MODULE__, {owner, opts}, Keyword.take(opts, [:name]))
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_line(pid, line), do: GenServer.cast(pid, {:line, IO.iodata_to_binary(line)})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:realtime, byte})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def simulated?, do: true
 
   ## Test hooks
@@ -42,7 +42,7 @@ defmodule CNC.Transport.FakeSim do
   @doc "Raise `ALARM:code` as the controller would (e.g. a limit switch)."
   def inject_alarm(pid, code), do: GenServer.call(pid, {:alarm, code})
 
-  @doc "Simulate transport loss: owner gets `{:transport, :disconnected}`, process exits."
+  @doc "Simulate losing the link: owner gets `{:link, :disconnected}`, process exits."
   def disconnect(pid), do: GenServer.call(pid, :disconnect)
 
   @doc "The current model, for assertions."
@@ -61,7 +61,7 @@ defmodule CNC.Transport.FakeSim do
       drop_acks: Keyword.get(opts, :drop_acks, false)
     }
 
-    send(owner, {:transport, :connected})
+    send(owner, {:link, :connected})
     {model, lines} = Model.boot(s.model)
     {:ok, emit(%{s | model: model}, lines)}
   end
@@ -79,7 +79,7 @@ defmodule CNC.Transport.FakeSim do
   def handle_call(:model, _from, s), do: {:reply, s.model, s}
 
   def handle_call(:disconnect, _from, s) do
-    send(s.owner, {:transport, :disconnected})
+    send(s.owner, {:link, :disconnected})
     {:stop, {:shutdown, :disconnected}, :ok, s}
   end
 
@@ -125,7 +125,7 @@ defmodule CNC.Transport.FakeSim do
 
     case :queue.peek(s.outbox) do
       {:value, {due, line}} when due <= now ->
-        send(s.owner, {:transport, :line, line})
+        send(s.owner, {:link, :line, line})
         flush(%{s | outbox: :queue.drop(s.outbox)})
 
       {:value, {due, _}} ->

@@ -1,30 +1,30 @@
-defmodule CNC.ScriptedTransport do
+defmodule CNC.ScriptedLink do
   @moduledoc """
-  Transport adapter for tests. Every write is forwarded to the test process
+  Link adapter for tests. Every write is forwarded to the test process
   as `{:line, binary}` or `{:rt, byte}`; the test plays controller by sending
-  `{:transport, :line, "..."}` to the owner directly.
+  `{:link, :line, "..."}` to the owner directly.
 
-  On start it sends the test `{:scripted_transport, pid, owner}`.
+  On start it sends the test `{:scripted_link, pid, owner}`.
   """
-  @behaviour CNC.Transport
+  @behaviour CNC.Link
   use GenServer
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def start_link(owner, opts), do: GenServer.start_link(__MODULE__, {owner, opts[:test]})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_line(pid, line), do: GenServer.cast(pid, {:line, IO.iodata_to_binary(line)})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:rt, byte})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
   @impl GenServer
   def init({owner, test}) do
-    send(test, {:scripted_transport, self(), owner})
-    send(owner, {:transport, :connected})
+    send(test, {:scripted_link, self(), owner})
+    send(owner, {:link, :connected})
     {:ok, test}
   end
 

@@ -3,13 +3,13 @@ defmodule CNC.Machine.WorkCoordinatesTest do
 
   describe "work coordinates" do
     setup do
-      m = start_machine({CNC.ScriptedTransport, test: self()}, "work-#{System.unique_integer()}")
-      assert_receive {:scripted_transport, _fake, ^m}
+      m = start_machine({CNC.ScriptedLink, test: self()}, "work-#{System.unique_integer()}")
+      assert_receive {:scripted_link, _fake, ^m}
       %{m: m}
     end
 
     defp at(m, {x, y, z}, wco) do
-      send(m, {:transport, :line, "<Idle|MPos:#{x},#{y},#{z}|FS:0,0|WCO:#{wco}>"})
+      send(m, {:link, :line, "<Idle|MPos:#{x},#{y},#{z}|FS:0,0|WCO:#{wco}>"})
       Machine.status(m)
     end
 
@@ -85,11 +85,11 @@ defmodule CNC.Machine.WorkCoordinatesTest do
       ok(m)
       assert Machine.go_to_work_zero(m) == {:error, :moving}
       # The controller reports it's jogging: still no.
-      send(m, {:transport, :line, "<Jog|MPos:105,100,0|FS:1200,0>"})
+      send(m, {:link, :line, "<Jog|MPos:105,100,0|FS:1200,0>"})
       assert Machine.go_to_work_zero(m) == {:error, :moving}
       assert Machine.status(m).moving?
       # Stopped: fine.
-      send(m, {:transport, :line, "<Idle|MPos:110,100,0|FS:0,0>"})
+      send(m, {:link, :line, "<Idle|MPos:110,100,0|FS:0,0>"})
       refute Machine.status(m).moving?
       assert :ok = Machine.go_to_work_zero(m)
       assert_receive {:line, "$J=G91 G21 X-100.000 Y-80.000 F3000"}

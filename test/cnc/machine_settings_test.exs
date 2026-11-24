@@ -5,11 +5,11 @@ defmodule CNC.Machine.SettingsTest do
     setup do
       m =
         start_machine(
-          {CNC.ScriptedTransport, test: self()},
+          {CNC.ScriptedLink, test: self()},
           "settings-#{System.unique_integer()}"
         )
 
-      assert_receive {:scripted_transport, _fake, ^m}
+      assert_receive {:scripted_link, _fake, ^m}
       %{m: m}
     end
 
@@ -24,12 +24,12 @@ defmodule CNC.Machine.SettingsTest do
       assert Machine.status(m).settings_write == %{110 => :pending, 130 => :pending}
 
       ok(m)
-      send(m, {:transport, :line, "error:3"})
+      send(m, {:link, :line, "error:3"})
       assert Machine.status(m).settings_write == %{110 => :ok, 130 => {:error, 3}}
 
       # All answered: read back.
       assert_receive {:line, "$$"}
-      for l <- ["$110=2500.000", "$130=1250.000", "ok"], do: send(m, {:transport, :line, l})
+      for l <- ["$110=2500.000", "$130=1250.000", "ok"], do: send(m, {:link, :line, l})
       assert Machine.settings(m) == %{110 => "2500.000", 130 => "1250.000"}
       assert Machine.status(m).settings_rev > rev
     end
@@ -39,7 +39,7 @@ defmodule CNC.Machine.SettingsTest do
       :ok = Machine.jog(m, {1, 0}, :normal)
       assert Machine.write_settings(m, [{110, "1"}]) == {:error, {:invalid_state, :jogging}}
       :ok = Machine.jog_stop(m)
-      send(m, {:transport, :line, "<Jog|MPos:1,0,0|FS:100,0>"})
+      send(m, {:link, :line, "<Jog|MPos:1,0,0|FS:100,0>"})
       assert Machine.write_settings(m, [{110, "1"}]) == {:error, :moving}
       assert Machine.write_settings(m, [{110, "1\n$H"}]) == {:error, :invalid_value}
     end

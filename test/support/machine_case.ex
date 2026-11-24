@@ -21,15 +21,15 @@ defmodule CNC.MachineCase do
     end
   end
 
-  def start_machine(transport, topic) do
-    spec = {Machine, name: nil, transport: transport, topic: topic}
+  def start_machine(link, topic) do
+    spec = {Machine, name: nil, link: link, topic: topic}
     start_supervised!(Supervisor.child_spec(spec, id: make_ref()))
   end
 
   def report(m, state, {x, y}),
-    do: send(m, {:transport, :line, "<#{state}|MPos:#{x}.000,#{y}.000,0.000|FS:0,0>"})
+    do: send(m, {:link, :line, "<#{state}|MPos:#{x}.000,#{y}.000,0.000|FS:0,0>"})
 
-  def ok(m), do: send(m, {:transport, :line, "ok"})
+  def ok(m), do: send(m, {:link, :line, "ok"})
 
   # First status after (re)connect: Machine then asks for settings ($$).
   # Play the controller: send the given setting lines, then ok.
@@ -37,9 +37,9 @@ defmodule CNC.MachineCase do
     report(m, state, pos)
     assert_receive {:line, "$$"}
     assert_receive {:line, "$I"}
-    for line <- settings, do: send(m, {:transport, :line, line})
+    for line <- settings, do: send(m, {:link, :line, line})
     ok(m)
-    for line <- info, do: send(m, {:transport, :line, line})
+    for line <- info, do: send(m, {:link, :line, line})
     ok(m)
   end
 
@@ -53,7 +53,7 @@ defmodule CNC.MachineCase do
 
   # Already idle (unlocked); report a new position including Z.
   def idle_at(m, {x, y}, z) do
-    send(m, {:transport, :line, "<Idle|MPos:#{x}.000,#{y}.000,#{z}.000|FS:0,0>"})
+    send(m, {:link, :line, "<Idle|MPos:#{x}.000,#{y}.000,#{z}.000|FS:0,0>"})
     Machine.status(m)
   end
 

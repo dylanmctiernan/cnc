@@ -1,30 +1,30 @@
-defmodule CNC.Transport.TCP do
+defmodule CNC.Link.TCP do
   @moduledoc """
   Raw TCP link to a Grbl-speaking controller, e.g. FluidNC's Wi-Fi telnet
   port (23).
 
   Connects after `start_link/2` returns (so a dead host doesn't block the
-  owner), then sends the owner `{:transport, :connected}`. Lines arrive as
-  `{:transport, :line, line}` without their line ending. On close or error it
-  sends `{:transport, :disconnected}` and exits; the owner reconnects.
+  owner), then sends the owner `{:link, :connected}`. Lines arrive as
+  `{:link, :line, line}` without their line ending. On close or error it
+  sends `{:link, :disconnected}` and exits; the owner reconnects.
 
   Options: `:host` (default `"localhost"`), `:port` (default 23, telnet),
   `:connect_timeout` ms (default 2000).
   """
-  @behaviour CNC.Transport
+  @behaviour CNC.Link
   use GenServer
   require Logger
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def start_link(owner, opts), do: GenServer.start_link(__MODULE__, {owner, opts})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_line(pid, line), do: GenServer.cast(pid, {:send, [line, ?\n]})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:send, <<byte>>})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
   @impl GenServer
@@ -42,7 +42,7 @@ defmodule CNC.Transport.TCP do
 
     case :gen_tcp.connect(host, port, tcp_opts, timeout) do
       {:ok, socket} ->
-        send(s.owner, {:transport, :connected})
+        send(s.owner, {:link, :connected})
         {:noreply, %{s | socket: socket}}
 
       {:error, reason} ->
@@ -67,7 +67,7 @@ defmodule CNC.Transport.TCP do
   @impl GenServer
   def handle_info({:tcp, socket, data}, %{socket: socket} = s) do
     line = data |> String.trim_trailing("\n") |> String.trim_trailing("\r")
-    send(s.owner, {:transport, :line, line})
+    send(s.owner, {:link, :line, line})
     :ok = :inet.setopts(socket, active: :once)
     {:noreply, s}
   end
@@ -76,7 +76,7 @@ defmodule CNC.Transport.TCP do
   def handle_info({:tcp_error, socket, reason}, %{socket: socket} = s), do: disconnect(s, reason)
 
   defp disconnect(s, reason) do
-    send(s.owner, {:transport, :disconnected})
+    send(s.owner, {:link, :disconnected})
     {:stop, {:shutdown, reason}, s}
   end
 end

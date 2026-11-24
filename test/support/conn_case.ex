@@ -50,7 +50,7 @@ defmodule CNCWeb.ConnCase do
 
     ExUnit.Callbacks.start_supervised!(
       Supervisor.child_spec(
-        {CNC.Machine, name: machine, topic: topic, transport: {CNC.Transport.FakeSim, sim_opts}},
+        {CNC.Machine, name: machine, topic: topic, link: {CNC.Link.FakeSim, sim_opts}},
         id: machine
       )
     )

@@ -1,4 +1,4 @@
-defmodule CNC.Transport.UARTTest do
+defmodule CNC.Link.UARTTest do
   @moduledoc """
   The UART adapter against a virtual serial port (a pseudo-terminal made by
   test/support/pty_bridge.py). The test plays the controller on the other
@@ -6,7 +6,7 @@ defmodule CNC.Transport.UARTTest do
   """
   use ExUnit.Case, async: true
 
-  alias CNC.Transport.UART
+  alias CNC.Link.UART
 
   @bridge Path.expand("../../support/pty_bridge.py", __DIR__)
 
@@ -25,7 +25,7 @@ defmodule CNC.Transport.UARTTest do
   defp open(%{device: device}) do
     Process.flag(:trap_exit, true)
     {:ok, pid} = UART.start_link(self(), port: device)
-    assert_receive {:transport, :connected}, 2000
+    assert_receive {:link, :connected}, 2000
     pid
   end
 
@@ -54,10 +54,10 @@ defmodule CNC.Transport.UARTTest do
     Process.sleep(20)
     Port.command(board, "2.000,0.000|FS:0,0>\r\nerror:15\r\n[MSG:partial")
 
-    assert_receive {:transport, :line, "ok"}
-    assert_receive {:transport, :line, "<Idle|MPos:1.000,2.000,0.000|FS:0,0>"}
-    assert_receive {:transport, :line, "error:15"}
-    refute_receive {:transport, :line, "[MSG:partial"}, 100
+    assert_receive {:link, :line, "ok"}
+    assert_receive {:link, :line, "<Idle|MPos:1.000,2.000,0.000|FS:0,0>"}
+    assert_receive {:link, :line, "error:15"}
+    refute_receive {:link, :line, "[MSG:partial"}, 100
   end
 
   test "close delivers queued writes first, then closes", %{board: board} = ctx do
@@ -71,7 +71,7 @@ defmodule CNC.Transport.UARTTest do
   test "pulling the cable disconnects and exits", %{board: board} = ctx do
     pid = open(ctx)
     Port.close(board)
-    assert_receive {:transport, :disconnected}, 2000
+    assert_receive {:link, :disconnected}, 2000
     assert_receive {:EXIT, ^pid, {:shutdown, _reason}}
   end
 
@@ -79,12 +79,12 @@ defmodule CNC.Transport.UARTTest do
     Process.flag(:trap_exit, true)
     {:ok, pid} = UART.start_link(self(), port: "/dev/cu.does-not-exist")
     assert_receive {:EXIT, ^pid, {:shutdown, {:connect_failed, _}}}, 2000
-    refute_received {:transport, :connected}
+    refute_received {:link, :connected}
   end
 
   test "Machine talks to a 'board' over the serial link", %{board: board, device: device} do
     topic = "uart-#{System.unique_integer([:positive])}"
-    spec = {CNC.Machine, name: nil, transport: {UART, port: device}, topic: topic}
+    spec = {CNC.Machine, name: nil, link: {UART, port: device}, topic: topic}
     m = start_supervised!(Supervisor.child_spec(spec, id: make_ref()))
 
     # Machine polls; the board answers with a status report.

@@ -8,13 +8,13 @@ defmodule CNC.Machine.WatchdogTest do
       spec =
         {Machine,
          name: nil,
-         transport: {CNC.ScriptedTransport, test: self()},
+         link: {CNC.ScriptedLink, test: self()},
          topic: topic,
          watchdog_ms: 200,
          connect_watchdog_ms: 400}
 
       m = start_supervised!(Supervisor.child_spec(spec, id: make_ref()))
-      assert_receive {:scripted_transport, fake, ^m}
+      assert_receive {:scripted_link, fake, ^m}
       %{m: m, fake: fake}
     end
 
@@ -29,7 +29,7 @@ defmodule CNC.Machine.WatchdogTest do
 
       assert_receive {:rt, 0x85}, 300
       assert_receive {:DOWN, ^ref, :process, ^fake, {:shutdown, _}}
-      assert_receive {:scripted_transport, _new, ^m}, 500
+      assert_receive {:scripted_link, _new, ^m}, 500
       assert %State{state: :connecting, last_error: {:link, :no_response}} = Machine.status(m)
     end
 

@@ -1,7 +1,7 @@
-defmodule CNC.Transport.TCPTest do
+defmodule CNC.Link.TCPTest do
   use ExUnit.Case, async: true
 
-  alias CNC.Transport.TCP
+  alias CNC.Link.TCP
 
   # A local listener plays the controller.
   setup do
@@ -15,7 +15,7 @@ defmodule CNC.Transport.TCPTest do
     Process.flag(:trap_exit, true)
     {:ok, pid} = TCP.start_link(self(), host: "localhost", port: port)
     {:ok, server} = :gen_tcp.accept(listen, 1000)
-    assert_receive {:transport, :connected}
+    assert_receive {:link, :connected}
     {pid, server}
   end
 
@@ -31,9 +31,9 @@ defmodule CNC.Transport.TCPTest do
     :ok = :gen_tcp.send(server, "ok\r\n<Idle|MPos:0.000,")
     :ok = :gen_tcp.send(server, "0.000,0.000|FS:0,0>\r\nerror:15\n")
 
-    assert_receive {:transport, :line, "ok"}
-    assert_receive {:transport, :line, "<Idle|MPos:0.000,0.000,0.000|FS:0,0>"}
-    assert_receive {:transport, :line, "error:15"}
+    assert_receive {:link, :line, "ok"}
+    assert_receive {:link, :line, "<Idle|MPos:0.000,0.000,0.000|FS:0,0>"}
+    assert_receive {:link, :line, "error:15"}
   end
 
   test "close delivers queued writes first, then closes", ctx do
@@ -48,7 +48,7 @@ defmodule CNC.Transport.TCPTest do
   test "controller closing the socket disconnects and exits", ctx do
     {pid, server} = connect(ctx)
     :gen_tcp.close(server)
-    assert_receive {:transport, :disconnected}
+    assert_receive {:link, :disconnected}
     assert_receive {:EXIT, ^pid, {:shutdown, :closed}}
   end
 
@@ -60,7 +60,7 @@ defmodule CNC.Transport.TCPTest do
 
     {:ok, pid} = TCP.start_link(self(), host: "localhost", port: port)
     assert_receive {:EXIT, ^pid, {:shutdown, {:connect_failed, :econnrefused}}}
-    refute_received {:transport, :connected}
+    refute_received {:link, :connected}
   end
 
   defp recv_all(socket, n, acc \\ "") do

@@ -12,12 +12,12 @@ Enforced at compile time by [Boundary](https://hexdocs.pm/boundary); a violation
 CNCApp  (supervision + wiring)            deps: CNC, CNCWeb
 ├── CNCWeb  (LiveView UI)                 deps: CNC          exports: Endpoint, Telemetry
 └── CNC  (domain)                         deps: —            exports: Machine
-    ├── CNC.Machine    state + jogging    deps: Grbl, Transport
-    ├── CNC.Transport  link to controller deps: Grbl         exports: Sim
+    ├── CNC.Machine    state + jogging    deps: Grbl, Link
+    ├── CNC.Link  link to controller deps: Grbl         exports: Sim
     └── CNC.Grbl       pure protocol      deps: —
 ```
 
-The web layer can only reach `CNC.Machine`; protocol and transport stay private to the domain.
+The web layer can only reach `CNC.Machine`; protocol and link stay private to the domain.
 
 ## Dev
 
@@ -32,7 +32,7 @@ mix test
 `mix phx.server` drives FluidNC running natively on this computer (the real
 firmware with `priv/fluidnc/sim.yaml`; nothing physical moves). Without the
 build it falls back to the fake sim (a simple imitation built into the app);
-`CNC_TRANSPORT=fake` forces that. Tests use the fake sim; the `test/cnc/fluidnc_sim_*_test.exs` modules
+`CNC_LINK=fake` forces that. Tests use the fake sim; the `test/cnc/fluidnc_sim_*_test.exs` modules
 runs against native FluidNC when it's built.
 
 The FluidNC sim has no switches, so homing is off (`$22=0`): Unlock instead. Edits to
@@ -46,7 +46,7 @@ first session is in `docs/bench-esp32.md`.
 
 ```sh
 mix cnc.ports                                          # find the board, e.g. /dev/cu.usbserial-0001
-CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
+CNC_LINK=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
 ```
 
 Opening the port may reset the board; the machine then shows Locked as after
@@ -56,7 +56,7 @@ port (`test/support/pty_bridge.py`), not yet against hardware.
 FluidNC can also be reached over Wi-Fi (telnet, port 23):
 
 ```sh
-CNC_TRANSPORT=tcp CNC_TCP=fluidnc.local mix phx.server  # or <ip>:<port>
+CNC_LINK=tcp CNC_TCP=fluidnc.local mix phx.server  # or <ip>:<port>
 ```
 
 ### From another device on your network

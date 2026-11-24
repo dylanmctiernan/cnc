@@ -4,8 +4,8 @@ defmodule CNC.Machine.ProtocolTest do
   describe "protocol (fake controller)" do
     setup do
       topic = "machine-#{System.unique_integer([:positive])}"
-      m = start_machine({CNC.ScriptedTransport, test: self()}, topic)
-      assert_receive {:scripted_transport, fake, ^m}
+      m = start_machine({CNC.ScriptedLink, test: self()}, topic)
+      assert_receive {:scripted_link, fake, ^m}
       %{m: m, fake: fake, topic: topic}
     end
 
@@ -14,18 +14,18 @@ defmodule CNC.Machine.ProtocolTest do
       assert Machine.status(m).speed == {0.0, 0.0}
 
       # Diagonal in X/Y at 1200 mm/min: all of it is X/Y speed.
-      send(m, {:transport, :line, "<Jog|MPos:3.000,4.000,0.000|FS:1200,0>"})
+      send(m, {:link, :line, "<Jog|MPos:3.000,4.000,0.000|FS:1200,0>"})
       assert {xy, z} = Machine.status(m).speed
       assert_in_delta xy, 1200, 1.0e-6
       assert_in_delta z, 0, 1.0e-6
 
       # Moving X and Z equally (45° down): split evenly by direction.
-      send(m, {:transport, :line, "<Jog|MPos:4.000,4.000,-1.000|FS:600,0>"})
+      send(m, {:link, :line, "<Jog|MPos:4.000,4.000,-1.000|FS:600,0>"})
       {xy, z} = Machine.status(m).speed
       assert_in_delta xy, 600 / :math.sqrt(2), 1.0e-3
       assert_in_delta z, 600 / :math.sqrt(2), 1.0e-3
 
-      send(m, {:transport, :line, "<Idle|MPos:4.000,4.000,-1.000|FS:0,0>"})
+      send(m, {:link, :line, "<Idle|MPos:4.000,4.000,-1.000|FS:0,0>"})
       assert Machine.status(m).speed == {0.0, 0.0}
     end
 
@@ -60,14 +60,14 @@ defmodule CNC.Machine.ProtocolTest do
 
       send(
         m,
-        {:transport, :line, "<Idle|WPos:-40.000,1.000,0.000|FS:0,0|WCO:48.562,0.000,0.000>"}
+        {:link, :line, "<Idle|WPos:-40.000,1.000,0.000|FS:0,0|WCO:48.562,0.000,0.000>"}
       )
 
       assert %{wpos: {-40.0, 1.0, +0.0}, mpos: {mx, 1.0, +0.0}} = Machine.status(m)
       assert_in_delta mx, 8.562, 1.0e-9
 
       # A later report without WCO reuses the known offset.
-      send(m, {:transport, :line, "<Idle|WPos:-39.000,1.000,0.000|FS:0,0>"})
+      send(m, {:link, :line, "<Idle|WPos:-39.000,1.000,0.000|FS:0,0>"})
       assert_in_delta elem(Machine.status(m).mpos, 0), 9.562, 1.0e-9
     end
 
@@ -104,19 +104,19 @@ defmodule CNC.Machine.ProtocolTest do
       assert_receive {:line, "$$"}
       assert_receive {:line, "$I"}
       # Busy: both are refused.
-      send(m, {:transport, :line, "error:8"})
-      send(m, {:transport, :line, "error:8"})
+      send(m, {:link, :line, "error:8"})
+      send(m, {:link, :line, "error:8"})
       report(m, "Alarm", {0, 0})
       assert_receive {:line, "$$"}
 
       for l <- ["$130=900.000", "$131=900.000", "$132=90.000", "ok"],
-          do: send(m, {:transport, :line, l})
+          do: send(m, {:link, :line, l})
 
       assert Machine.status(m).travel_source == :controller
     end
 
     test "identifies the controller from $I and the banner", %{m: m} do
-      send(m, {:transport, :line, "GrblHAL 1.1f ['$' or '$HELP' for help]"})
+      send(m, {:link, :line, "GrblHAL 1.1f ['$' or '$HELP' for help]"})
 
       connect(m, "Alarm", {0, 0}, [], [
         "[VER:1.1f.20261123:]",
@@ -144,7 +144,7 @@ defmodule CNC.Machine.ProtocolTest do
       assert_receive {:line, "$22=5"}
       ok(m)
       assert_receive {:line, "$$"}
-      for l <- ["$22=5", "ok"], do: send(m, {:transport, :line, l})
+      for l <- ["$22=5", "ok"], do: send(m, {:link, :line, l})
       assert Machine.status(m).homing_enabled? == true
     end
 
@@ -329,20 +329,20 @@ defmodule CNC.Machine.ProtocolTest do
       idle(m)
       :ok = Machine.jog(m, {1, 0}, :normal)
       assert_receive {:line, "$J=" <> _}
-      send(m, {:transport, :line, "error:15"})
+      send(m, {:link, :line, "error:15"})
       assert %State{state: :idle, last_error: {:error, 15}} = Machine.status(m)
     end
 
     test "ALARM:N locks from any state", %{m: m} do
       idle(m)
       :ok = Machine.jog(m, {1, 0}, :normal)
-      send(m, {:transport, :line, "ALARM:1"})
+      send(m, {:link, :line, "ALARM:1"})
       assert %State{state: :alarm, alarm: {:alarm, 1}, jog: {0, 0, 0}} = Machine.status(m)
     end
 
     test "controller reset (banner) re-syncs and locks", %{m: m} do
       idle(m)
-      send(m, {:transport, :line, "Grbl 1.1h ['$' for help]"})
+      send(m, {:link, :line, "Grbl 1.1h ['$' for help]"})
       assert Machine.status(m).state == :connecting
       connect(m, "Idle", {0, 0})
       assert %State{state: :alarm, alarm: :reset} = Machine.status(m)
@@ -350,7 +350,7 @@ defmodule CNC.Machine.ProtocolTest do
 
     test "the work offset carries over reports that omit it", %{m: m} do
       idle(m)
-      send(m, {:transport, :line, "<Idle|MPos:10.000,20.000,0.000|FS:0,0|WCO:1.000,2.000,0.000>"})
+      send(m, {:link, :line, "<Idle|MPos:10.000,20.000,0.000|FS:0,0|WCO:1.000,2.000,0.000>"})
       report(m, "Idle", {11, 20})
 
       assert %State{wco: {1.0, 2.0, +0.0}, wpos: {10.0, 18.0, +0.0}, mpos: {11.0, 20.0, +0.0}} =
@@ -376,10 +376,10 @@ defmodule CNC.Machine.ProtocolTest do
       assert Machine.status(m).state == :idle
     end
 
-    test "transport loss disconnects, then reconnects", %{m: m, fake: fake} do
+    test "link loss disconnects, then reconnects", %{m: m, fake: fake} do
       idle(m)
       Process.exit(fake, :kill)
-      assert_receive {:scripted_transport, _new, ^m}, 500
+      assert_receive {:scripted_link, _new, ^m}, 500
       assert Machine.status(m).state == :connecting
       connect(m, "Idle", {5, 5})
       assert %State{state: :alarm, alarm: :connect, mpos: {5.0, 5.0, +0.0}} = Machine.status(m)

@@ -1,7 +1,7 @@
-defmodule CNC.Transport.FakeSim.Model do
+defmodule CNC.Link.FakeSim.Model do
   @moduledoc """
   Pure model of a small Grbl-ish controller: the functional core of
-  `CNC.Transport.FakeSim`. Every function returns `{model, lines}`, where `lines`
+  `CNC.Link.FakeSim`. Every function returns `{model, lines}`, where `lines`
   are the controller's replies (no newlines). Time only moves via
   `advance/2`, so tests are deterministic.
 

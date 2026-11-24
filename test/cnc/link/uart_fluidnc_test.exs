@@ -1,7 +1,7 @@
-defmodule CNC.Transport.UARTFluidNCTest do
+defmodule CNC.Link.UARTFluidNCTest do
   @moduledoc """
   The whole path the bench ESP32 will use, minus the board: Machine →
-  CNC.Transport.UART → a virtual serial port → real FluidNC (the FluidNC sim
+  CNC.Link.UART → a virtual serial port → real FluidNC (the FluidNC sim
   running as the port's terminal, via test/support/fluidnc_serial.py).
 
   Runs when FluidNC has been built (mix cnc.fluidnc.build).
@@ -12,7 +12,7 @@ defmodule CNC.Transport.UARTFluidNCTest do
 
   alias CNC.Machine
   alias CNC.Machine.State
-  alias CNC.Transport.FluidNCSim
+  alias CNC.Link.FluidNCSim
 
   @bridge Path.expand("../../support/fluidnc_serial.py", __DIR__)
 
@@ -31,7 +31,7 @@ defmodule CNC.Transport.UARTFluidNCTest do
     on_exit(fn -> if Port.info(bridge), do: Port.close(bridge) end)
 
     spec =
-      {Machine, name: nil, transport: {CNC.Transport.UART, port: device}, topic: "uart-#{device}"}
+      {Machine, name: nil, link: {CNC.Link.UART, port: device}, topic: "uart-#{device}"}
 
     m = start_supervised!(Supervisor.child_spec(spec, id: make_ref()))
     assert eventually(fn -> Machine.status(m).travel_source == :controller end, 5000)

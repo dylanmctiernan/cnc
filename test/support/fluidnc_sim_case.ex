@@ -24,14 +24,14 @@ defmodule CNC.FluidNCSimCase do
   end
 
   def start_fluidnc(%{tmp_dir: dir}) do
-    transport =
-      {CNC.Transport.FluidNCSim,
+    link =
+      {CNC.Link.FluidNCSim,
        executable: Path.expand(".fluidnc/bin/fluidnc"),
        config: Path.expand("priv/fluidnc/sim.yaml"),
        run_dir: dir}
 
     topic = "fluidnc-#{System.unique_integer([:positive])}"
-    spec = {Machine, name: nil, transport: transport, topic: topic}
+    spec = {Machine, name: nil, link: link, topic: topic}
     m = start_supervised!(Supervisor.child_spec(spec, id: make_ref()))
     assert eventually(fn -> Machine.status(m).travel_source == :controller end, 5000)
     %{m: m}

@@ -1,12 +1,12 @@
-defmodule CNC.Transport.UART do
+defmodule CNC.Link.UART do
   @moduledoc """
   Serial link to a Grbl-speaking controller (FluidNC over USB), via
   `Circuits.UART`.
 
   Opens the port after `start_link/2` returns, then sends the owner
-  `{:transport, :connected}`. Lines arrive as `{:transport, :line, line}`
+  `{:link, :connected}`. Lines arrive as `{:link, :line, line}`
   without their line ending (FluidNC sends `\\r\\n`). On a read error (e.g.
-  the cable is pulled) it sends `{:transport, :disconnected}` and exits; the
+  the cable is pulled) it sends `{:link, :disconnected}` and exits; the
   owner reconnects with backoff.
 
   Framing is done here rather than by `Circuits.UART.Framing.Line`, because
@@ -14,25 +14,25 @@ defmodule CNC.Transport.UART do
   `0x85`, ...) must go out bare.
 
   Options: `:port` (required, e.g. `"/dev/cu.usbserial-0001"`, see
-  `CNC.Transport.UART.ports/0`), `:speed` (default 115200).
+  `CNC.Link.UART.ports/0`), `:speed` (default 115200).
 
   Note: opening the port may reset an ESP32 board (DTR/RTS); the controller
   then boots, which the Machine treats like any reset (it re-locks).
   """
-  @behaviour CNC.Transport
+  @behaviour CNC.Link
   use GenServer
   require Logger
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def start_link(owner, opts), do: GenServer.start_link(__MODULE__, {owner, opts})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_line(pid, line), do: GenServer.cast(pid, {:write, [line, ?\n]})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:write, <<byte>>})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
   @doc "Serial ports present on this computer, with whatever the OS knows about them."
@@ -51,7 +51,7 @@ defmodule CNC.Transport.UART do
 
     case Circuits.UART.open(s.uart, port, speed: speed, active: true) do
       :ok ->
-        send(s.owner, {:transport, :connected})
+        send(s.owner, {:link, :connected})
         {:noreply, s}
 
       {:error, reason} ->
@@ -82,12 +82,12 @@ defmodule CNC.Transport.UART do
 
   def handle_info({:circuits_uart, _port, data}, s) when is_binary(data) do
     {lines, rest} = split_lines(s.buffer <> data)
-    for line <- lines, do: send(s.owner, {:transport, :line, line})
+    for line <- lines, do: send(s.owner, {:link, :line, line})
     {:noreply, %{s | buffer: rest}}
   end
 
   defp disconnect(s, reason) do
-    send(s.owner, {:transport, :disconnected})
+    send(s.owner, {:link, :disconnected})
     {:stop, {:shutdown, reason}, s}
   end
 

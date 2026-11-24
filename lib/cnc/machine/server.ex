@@ -1,17 +1,17 @@
 defmodule CNC.Machine.Server do
   @moduledoc """
   `gen_statem` behind `CNC.Machine`. The only process that talks to the
-  transport.
+  link.
 
   ## States
 
-      :disconnected ─(transport started)─▶ :connecting ─(first status)─▶ :alarm
+      :disconnected ─(link started)─▶ :connecting ─(first status)─▶ :alarm
       :alarm ─($X ok)─▶ :idle ◀─▶ :jogging
       :alarm | :idle ─($H)─▶ :homing ─(ok)─▶ :idle
       :idle | :jogging ─(status: hold/door/...)─▶ :busy ─(status: Idle)─▶ :idle
       any ─(ALARM:N or status Alarm)─▶ :alarm
       any ─(banner = controller reset)─▶ :connecting
-      any ─(transport lost)─▶ :disconnected ─(backoff)─▶ reconnect
+      any ─(link lost)─▶ :disconnected ─(backoff)─▶ reconnect
 
   Every (re)connect and reset lands in `:alarm`: even if the controller says
   Idle, the host requires an explicit Unlock or Home before moving.
@@ -44,7 +44,7 @@ defmodule CNC.Machine.Server do
     :travel,
     :config_travel,
     :config_max_rate,
-    :transport,
+    :link,
     :pubsub,
     :topic,
     :status,
@@ -118,8 +118,8 @@ defmodule CNC.Machine.Server do
       end)
 
     {adapter, adapter_opts} =
-      Keyword.get_lazy(opts, :transport, fn ->
-        config = Application.fetch_env!(:cnc, :transport)
+      Keyword.get_lazy(opts, :link, fn ->
+        config = Application.fetch_env!(:cnc, :link)
         {Keyword.fetch!(config, :adapter), Keyword.get(config, :opts, [])}
       end)
 
@@ -156,7 +156,7 @@ defmodule CNC.Machine.Server do
 
     d = %{
       end_session(d)
-      | transport: nil,
+      | link: nil,
         connected?: false,
         status: nil,
         alarm: nil,
@@ -196,22 +196,22 @@ defmodule CNC.Machine.Server do
   defp event(:state_timeout, :reconnect, :disconnected, d) do
     case d.adapter.start_link(self(), d.adapter_opts) do
       {:ok, pid} ->
-        {:connecting, %{d | transport: pid}, []}
+        {:connecting, %{d | link: pid}, []}
 
       {:error, reason} ->
-        Logger.warning("transport start failed: #{inspect(reason)}")
+        Logger.warning("link start failed: #{inspect(reason)}")
 
         {:disconnected, %{d | backoff: next_backoff(d.backoff)},
          [{:state_timeout, d.backoff, :reconnect}]}
     end
   end
 
-  defp event(:info, {:transport, :connected}, s, d), do: {s, %{d | connected?: true}, []}
-  defp event(:info, {:transport, :disconnected}, _s, d), do: {:disconnected, d, []}
-  defp event(:info, {:EXIT, pid, _}, _s, %{transport: pid} = d), do: {:disconnected, d, []}
+  defp event(:info, {:link, :connected}, s, d), do: {s, %{d | connected?: true}, []}
+  defp event(:info, {:link, :disconnected}, _s, d), do: {:disconnected, d, []}
+  defp event(:info, {:EXIT, pid, _}, _s, %{link: pid} = d), do: {:disconnected, d, []}
   defp event(:info, {:EXIT, _stale, _}, s, d), do: {s, d, []}
 
-  defp event(:info, {:transport, :line, line}, s, d) do
+  defp event(:info, {:link, :line, line}, s, d) do
     parsed = Response.parse(line)
     status? = match?({:status, _}, parsed)
 
@@ -242,11 +242,11 @@ defmodule CNC.Machine.Server do
   defp event({:timeout, :watchdog}, :expired, s, d) when s not in [:disconnected, :homing] do
     Logger.warning("no status from the controller in #{s}; dropping the link and reconnecting")
     # Best effort: if the link is half-alive, stop any motion. close/1 runs
-    # after the queued jog cancel; the timer is the backstop for a transport
+    # after the queued jog cancel; the timer is the backstop for a link
     # that is itself hung.
     d = if d.connected?, do: realtime(d, Realtime.jog_cancel()), else: d
-    :ok = d.adapter.close(d.transport)
-    :timer.exit_after(1_000, d.transport, {:shutdown, :watchdog})
+    :ok = d.adapter.close(d.link)
+    :timer.exit_after(1_000, d.link, {:shutdown, :watchdog})
     {:disconnected, %{d | last_error: {:link, :no_response}}, []}
   end
 
@@ -545,7 +545,7 @@ defmodule CNC.Machine.Server do
   ## Settings
 
   # What's on the other end, from $I (VER/FIRMWARE/DRIVER), the boot banner,
-  # and the transport (sims say so via CNC.Transport.simulated?/1).
+  # and the link (sims say so via CNC.Link.simulated?/1).
   defp identify(%{info: info, banner: banner, adapter: adapter}) do
     ver = info["VER"] || ""
     text = ver <> " " <> (banner || "")
@@ -562,7 +562,7 @@ defmodule CNC.Machine.Server do
     %{
       firmware: firmware,
       version: ver |> String.split(":") |> hd() |> blank_to_nil(),
-      simulated?: CNC.Transport.simulated?(adapter) or info["DRIVER"] == "Simulator"
+      simulated?: CNC.Link.simulated?(adapter) or info["DRIVER"] == "Simulator"
     }
   end
 
@@ -727,10 +727,10 @@ defmodule CNC.Machine.Server do
 
   defp end_session(d), do: %{d | vector: {0, 0, 0}, target: nil}
 
-  ## Transport
+  ## Link
 
   defp send_line(d, line, tag) do
-    :ok = d.adapter.write_line(d.transport, line)
+    :ok = d.adapter.write_line(d.link, line)
     in_flight = if tag == :jog, do: d.in_flight + 1, else: d.in_flight
     moves? = tag in [:jog, :step, :raw]
 
@@ -745,7 +745,7 @@ defmodule CNC.Machine.Server do
   end
 
   defp realtime(d, byte) do
-    :ok = d.adapter.write_realtime(d.transport, byte)
+    :ok = d.adapter.write_realtime(d.link, byte)
     kind = if byte == Realtime.status(), do: :poll, else: :realtime
     log(d, :out, kind, Console.describe(byte))
   end

@@ -5,7 +5,7 @@
 Makes two pseudo-terminal pairs and relays bytes between their master ends.
 FluidNC runs with one slave as its terminal (stdin/stdout); the other
 slave's device path is printed on the first line of stdout, for
-CNC.Transport.UART to open. Exits, stopping FluidNC, when stdin closes.
+CNC.Link.UART to open. Exits, stopping FluidNC, when stdin closes.
 """
 import os, pty, select, signal, subprocess, sys, tty
 

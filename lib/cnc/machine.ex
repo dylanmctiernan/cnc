@@ -2,7 +2,7 @@ defmodule CNC.Machine do
   @moduledoc """
   Machine state and jogging: the public API for everything above the domain.
 
-  A single `gen_statem` (`CNC.Machine.Server`) owns the transport and caches
+  A single `gen_statem` (`CNC.Machine.Server`) owns the link and caches
   what the controller reports. The controller remains the source of truth;
   after any (re)connect or reset the machine is locked in `:alarm` until
   `unlock/1` or `home/1`.
@@ -14,7 +14,7 @@ defmodule CNC.Machine do
   application's instance. Commands invalid for the current state return
   `{:error, {:invalid_state, state}}`.
   """
-  use Boundary, deps: [CNC.Grbl, CNC.Transport], exports: [State]
+  use Boundary, deps: [CNC.Grbl, CNC.Link], exports: [State]
 
   alias CNC.Machine.{Jog, Server, State}
 

@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Cnc.Fluidnc.Build do
   @moduledoc """
   Builds the FluidNC sim: stock FluidNC compiled to run natively on this
   computer (macOS or Linux), with step pulses counted instead of sent to
-  pins. Dev uses it automatically once built (`CNC.Transport.FluidNCSim`,
+  pins. Dev uses it automatically once built (`CNC.Link.FluidNCSim`,
   config `priv/fluidnc/sim.yaml`), and the `:fluidnc_sim` tests run against it.
 
       mix cnc.fluidnc.build        # -> .fluidnc/bin/fluidnc

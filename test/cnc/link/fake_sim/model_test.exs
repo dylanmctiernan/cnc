@@ -1,8 +1,8 @@
-defmodule CNC.Transport.FakeSim.ModelTest do
+defmodule CNC.Link.FakeSim.ModelTest do
   use ExUnit.Case, async: true
 
   alias CNC.Grbl.{Command, Realtime, Response}
-  alias CNC.Transport.FakeSim.Model
+  alias CNC.Link.FakeSim.Model
 
   # 600 mm/min = 10 mm/s = 0.01 mm/ms
   @feed 600

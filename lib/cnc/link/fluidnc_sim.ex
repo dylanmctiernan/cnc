@@ -1,4 +1,4 @@
-defmodule CNC.Transport.FluidNCSim do
+defmodule CNC.Link.FluidNCSim do
   @moduledoc """
   Link to FluidNC running natively on this computer (see `mix cnc.fluidnc.build`):
   the real firmware as a child program, spoken to over its stdin/stdout.
@@ -23,24 +23,24 @@ defmodule CNC.Transport.FluidNCSim do
       this app dies without closing, the watchdog notices within a second
       and stops it too (FluidNC itself ignores its input closing).
   """
-  @behaviour CNC.Transport
+  @behaviour CNC.Link
   use GenServer
   require Logger
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def start_link(owner, opts), do: GenServer.start_link(__MODULE__, {owner, opts})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_line(pid, line), do: GenServer.cast(pid, {:write, [line, ?\n]})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:write, <<byte>>})
 
-  @impl CNC.Transport
+  @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
   # Real firmware, but nothing physical moves.
-  @impl CNC.Transport
+  @impl CNC.Link
   def simulated?, do: true
 
   @doc "Default path of the native FluidNC binary."
@@ -108,7 +108,7 @@ defmodule CNC.Transport.FluidNCSim do
         ])
 
       {:os_pid, os_pid} = Port.info(port, :os_pid)
-      send(s.owner, {:transport, :connected})
+      send(s.owner, {:link, :connected})
       {:noreply, %{s | port: port, os_pid: os_pid}}
     else
       {:error, reason} ->
@@ -128,13 +128,13 @@ defmodule CNC.Transport.FluidNCSim do
   @impl GenServer
   def handle_info({port, {:data, data}}, %{port: port} = s) do
     {lines, rest} = split_lines(s.buffer <> data)
-    for line <- lines, do: send(s.owner, {:transport, :line, line})
+    for line <- lines, do: send(s.owner, {:link, :line, line})
     {:noreply, %{s | buffer: rest}}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = s) do
     Logger.warning("FluidNC exited (status #{status})")
-    send(s.owner, {:transport, :disconnected})
+    send(s.owner, {:link, :disconnected})
     {:stop, {:shutdown, {:exited, status}}, %{s | port: nil, os_pid: nil}}
   end
 

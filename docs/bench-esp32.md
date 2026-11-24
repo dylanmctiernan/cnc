@@ -67,7 +67,7 @@ see more than a faint glow.)
 ## 4. Run the app against the board
 
 ```sh
-CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
+CNC_LINK=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
 ```
 
 The link label should read `UART connected`, the firmware `FluidNC v4.1.1`,

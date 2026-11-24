@@ -3,7 +3,7 @@ defmodule CNC.Machine.FakeSimTest do
 
   describe "with FakeSim" do
     setup do
-      m = start_machine({CNC.Transport.FakeSim, homing_ms: 50}, "sim-#{System.unique_integer()}")
+      m = start_machine({CNC.Link.FakeSim, homing_ms: 50}, "sim-#{System.unique_integer()}")
       assert eventually(fn -> Machine.status(m).state == :alarm end)
       %{m: m}
     end
@@ -42,7 +42,7 @@ defmodule CNC.Machine.FakeSimTest do
     end
 
     test "holding a key into a limit slides up to it without errors" do
-      m = start_machine({CNC.Transport.FakeSim, pos: {1249.0, 600.0, 0.0}}, "sim-limit")
+      m = start_machine({CNC.Link.FakeSim, pos: {1249.0, 600.0, 0.0}}, "sim-limit")
       assert eventually(fn -> Machine.status(m).state == :alarm end)
       :ok = Machine.unlock(m)
       assert eventually(fn -> Machine.status(m).state == :idle end)
@@ -61,7 +61,7 @@ defmodule CNC.Machine.FakeSimTest do
 
     test "travel comes from the fake sim's settings" do
       sim_travel = {{0.0, 400.0}, {0.0, 300.0}, {-50.0, 0.0}}
-      m = start_machine({CNC.Transport.FakeSim, travel: sim_travel}, "sim-travel")
+      m = start_machine({CNC.Link.FakeSim, travel: sim_travel}, "sim-travel")
       assert eventually(fn -> Machine.status(m).travel_source == :controller end)
       assert Machine.status(m).travel == sim_travel
     end
@@ -100,7 +100,7 @@ defmodule CNC.Machine.FakeSimTest do
       assert eventually(fn -> Machine.status(m).state == :idle end)
 
       {_, data} = :sys.get_state(m)
-      :ok = CNC.Transport.FakeSim.disconnect(data.transport)
+      :ok = CNC.Link.FakeSim.disconnect(data.link)
       assert eventually(fn -> Machine.status(m).alarm == :connect end)
     end
   end
