@@ -580,6 +580,36 @@ body {
   color: var(--red-text);
 }
 
+/* PIN page */
+
+.cnc-pin {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+.cnc-pin-form {
+  display: grid;
+  gap: 0.75rem;
+  width: min(100%, 20rem);
+}
+.cnc-pin-form input[type="password"] {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--graphite-raised);
+  color: var(--alu);
+  font-size: 1.25rem;
+  letter-spacing: 0.2em;
+}
+.cnc-pin-form input:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+.cnc-pin-error {
+  color: var(--red-text);
+}
+
 @media (max-width: 52rem) {
   .cnc {
     grid-template-columns: 1fr;

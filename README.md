@@ -46,7 +46,9 @@ while the dev server is connected to it.
 ### From another device on your network
 
 ```sh
-CNC_LAN=1 mix phx.server          # then open http://<this-mac's-ip>:4000
+CNC_LAN=1 CNC_PIN=<pin> mix phx.server   # then open http://<this-mac's-ip>:4000
 ```
 
-Dev only. There's no login, so anyone on the network can drive the machine.
+Dev only. `CNC_LAN=1` refuses to start without a PIN; each browser enters it
+once. Changing the PIN logs every device out. `CNC_PIN` alone (without
+`CNC_LAN`) protects a local-only server too.

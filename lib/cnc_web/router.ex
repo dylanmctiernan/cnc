@@ -8,6 +8,7 @@ defmodule CNCWeb.Router do
     plug :put_root_layout, html: {CNCWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug CNCWeb.Pin
   end
 
   pipeline :api do
@@ -17,7 +18,12 @@ defmodule CNCWeb.Router do
   scope "/", CNCWeb do
     pipe_through :browser
 
-    live "/", MachineLive
+    get "/pin", PinController, :new
+    post "/pin", PinController, :create
+
+    live_session :machine, on_mount: CNCWeb.Pin do
+      live "/", MachineLive
+    end
   end
 
   # Other scopes may use custom stacks.

@@ -22,10 +22,20 @@ end
 
 config :cnc, CNCWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
-# CNC_LAN=1 serves the UI to other devices on the local network (dev only).
-# There's no login: anyone on the network can drive the machine. Fine for the
-# simulators; think twice once real hardware is connected.
+# CNC_PIN=<pin> requires that PIN in every browser (once per device).
+# CNC_LAN=1 serves the UI to other devices on the local network (dev only),
+# and refuses to start without a PIN: anyone who can reach the page can
+# drive the machine.
+if pin = System.get_env("CNC_PIN") do
+  if String.length(pin) < 4, do: raise("CNC_PIN must be at least 4 characters")
+  config :cnc, :access_pin, pin
+end
+
 if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
+  unless System.get_env("CNC_PIN") do
+    raise "CNC_LAN=1 needs CNC_PIN=<pin>: anyone on the network could drive the machine"
+  end
+
   config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
 end
 
