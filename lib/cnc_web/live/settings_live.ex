@@ -105,6 +105,7 @@ defmodule CNCWeb.SettingsLive do
       <div class="cnc-page">
         <header class="cnc-bar">
           <.link navigate={~p"/"} class="cnc-btn">Back to machine</.link>
+          <.link navigate={~p"/controllers"} class="cnc-btn">Controllers</.link>
           <h1 class="cnc-page-title">Controller settings</h1>
           <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_word(@machine.state)}

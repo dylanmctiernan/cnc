@@ -26,14 +26,16 @@ defmodule CNCWeb.MachineLive do
     if connected?(socket) do
       Machine.subscribe(cnc.topic)
       Program.subscribe(cnc.program_topic)
+      CNC.Controllers.subscribe(cnc.controllers_topic)
     end
 
     machine = Machine.status(cnc.machine)
     program = Program.current(cnc.program)
+    controller = CNC.Controllers.active(cnc.controllers)
 
     {:ok,
      socket
-     |> assign(cnc: cnc, machine: machine, tier: :normal, step: 10)
+     |> assign(cnc: cnc, machine: machine, controller: controller, tier: :normal, step: 10)
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, step_axis: :x)
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
@@ -87,6 +89,11 @@ defmodule CNCWeb.MachineLive do
      |> push_program()
      |> push_event("zoom", %{mode: zoom})}
   end
+
+  def handle_info({:controllers, _}, socket),
+    do:
+      {:noreply,
+       assign(socket, controller: CNC.Controllers.active(socket.assigns.cnc.controllers))}
 
   def handle_info({:machine_console, entry}, socket),
     do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
@@ -359,11 +366,13 @@ defmodule CNCWeb.MachineLive do
           </span>
           <dl class="cnc-meta">
             <div>
-              <dt>link</dt>
+              <dt>controller</dt>
               <dd class={if @machine.connected?, do: "is-on", else: "is-off"}>
-                {adapter_label(@machine.adapter)} {if @machine.connected?,
-                  do: "connected",
-                  else: "not connected"}
+                <.link navigate={~p"/controllers"} class="cnc-meta-link" title="Controllers">
+                  {controller_name(@controller, @machine)} {if @machine.connected?,
+                    do: "connected",
+                    else: "not connected"}
+                </.link>
               </dd>
             </div>
             <div class="cnc-meta-firmware">
@@ -460,6 +469,9 @@ defmodule CNCWeb.MachineLive do
               >
                 {if @details?, do: "Hide console", else: "Console"}
               </button>
+              <.link navigate={~p"/controllers"} class="cnc-btn">
+                Controller: {controller_name(@controller, @machine)}
+              </.link>
               <.link navigate={~p"/settings"} class="cnc-btn">Settings</.link>
               <button
                 type="button"
@@ -1526,6 +1538,10 @@ defmodule CNCWeb.MachineLive do
 
   defp travel_list({{x0, x1}, {y0, y1}, {z0, z1}}), do: [[x0, x1], [y0, y1], [z0, z1]]
   defp travel_list(_), do: [[0, 1250], [0, 1250], [-100, 0]]
+
+  # The active controller's name; with a link override (CNC_LINK), the link.
+  defp controller_name(%CNC.Controllers.Profile{name: name}, _machine), do: name
+  defp controller_name(nil, machine), do: adapter_label(machine.adapter)
 
   defp adapter_label("FakeSim"), do: "Fake sim"
   defp adapter_label("FluidNCSim"), do: "FluidNC sim"

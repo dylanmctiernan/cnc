@@ -36,22 +36,39 @@ defmodule CNCWeb.ConnCase do
   end
 
   @doc """
-  Start a private machine (fake sim) and program store for one test and put
-  them in the conn's session, so the screens drive these instead of the
-  app's (see `CNCWeb.Instance`). Screen tests can then run in parallel.
-  Returns `{conn, machine, program}`; the machine boots locked.
+  Start a private machine, program store and controllers for one test and
+  put them in the conn's session, so the screens drive these instead of the
+  app's (see `CNCWeb.Instance`). Screen tests can then run in parallel. The
+  controllers hold just a fake sim, active, which they connect the machine
+  to (the same path as the app). Returns `{conn, machine, program}`; the
+  machine boots locked.
   """
-  def with_instance(conn, sim_opts \\ []) do
+  def with_instance(conn) do
     id = System.unique_integer([:positive])
     machine = :"machine_test_#{id}"
     program = :"program_test_#{id}"
     topic = "machine-test-#{id}"
     program_topic = "program-test-#{id}"
+    controllers = :"controllers_test_#{id}"
+    controllers_topic = "controllers-test-#{id}"
+    data_dir = Path.join(System.tmp_dir!(), "cnc-test-#{id}")
+    File.rm_rf!(data_dir)
+    ExUnit.Callbacks.on_exit(fn -> File.rm_rf(data_dir) end)
+
+    ExUnit.Callbacks.start_supervised!(
+      Supervisor.child_spec({CNC.Machine, name: machine, topic: topic, link: nil}, id: machine)
+    )
 
     ExUnit.Callbacks.start_supervised!(
       Supervisor.child_spec(
-        {CNC.Machine, name: machine, topic: topic, link: {CNC.Link.FakeSim, sim_opts}},
-        id: machine
+        {CNC.Controllers,
+         name: controllers,
+         topic: controllers_topic,
+         data_dir: data_dir,
+         machine: machine,
+         overridden?: false,
+         seed: :fake_only},
+        id: controllers
       )
     )
 
@@ -63,7 +80,9 @@ defmodule CNCWeb.ConnCase do
       machine: machine,
       topic: topic,
       program: program,
-      program_topic: program_topic
+      program_topic: program_topic,
+      controllers: controllers,
+      controllers_topic: controllers_topic
     }
 
     {Plug.Test.init_test_session(conn, %{"cnc_instance" => instance}), machine, program}

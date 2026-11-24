@@ -24,6 +24,7 @@ defmodule CNCWeb.Router do
     live_session :machine, on_mount: CNCWeb.Pin do
       live "/", MachineLive
       live "/settings", SettingsLive
+      live "/controllers", ControllersLive
     end
   end
 

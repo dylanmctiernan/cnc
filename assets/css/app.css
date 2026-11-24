@@ -1793,3 +1793,81 @@ body {
   font-size: 0.8125rem;
   background: color-mix(in srgb, var(--panel) 85%, transparent);
 }
+
+/* Controllers page */
+.cnc-meta-link {
+  color: inherit;
+  text-decoration: underline dotted var(--text-dim);
+  text-underline-offset: 0.25em;
+}
+.cnc-ctls {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cnc-ctl-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+.cnc-ctl-card.is-active {
+  border-left-color: var(--ok);
+}
+.cnc-ctl-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+.cnc-ctl-name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+.cnc-ctl-tag {
+  color: var(--ok);
+  font-size: 0.8125rem;
+}
+.cnc-ctl-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 32rem;
+}
+.cnc-ctl-field {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.cnc-ctl-field > span,
+.cnc-ctl-field > legend,
+.cnc-ctl-field > label {
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+}
+.cnc-ctl-field input,
+.cnc-ctl-field select {
+  min-height: var(--touch);
+  padding: 0 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: max(1rem, 16px);
+}
+.cnc-ctl-field .cnc-row input {
+  flex: 1;
+  min-width: 0;
+}
+.cnc-ctl-field .cnc-seg label.is-on {
+  background: var(--text);
+  color: var(--bg);
+}

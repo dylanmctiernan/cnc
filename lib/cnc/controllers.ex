@@ -40,9 +40,38 @@ defmodule CNC.Controllers do
   @doc "True when a configured link overrides the profiles (CNC_LINK, tests)."
   def overridden?(server \\ __MODULE__), do: GenServer.call(server, :overridden?)
 
-  @doc "Make a profile active and connect the machine to it."
-  @spec select(GenServer.server(), String.t()) :: :ok | {:error, :not_found | :overridden}
+  @doc """
+  Make a profile active and connect the machine to it. Refused while the
+  machine is moving (switching drops the link).
+  """
+  @spec select(GenServer.server(), String.t()) ::
+          :ok | {:error, :not_found | :overridden | :moving}
   def select(server \\ __MODULE__, id), do: GenServer.call(server, {:select, id}, 10_000)
+
+  @doc """
+  Change how a controller is reached (only links its board can use). The
+  controller and its config stay the same; if it's the active one, the
+  machine reconnects over the new link.
+  """
+  @spec update_link(GenServer.server(), String.t(), map) :: {:ok, Profile.t()} | {:error, term}
+  def update_link(server \\ __MODULE__, id, link),
+    do: GenServer.call(server, {:update_link, id, link}, 10_000)
+
+  @doc "Remove a profile (not the active one)."
+  @spec remove(GenServer.server(), String.t()) :: :ok | {:error, :active | :not_found}
+  def remove(server \\ __MODULE__, id), do: GenServer.call(server, {:remove, id})
+
+  @doc "Serial ports on this computer: `[{device, description}]`, for choosing a USB link."
+  def serial_ports do
+    for {name, info} <- Enum.sort(CNC.Link.UART.ports()) do
+      device = if String.starts_with?(name, "/dev/"), do: name, else: "/dev/" <> name
+
+      description =
+        [info[:manufacturer], info[:description]] |> Enum.reject(&is_nil/1) |> Enum.join(", ")
+
+      {device, description}
+    end
+  end
 
   @doc """
   Add a profile: `%{name: ..., board: ..., link: ...}`. The link defaults to
@@ -52,7 +81,7 @@ defmodule CNC.Controllers do
   def add(server \\ __MODULE__, attrs), do: GenServer.call(server, {:add, attrs})
 
   @doc "Receive `{:controllers, %{profiles: [...], active: id | nil}}` on changes."
-  def subscribe, do: Phoenix.PubSub.subscribe(CNC.PubSub, @topic)
+  def subscribe(topic \\ @topic), do: Phoenix.PubSub.subscribe(CNC.PubSub, topic)
 
   @doc """
   The `CNC.Link` adapter and options for a profile. A FluidNC sim gets its
@@ -85,7 +114,10 @@ defmodule CNC.Controllers do
       overridden?:
         Keyword.get_lazy(opts, :overridden?, fn -> Application.get_env(:cnc, :link) != nil end),
       profiles: [],
-      active: nil
+      active: nil,
+      # Tests seed just the fake sim (no FluidNC process, no dev data)
+      seed: Keyword.get(opts, :seed, :default),
+      topic: Keyword.get(opts, :topic, @topic)
     }
 
     s = load(s)
@@ -103,14 +135,40 @@ defmodule CNC.Controllers do
     do: {:reply, {:error, :overridden}, s}
 
   def handle_call({:select, id}, _from, s) do
-    case find(s, id) do
-      nil ->
+    cond do
+      find(s, id) == nil ->
         {:reply, {:error, :not_found}, s}
 
-      _profile ->
+      moving?(s) ->
+        {:reply, {:error, :moving}, s}
+
+      true ->
         s = save(%{s | active: id})
         connect_active(s)
         {:reply, :ok, s}
+    end
+  end
+
+  def handle_call({:update_link, id, link}, _from, s) do
+    active? = id == s.active and not s.overridden?
+
+    with %Profile{} = profile <- find(s, id) || {:error, :not_found},
+         false <- (active? and moving?(s)) && {:error, :moving},
+         {:ok, link} <- link_for(profile.board, link) do
+      profile = %{profile | link: link}
+      s = save(%{s | profiles: Enum.map(s.profiles, &if(&1.id == id, do: profile, else: &1))})
+      if active?, do: connect_active(s)
+      {:reply, {:ok, profile}, s}
+    else
+      {:error, _} = error -> {:reply, error, s}
+    end
+  end
+
+  def handle_call({:remove, id}, _from, s) do
+    cond do
+      find(s, id) == nil -> {:reply, {:error, :not_found}, s}
+      id == s.active -> {:reply, {:error, :active}, s}
+      true -> {:reply, :ok, save(%{s | profiles: Enum.reject(s.profiles, &(&1.id == id))})}
     end
   end
 
@@ -152,6 +210,11 @@ defmodule CNC.Controllers do
 
   defp find(s, id), do: Enum.find(s.profiles, &(&1.id == id))
 
+  defp moving?(s) do
+    status = Machine.status(s.machine)
+    status.moving? or status.state in [:jogging, :homing]
+  end
+
   defp connect_active(s) do
     case find(s, s.active) do
       nil -> :ok
@@ -179,6 +242,17 @@ defmodule CNC.Controllers do
   end
 
   # First run: the FluidNC sim when it's built (and active), and the fake sim.
+  defp seed(%{seed: :fake_only} = s) do
+    fake = %Profile{
+      id: Profile.new_id(),
+      name: "Fake sim",
+      board: :fake_sim,
+      link: %{type: :fake_sim}
+    }
+
+    save(%{s | profiles: [fake], active: fake.id})
+  end
+
   defp seed(s) do
     sim? = CNC.Link.FluidNCSim.available?()
 
@@ -212,7 +286,7 @@ defmodule CNC.Controllers do
 
     Phoenix.PubSub.broadcast(
       CNC.PubSub,
-      @topic,
+      s.topic,
       {:controllers, %{profiles: s.profiles, active: s.active}}
     )
 
