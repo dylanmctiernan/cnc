@@ -12,6 +12,7 @@ defmodule CNCWeb.MachineLive do
 
   @tiers [fine: 5, normal: 20, fast: 50]
   @steps [0.1, 1, 10, 50]
+  @console_rows 200
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,13 +22,19 @@ defmodule CNCWeb.MachineLive do
     {:ok,
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
+     |> assign(details?: false, polls?: false)
      |> assign(tiers: @tiers, steps: @steps)
+     |> stream_configure(:console, dom_id: &"log-#{&1.id}")
+     |> stream(:console, [])
      |> push_pos(machine)}
   end
 
   @impl true
   def handle_info({:machine, %State{} = machine}, socket),
     do: {:noreply, socket |> assign(machine: machine) |> push_pos(machine)}
+
+  def handle_info({:machine_console, entry}, socket),
+    do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
 
   @impl true
   def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier}, socket) do
@@ -76,6 +83,33 @@ defmodule CNCWeb.MachineLive do
   end
 
   def handle_event("toggle_help", _, socket), do: {:noreply, update(socket, :help?, &(!&1))}
+
+  # Console traffic is only subscribed to while the panel is open. Subscribe
+  # before loading history; overlapping entries share a DOM id, so no dupes.
+  def handle_event("toggle_details", _, %{assigns: %{details?: false}} = socket) do
+    Machine.subscribe_console()
+
+    {:noreply,
+     socket
+     |> assign(details?: true)
+     |> stream(:console, Machine.console(), reset: true)}
+  end
+
+  def handle_event("toggle_details", _, socket) do
+    Machine.unsubscribe_console()
+    Machine.unsubscribe_polls()
+
+    {:noreply,
+     socket |> assign(details?: false, polls?: false) |> stream(:console, [], reset: true)}
+  end
+
+  def handle_event("toggle_polls", _, %{assigns: %{polls?: polls?}} = socket) do
+    if polls?, do: Machine.unsubscribe_polls(), else: Machine.subscribe_polls()
+    {:noreply, assign(socket, polls?: !polls?)}
+  end
+
+  def handle_event("clear_console", _, socket),
+    do: {:noreply, stream(socket, :console, [], reset: true)}
 
   @impl true
   def render(assigns) do
@@ -199,6 +233,33 @@ defmodule CNCWeb.MachineLive do
                 Reset
               </button>
             </div>
+            <button
+              type="button"
+              class="cnc-btn cnc-btn--quiet"
+              phx-click="toggle_details"
+              aria-expanded={to_string(@details?)}
+              aria-controls="console"
+            >
+              {if @details?, do: "Hide details and console", else: "Details and console"}
+            </button>
+            <dl :if={@details?} class="cnc-facts">
+              <dt>Reports</dt>
+              <dd>{controller_label(@machine)}</dd>
+              <dt>Feed</dt>
+              <dd>{if @machine.feed, do: "#{round(@machine.feed)} mm/min", else: "—"}</dd>
+              <dt>Planner</dt>
+              <dd>{buffer_label(@machine.buffer, 0, "blocks")}</dd>
+              <dt>Serial buffer</dt>
+              <dd>{buffer_label(@machine.buffer, 1, "bytes")}</dd>
+              <dt>Awaiting ack</dt>
+              <dd>{pluralize(@machine.awaiting_ack, "line")}</dd>
+              <dt>Work offset</dt>
+              <dd>{xyz_label(@machine.wco)}</dd>
+              <dt>Travel</dt>
+              <dd>{travel_label(@machine.travel)}</dd>
+              <dt :if={@machine.alarm}>Locked because</dt>
+              <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
+            </dl>
           </section>
 
           <section class="cnc-group">
@@ -219,6 +280,31 @@ defmodule CNCWeb.MachineLive do
             </dl>
           </section>
         </aside>
+
+        <section :if={@details?} id="console" class="cnc-console" aria-label="Controller console">
+          <div class="cnc-console-bar">
+            <h2 class="cnc-h">Console</h2>
+            <label class="cnc-check">
+              <input type="checkbox" checked={@polls?} phx-click="toggle_polls" /> Show status polls
+            </label>
+            <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_console">
+              Clear
+            </button>
+          </div>
+          <ol id="console-log" class="cnc-log" phx-update="stream" phx-hook="ConsoleScroll">
+            <li
+              :for={{dom_id, entry} <- @streams.console}
+              id={dom_id}
+              class={["cnc-log-row", "is-#{entry.dir}", tone(entry)]}
+            >
+              <time>{clock(entry.at)}</time>
+              <span class="cnc-log-dir" title={if entry.dir == :out, do: "Sent", else: "Received"}>
+                {if entry.dir == :out, do: "→", else: "←"}
+              </span>
+              <span class="cnc-log-text">{entry.text}</span>
+            </li>
+          </ol>
+        </section>
       </div>
     </Layouts.app>
     """
@@ -317,6 +403,41 @@ defmodule CNCWeb.MachineLive do
   defp alarm_cause(3), do: "The controller was reset while moving, so the position may be off."
   defp alarm_cause(code) when code in 6..9, do: "Homing didn't complete."
   defp alarm_cause(code), do: "The controller raised alarm #{code}."
+
+  defp controller_label(%State{controller: nil}), do: "—"
+
+  defp controller_label(%State{controller: c, substate: sub}) do
+    name = c |> to_string() |> String.capitalize()
+    if sub, do: "#{name}:#{sub}", else: name
+  end
+
+  defp buffer_label(nil, _i, _unit), do: "Not reported"
+  defp buffer_label(buffer, i, unit), do: "#{elem(buffer, i)} #{unit} free"
+
+  defp pluralize(1, word), do: "1 #{word}"
+  defp pluralize(n, word), do: "#{n} #{word}s"
+
+  defp xyz_label(nil), do: "Not reported yet"
+  defp xyz_label({x, y, z}), do: "X #{fmt(x)}, Y #{fmt(y)}, Z #{fmt(z)}"
+
+  defp travel_label({{x0, x1}, {y0, y1}, _}),
+    do: "X #{round(x0)} to #{round(x1)}, Y #{round(y0)} to #{round(y1)} mm"
+
+  defp travel_label(_), do: "—"
+
+  defp lock_label(:connect), do: "New connection"
+  defp lock_label(:reset), do: "Controller restarted"
+  defp lock_label(:reported), do: "Controller reports alarm"
+  defp lock_label({:alarm, code}), do: "ALARM:#{code}"
+
+  defp tone(%{dir: :in, text: "error:" <> _}), do: "is-error"
+  defp tone(%{dir: :in, text: "ALARM:" <> _}), do: "is-alarm"
+  defp tone(%{kind: :poll}), do: "is-poll"
+  defp tone(%{kind: :realtime}), do: "is-realtime"
+  defp tone(_), do: nil
+
+  defp clock({{h, m, s}, ms}),
+    do: :io_lib.format("~2..0B:~2..0B:~2..0B.~3..0B", [h, m, s, ms]) |> to_string()
 
   defp error_text(nil), do: nil
   defp error_text({:jog, :heartbeat_lost}), do: "Jog stopped: the keyboard stopped responding."

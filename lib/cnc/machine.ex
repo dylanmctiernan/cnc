@@ -27,6 +27,26 @@ defmodule CNC.Machine do
   @doc "Subscribe the caller to `{:machine, %State{}}` broadcasts."
   def subscribe(topic \\ "machine"), do: Phoenix.PubSub.subscribe(CNC.PubSub, topic)
 
+  @doc """
+  Subscribe to raw controller traffic as `{:machine_console, entry}` (see
+  `CNC.Machine.Console`). Status polls are a separate, opt-in stream.
+  """
+  def subscribe_console(topic \\ "machine"),
+    do: Phoenix.PubSub.subscribe(CNC.PubSub, topic <> ":console")
+
+  def unsubscribe_console(topic \\ "machine"),
+    do: Phoenix.PubSub.unsubscribe(CNC.PubSub, topic <> ":console")
+
+  def subscribe_polls(topic \\ "machine"),
+    do: Phoenix.PubSub.subscribe(CNC.PubSub, topic <> ":console:polls")
+
+  def unsubscribe_polls(topic \\ "machine"),
+    do: Phoenix.PubSub.unsubscribe(CNC.PubSub, topic <> ":console:polls")
+
+  @doc "Recent traffic (last 200 entries, polls excluded), oldest first."
+  @spec console(server) :: [CNC.Machine.Console.entry()]
+  def console(server \\ __MODULE__), do: call(server, :console)
+
   @spec status(server) :: State.t()
   def status(server \\ __MODULE__), do: call(server, :status)
 

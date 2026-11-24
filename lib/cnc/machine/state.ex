@@ -7,7 +7,12 @@ defmodule CNC.Machine.State do
       :jogging | :homing | :busy`
     * `controller` — the controller's own last reported state
       (`CNC.Grbl.Status` state atom), `nil` until the first report
+    * `substate` — e.g. the `1` in `Hold:1` / `Door:1`
     * `mpos`/`wpos` — last *reported* positions, never commanded ones
+    * `wco` — work coordinate offset, once the controller has reported it
+    * `feed` — reported feed rate (mm/min)
+    * `buffer` — `{planner_blocks_free, serial_bytes_free}` (`Bf`), if reported
+    * `awaiting_ack` — lines sent that the controller hasn't acked yet
     * `alarm` — why we're locked in `:alarm`: `:connect` (fresh connection,
       position not trusted), `:reset` (controller rebooted), `{:alarm, code}`
       (controller `ALARM:N`), or `:reported` (status said Alarm)
@@ -24,8 +29,13 @@ defmodule CNC.Machine.State do
             connected?: false,
             adapter: nil,
             controller: nil,
+            substate: nil,
             mpos: nil,
             wpos: nil,
+            wco: nil,
+            feed: nil,
+            buffer: nil,
+            awaiting_ack: 0,
             alarm: nil,
             last_error: nil,
             tier: :normal,

@@ -177,6 +177,52 @@ defmodule CNC.MachineTest do
     end
   end
 
+  describe "console" do
+    setup do
+      topic = "console-#{System.unique_integer([:positive])}"
+      m = start_machine({CNC.FakeTransport, test: self()}, topic)
+      assert_receive {:fake_transport, _fake, ^m}
+      Machine.subscribe_console(topic)
+      %{m: m, topic: topic}
+    end
+
+    test "logs traffic both ways, with real-time bytes named", %{m: m} do
+      idle(m)
+      :ok = Machine.jog(m, {1, 0}, :normal)
+      :ok = Machine.jog_stop(m)
+
+      texts = for e <- Machine.console(m), do: {e.dir, e.text}
+      assert {:out, "$X"} in texts
+      assert {:in, "ok"} in texts
+      assert {:out, "$J=G91 G21 X1.000 F1200"} in texts
+      assert {:out, "0x85 jog cancel"} in texts
+      assert_received {:machine_console, %{dir: :out, text: "$X"}}
+    end
+
+    test "status polls stream on their own topic and stay out of history", %{m: m, topic: topic} do
+      report(m, "Idle", {0, 0})
+      refute_receive {:machine_console, %{kind: :poll}}, 250
+
+      Machine.subscribe_polls(topic)
+      assert_receive {:machine_console, %{kind: :poll, dir: :out, text: "? status"}}, 300
+      report(m, "Idle", {1, 0})
+      assert_receive {:machine_console, %{kind: :poll, dir: :in, text: "<Idle|" <> _}}
+
+      refute Enum.any?(Machine.console(m), &(&1.kind == :poll))
+    end
+
+    test "history keeps the newest 200" do
+      console =
+        Enum.reduce(1..250, CNC.Machine.Console.new(), fn i, c ->
+          CNC.Machine.Console.push(c, CNC.Machine.Console.entry(:out, :line, "L#{i}"))
+        end)
+
+      list = CNC.Machine.Console.to_list(console)
+      assert length(list) == 200
+      assert {hd(list).text, List.last(list).text} == {"L51", "L250"}
+    end
+  end
+
   # Against the in-process simulator, end to end.
   describe "with Sim" do
     setup do

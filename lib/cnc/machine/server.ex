@@ -24,7 +24,7 @@ defmodule CNC.Machine.Server do
   require Logger
 
   alias CNC.Grbl.{Command, Realtime, Response}
-  alias CNC.Machine.{Jog, State}
+  alias CNC.Machine.{Console, Jog, State}
 
   @poll_ms 200
   @poll_jog_ms 50
@@ -51,6 +51,7 @@ defmodule CNC.Machine.Server do
     vector: {0, 0},
     in_flight: 0,
     pending: :queue.new(),
+    console: Console.new(),
     backoff: 0
   ]
 
@@ -148,13 +149,16 @@ defmodule CNC.Machine.Server do
   defp event(:info, {:EXIT, pid, _}, _s, %{transport: pid} = d), do: {:disconnected, d, []}
   defp event(:info, {:EXIT, _stale, _}, s, d), do: {s, d, []}
 
-  defp event(:info, {:transport, :line, line}, s, d),
-    do: response(Response.parse(line), s, d)
+  defp event(:info, {:transport, :line, line}, s, d) do
+    parsed = Response.parse(line)
+    kind = if match?({:status, _}, parsed), do: :poll, else: :line
+    response(parsed, s, log(d, :in, kind, line))
+  end
 
   ## Timers
 
   defp event({:timeout, :poll}, :poll, s, d) do
-    if d.connected?, do: realtime(d, Realtime.status())
+    d = if d.connected?, do: realtime(d, Realtime.status()), else: d
     {s, d, [poll(if s == :jogging, do: @poll_jog_ms, else: @poll_ms)]}
   end
 
@@ -162,7 +166,7 @@ defmodule CNC.Machine.Server do
     do: {:jogging, maybe_increment(d), [{{:timeout, :jog_tick}, Jog.dt_ms(), :tick}]}
 
   defp event({:timeout, :deadman}, :expired, :jogging, d) do
-    realtime(d, Realtime.jog_cancel())
+    d = realtime(d, Realtime.jog_cancel())
     {:idle, %{d | last_error: {:jog, :heartbeat_lost}}, []}
   end
 
@@ -171,6 +175,9 @@ defmodule CNC.Machine.Server do
   ## Calls
 
   defp event({:call, from}, :status, s, d), do: {s, d, [{:reply, from, snapshot(s, d)}]}
+
+  defp event({:call, from}, :console, s, d),
+    do: {s, d, [{:reply, from, Console.to_list(d.console)}]}
 
   defp event({:call, from}, :unlock, s, d) when s in [:alarm, :idle],
     do: {s, send_line(d, Command.unlock(), :unlock), [{:reply, from, :ok}]}
@@ -194,7 +201,7 @@ defmodule CNC.Machine.Server do
 
   # Stopping is never refused.
   defp event({:call, from}, :jog_stop, s, d) do
-    if d.connected?, do: realtime(d, Realtime.jog_cancel())
+    d = if d.connected?, do: realtime(d, Realtime.jog_cancel()), else: d
     {if(s == :jogging, do: :idle, else: s), d, [{:reply, from, :ok}]}
   end
 
@@ -216,7 +223,7 @@ defmodule CNC.Machine.Server do
         :reset -> Realtime.reset()
       end
 
-    realtime(d, byte)
+    d = realtime(d, byte)
     # Feed hold cancels an active jog on the controller.
     next = if cmd == :feed_hold and s == :jogging, do: :idle, else: s
     {next, d, [{:reply, from, :ok}]}
@@ -253,7 +260,7 @@ defmodule CNC.Machine.Server do
   # First report after (re)connect or reset. Never trust it enough to move:
   # lock until Unlock/Home. A jog left running by a previous session is stopped.
   defp on_status(:connecting, reported, d) do
-    if reported == :jog, do: realtime(d, Realtime.jog_cancel())
+    d = if reported == :jog, do: realtime(d, Realtime.jog_cancel()), else: d
     {:alarm, %{d | alarm: d.alarm || :connect, backoff: 0}, []}
   end
 
@@ -264,8 +271,7 @@ defmodule CNC.Machine.Server do
     do: {s, d, []}
 
   defp on_status(:jogging, _other, d) do
-    realtime(d, Realtime.jog_cancel())
-    {:busy, d, []}
+    {:busy, realtime(d, Realtime.jog_cancel()), []}
   end
 
   defp on_status(:idle, _other, d), do: {:busy, d, []}
@@ -317,10 +323,23 @@ defmodule CNC.Machine.Server do
   defp send_line(d, line, tag) do
     :ok = d.adapter.write_line(d.transport, line)
     in_flight = if tag == :jog, do: d.in_flight + 1, else: d.in_flight
-    %{d | pending: :queue.in(tag, d.pending), in_flight: in_flight}
+    d = %{d | pending: :queue.in(tag, d.pending), in_flight: in_flight}
+    log(d, :out, :line, IO.iodata_to_binary(line))
   end
 
-  defp realtime(d, byte), do: :ok = d.adapter.write_realtime(d.transport, byte)
+  defp realtime(d, byte) do
+    :ok = d.adapter.write_realtime(d.transport, byte)
+    kind = if byte == Realtime.status(), do: :poll, else: :realtime
+    log(d, :out, kind, Console.describe(byte))
+  end
+
+  # Console: polls go to their own topic so subscribers can opt out.
+  defp log(d, dir, kind, text) do
+    entry = Console.entry(dir, kind, text)
+    topic = if kind == :poll, do: "#{d.topic}:console:polls", else: "#{d.topic}:console"
+    Phoenix.PubSub.broadcast(d.pubsub, topic, {:machine_console, entry})
+    %{d | console: Console.push(d.console, entry)}
+  end
 
   defp flush_pending(d), do: %{end_session(d) | pending: :queue.new(), in_flight: 0}
 
@@ -349,8 +368,13 @@ defmodule CNC.Machine.Server do
       connected?: d.connected? and s != :disconnected,
       adapter: d.adapter |> Module.split() |> List.last(),
       controller: d.status && d.status.state,
+      substate: d.status && d.status.substate,
       mpos: d.status && d.status.mpos,
       wpos: d.status && d.status.wpos,
+      wco: d.status && d.status.wco,
+      feed: d.status && d.status.feed,
+      buffer: d.status && d.status.buffer,
+      awaiting_ack: :queue.len(d.pending),
       alarm: d.alarm,
       last_error: d.last_error,
       tier: d.tier,

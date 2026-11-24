@@ -81,6 +81,25 @@ defmodule CNCWeb.MachineLiveTest do
     assert render_hook(view, "stop", %{})
   end
 
+  test "details and console", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    refute has_element?(view, "#console")
+
+    view |> element("button", "Details and console") |> render_click()
+    assert has_element?(view, "#console")
+    assert render(view) =~ "Controller restarted"
+
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> has_element?(view, "#console-log li", "$X") end)
+    refute has_element?(view, "#console-log li.is-poll")
+
+    view |> element("#console input[type=checkbox]") |> render_click()
+    assert eventually(fn -> has_element?(view, "#console-log li.is-poll") end)
+
+    view |> element("button", "Hide details and console") |> render_click()
+    refute has_element?(view, "#console")
+  end
+
   defp eventually(fun, timeout \\ 2000) do
     cond do
       fun.() -> true
