@@ -504,13 +504,15 @@ defmodule CNCWeb.MachineLive do
             <span :if={!@machine.wpos} class="cnc-num">
               {fmt(axis_value(shown(@machine, @frame), i))}
             </span>
+            <%!-- Kept in the machine frame too (hidden), so the rows don't change size --%>
             <button
-              :if={frame(@machine, @frame) == :work}
               type="button"
-              class="cnc-btn cnc-btn--zero"
+              class={["cnc-btn cnc-btn--zero", frame(@machine, @frame) != :work && "is-hidden"]}
               phx-click="zero"
               phx-value-axes={String.downcase(axis)}
-              disabled={@machine.state != :idle}
+              disabled={@machine.state != :idle or frame(@machine, @frame) != :work}
+              aria-hidden={to_string(frame(@machine, @frame) != :work)}
+              tabindex={if frame(@machine, @frame) != :work, do: "-1"}
               aria-label={"Set work #{axis} to zero here"}
             >
               Zero

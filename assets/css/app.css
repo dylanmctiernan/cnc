@@ -1694,3 +1694,8 @@ body {
   font-size: max(1rem, 16px);
   text-align: right;
 }
+
+/* Hidden but still taking its space (no layout shift on frame switch) */
+.cnc-btn--zero.is-hidden {
+  visibility: hidden;
+}
