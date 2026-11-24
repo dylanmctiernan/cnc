@@ -30,13 +30,13 @@ mix test
 ```
 
 `mix phx.server` drives FluidNC running natively on this computer (the real
-firmware with `fluidnc/native.yaml`; nothing physical moves). Without the
+firmware with `fluidnc/sim.yaml`; nothing physical moves). Without the
 build it falls back to the fake sim (a simple imitation built into the app);
 `CNC_TRANSPORT=fake` forces that. Tests use the fake sim; `test/cnc/fluidnc_sim_test.exs`
 runs against native FluidNC when it's built.
 
-Native FluidNC can't home (there are no switches), so Unlock instead. Its
-config applies on each controller restart (Reset in the UI).
+The FluidNC sim has no switches, so homing is off (`$22=0`): Unlock instead. Edits to
+`fluidnc/sim.yaml` apply when the app restarts (FluidNC reads it at start).
 
 ### Against the real board (FluidNC over USB)
 

@@ -3,14 +3,14 @@ defmodule CNC.Transport.FluidNCSim do
   Link to FluidNC running natively on this computer (see `fluidnc/build.sh`):
   the real firmware as a child program, spoken to over its stdin/stdout.
 
-  Each connect starts a fresh FluidNC with the current `fluidnc/native.yaml`,
-  so a config edit applies on the next reconnect (Reset in the UI, or a
-  restart). FluidNC keeps its `$` settings (NVS) in the run directory.
+  Each connect starts a fresh FluidNC with the current `fluidnc/sim.yaml`,
+  so a config edit applies on the next reconnect (an app restart; the UI's
+  Reset is a soft reset inside FluidNC and doesn't reload it). FluidNC keeps its `$` settings (NVS) in the run directory.
 
   Options:
 
     * `:executable` — the FluidNC binary (default `.fluidnc/bin/fluidnc`)
-    * `:config` — the config.yaml to run (default `fluidnc/native.yaml`)
+    * `:config` — the config.yaml to run (default `fluidnc/sim.yaml`)
     * `:run_dir` — working directory for FluidNC's files (default
       `.fluidnc/run`); one per concurrently running instance
 
@@ -86,7 +86,7 @@ defmodule CNC.Transport.FluidNCSim do
   @impl GenServer
   def handle_continue(:start, %{opts: opts} = s) do
     exe = Keyword.get(opts, :executable, default_executable())
-    config = Keyword.get(opts, :config, Path.expand("fluidnc/native.yaml"))
+    config = Keyword.get(opts, :config, Path.expand("fluidnc/sim.yaml"))
     run_dir = Keyword.get(opts, :run_dir, Path.expand(".fluidnc/run"))
 
     with true <- File.exists?(exe) || {:error, {:not_built, exe}},

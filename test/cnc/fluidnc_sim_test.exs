@@ -1,7 +1,7 @@
 defmodule CNC.FluidNCSimTest do
   @moduledoc """
   CNC.Machine against real FluidNC firmware running natively
-  (`CNC.Transport.FluidNCSim`), with this machine's `fluidnc/native.yaml`.
+  (`CNC.Transport.FluidNCSim`), with this machine's `fluidnc/sim.yaml`.
 
   Runs when FluidNC has been built (`fluidnc/build.sh`); skipped otherwise
   (see test_helper.exs). Each test starts its own FluidNC in a temporary
@@ -18,7 +18,7 @@ defmodule CNC.FluidNCSimTest do
     transport =
       {CNC.Transport.FluidNCSim,
        executable: Path.expand(".fluidnc/bin/fluidnc"),
-       config: Path.expand("fluidnc/native.yaml"),
+       config: Path.expand("fluidnc/sim.yaml"),
        run_dir: dir}
 
     topic = "fluidnc-#{System.unique_integer([:positive])}"
@@ -28,14 +28,14 @@ defmodule CNC.FluidNCSimTest do
     %{m: m}
   end
 
-  test "connects locked as FluidNC, travel and homing from its settings", %{m: m} do
+  test "connects locked as FluidNC; travel from its settings, homing off", %{m: m} do
     assert eventually(fn -> Machine.status(m).controller_info.firmware == "FluidNC" end)
 
     assert %State{
              state: :alarm,
              travel: {{+0.0, 1250.0}, {+0.0, 1250.0}, {-100.0, +0.0}},
              travel_issues: [],
-             homing_enabled?: true,
+             homing_enabled?: false,
              controller_info: %{firmware: "FluidNC", simulated?: true}
            } = Machine.status(m)
 

@@ -2,7 +2,7 @@
 # Upload to the board as config.yaml. The 6x board will get its own file
 # with the same axes and its own pins.
 #
-# Keep the axes in step with native.yaml (dev): same travel, speeds and
+# Keep the axes in step with sim.yaml (dev): same travel, speeds and
 # homing; only pins and stepping differ.
 #
 # Ranges our app expects (CNC machine travel): X/Y 0..1250, Z -100..0.
