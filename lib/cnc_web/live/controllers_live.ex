@@ -136,9 +136,9 @@ defmodule CNCWeb.ControllersLive do
         <main class="cnc-settings">
           <p class="cnc-sub cnc-settings-intro">
             A controller is a board plus how the app reaches it. Its configuration lives on
-            the controller, so changing the link (USB to Wi-Fi, say) keeps it. Switching
-            connects the machine to it, locked until you unlock or home. Fork a sim to get
-            an independent copy to experiment with.
+            the controller, so changing the link (USB to Wi-Fi, say) keeps it. Connect one
+            to drive the machine with it (it starts locked until you unlock or home);
+            Disconnect to use none. Fork a sim to get an independent copy to experiment with.
           </p>
 
           <p :if={@overridden?} class="cnc-note cnc-note--warn">
@@ -195,7 +195,7 @@ defmodule CNCWeb.ControllersLive do
                     phx-value-id={p.id}
                     disabled={@overridden? or @machine.moving?}
                   >
-                    Use this controller
+                    Connect
                   </button>
                   <button
                     :if={p.id == @active_id}

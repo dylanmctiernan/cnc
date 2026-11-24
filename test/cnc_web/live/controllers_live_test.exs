@@ -76,7 +76,7 @@ defmodule CNCWeb.ControllersLiveTest do
     |> render_submit()
 
     second = controller_id(view, "Fake two")
-    view |> element("#controller-#{second} button", "Use this controller") |> render_click()
+    view |> element("#controller-#{second} button", "Connect") |> render_click()
     assert eventually(fn -> has_element?(view, "#controller-#{second}.is-active") end)
     assert eventually(fn -> Machine.status(m).state == :alarm end, 3000)
 
