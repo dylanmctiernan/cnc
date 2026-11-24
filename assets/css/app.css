@@ -1440,9 +1440,44 @@ body {
   .cnc-actions {
     display: flex;
   }
+  /* One row that never re-wraps: the readouts have fixed widths, long
+     text is cut with an ellipsis. A changing feed can't move the header. */
   .cnc-bar {
+    flex-wrap: nowrap;
+    align-items: center;
     gap: 0.5rem 1.25rem;
     padding: 0.5rem 0.75rem;
+  }
+  .cnc-meta {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .cnc-meta div {
+    min-width: 0;
+  }
+  .cnc-meta dd {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cnc-meta-firmware {
+    flex: 0 1 auto;
+  }
+  .cnc-meta-reports dd {
+    width: 8ch;
+  }
+  .cnc-meta-reports {
+    flex: none;
+  }
+  .cnc-bar > .cnc-state,
+  .cnc-bar > .cnc-sim,
+  .cnc-actions {
+    flex: none;
+  }
+  .cnc-actions {
+    flex-wrap: nowrap;
   }
   .cnc-state {
     min-width: 9rem;
@@ -1683,4 +1718,17 @@ body {
   font: inherit;
   font-size: max(1rem, 16px);
   text-align: right;
+}
+
+/* Narrower workstations: the header keeps state, reports and the actions */
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 80rem) {
+  .cnc-meta .cnc-meta-firmware {
+    display: none;
+  }
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 72rem) {
+  .cnc-meta div:has(> dd.is-on),
+  .cnc-meta div:has(> dd.is-off) {
+    display: none;
+  }
 }

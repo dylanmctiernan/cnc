@@ -307,17 +307,15 @@ defmodule CNCWeb.MachineLive do
                   else: "not connected"}
               </dd>
             </div>
-            <div>
+            <div class="cnc-meta-firmware">
               <dt>firmware</dt>
-              <dd>{firmware_label(@machine.controller_info)}</dd>
+              <dd title={full_firmware(@machine.controller_info)}>
+                {firmware_label(@machine.controller_info)}
+              </dd>
             </div>
-            <div>
+            <div class="cnc-meta-reports">
               <dt>reports</dt>
               <dd>{controller_label(@machine)}</dd>
-            </div>
-            <div>
-              <dt>feed</dt>
-              <dd>{if @machine.feed, do: "#{round(@machine.feed)} mm/min", else: "—"}</dd>
             </div>
           </dl>
           <div class="cnc-actions">
@@ -1397,7 +1395,18 @@ defmodule CNCWeb.MachineLive do
 
   defp firmware_label(%{firmware: nil}), do: "—"
   defp firmware_label(%{firmware: fw, version: nil}), do: fw
-  defp firmware_label(%{firmware: fw, version: v}), do: "#{fw} #{v}"
+
+  # FluidNC's version line repeats itself ("4.1 FluidNC v4.1.1 (HEAD-…)
+  # (macos-capture)"): show "FluidNC v4.1.1", the rest on hover.
+  defp firmware_label(%{firmware: fw, version: v}) do
+    case Regex.run(~r/FluidNC (v[\w.]+)/, v) do
+      [_, release] -> "FluidNC #{release}"
+      nil -> "#{fw} #{v}"
+    end
+  end
+
+  defp full_firmware(%{firmware: nil}), do: nil
+  defp full_firmware(%{firmware: fw, version: v}), do: String.trim("#{fw} #{v}")
 
   defp controller_label(%State{controller: nil}), do: "—"
 
