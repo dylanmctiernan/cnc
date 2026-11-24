@@ -357,13 +357,6 @@ defmodule CNCWeb.MachineLive do
           <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_label(@machine)}
           </div>
-          <span
-            :if={@machine.controller_info.simulated?}
-            class="cnc-sim"
-            title="Connected to a simulator, not a real machine"
-          >
-            Simulator
-          </span>
           <dl class="cnc-meta">
             <div>
               <dt>controller</dt>
@@ -374,6 +367,10 @@ defmodule CNCWeb.MachineLive do
                     else: "not connected"}
                 </.link>
               </dd>
+            </div>
+            <div class="cnc-meta-linkinfo" id="header-link">
+              <dt>link</dt>
+              <dd title={link_title(@controller, @machine)}>{link_label(@controller, @machine)}</dd>
             </div>
             <div class="cnc-meta-firmware">
               <dt>firmware</dt>
@@ -1546,6 +1543,25 @@ defmodule CNCWeb.MachineLive do
   defp controller_name(%CNC.Controllers.Controller{name: name}, _machine), do: name
   defp controller_name(nil, %State{adapter: nil}), do: "No controller"
   defp controller_name(nil, machine), do: adapter_label(machine.adapter)
+
+  # How the app reaches the controller; a sim says so (it's not a machine).
+  defp link_label(%CNC.Controllers.Controller{link: link}, _machine), do: short_link(link)
+  defp link_label(nil, %State{adapter: nil}), do: "None"
+  defp link_label(nil, %State{adapter: "FakeSim"}), do: short_link(%{type: :fake_sim})
+  defp link_label(nil, %State{adapter: "FluidNCSim"}), do: short_link(%{type: :fluidnc_sim})
+  defp link_label(nil, %State{adapter: "UART"}), do: "USB"
+  defp link_label(nil, %State{adapter: "TCP"}), do: "Wi-Fi"
+  defp link_label(nil, %State{adapter: other}), do: other
+
+  defp short_link(%{type: :fluidnc_sim}), do: "This computer (sim)"
+  defp short_link(%{type: :fake_sim}), do: "Built in (sim)"
+  defp short_link(%{type: :serial, port: port}), do: "USB " <> Path.basename(port)
+  defp short_link(%{type: :tcp, host: host}), do: "Wi-Fi " <> host
+
+  defp link_title(%CNC.Controllers.Controller{link: link}, _),
+    do: CNC.Controllers.Controller.describe_link(link)
+
+  defp link_title(nil, _), do: "Set by CNC_LINK"
 
   defp adapter_label("FakeSim"), do: "Fake sim"
   defp adapter_label("FluidNCSim"), do: "FluidNC sim"

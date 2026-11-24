@@ -221,15 +221,6 @@ button {
   border-style: dashed;
   color: var(--text-dim);
 }
-.cnc-sim {
-  align-self: center;
-  padding: 0.125rem 0.5rem;
-  border: 1px dashed var(--cyan);
-  border-radius: 3px;
-  color: var(--cyan);
-  font-size: 0.75rem;
-  font-weight: 700;
-}
 .cnc-meta {
   flex-wrap: wrap;
   align-items: center;
@@ -1462,7 +1453,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .cnc-meta-firmware {
+  .cnc-meta-firmware,
+  .cnc-meta-linkinfo {
     flex: 0 1 auto;
   }
   .cnc-meta-reports dd {
@@ -1472,7 +1464,6 @@ body {
     flex: none;
   }
   .cnc-bar > .cnc-state,
-  .cnc-bar > .cnc-sim,
   .cnc-actions {
     flex: none;
   }
@@ -1726,6 +1717,11 @@ body {
 /* Narrower workstations: the header keeps state, reports and the actions */
 @media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 80rem) {
   .cnc-meta .cnc-meta-firmware {
+    display: none;
+  }
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 76rem) {
+  .cnc-meta .cnc-meta-linkinfo {
     display: none;
   }
 }
