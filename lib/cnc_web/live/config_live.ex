@@ -15,6 +15,8 @@ defmodule CNCWeb.ConfigLive do
   alias CNC.{Boards, Controllers, Machine}
   alias CNC.Controllers.{Config, Profiles}
 
+  import CNCWeb.YamlView, only: [yaml_view: 1]
+
   @axis_fields [
     {"steps_per_mm", "Steps per mm"},
     {"max_rate_mm_per_min", "Max rate (mm/min)"},
@@ -49,6 +51,7 @@ defmodule CNCWeb.ConfigLive do
          |> assign(working: nil, field_errors: %{}, other: %{"path" => "", "value" => ""})
          |> assign(new: %{"name" => "", "from" => ""}, advanced?: false)
          |> assign(editing_current?: false, editing_profile: nil, showing_profile: nil)
+         |> assign(diffing_profile: nil)
          |> allow_upload(:config_file, accept: :any, max_entries: 1, max_file_size: 256_000)
          |> refresh_active()
          |> maybe_load()}
@@ -167,6 +170,11 @@ defmodule CNCWeb.ConfigLive do
   def handle_event("show_all", %{"profile" => pid}, socket) do
     showing = if socket.assigns.showing_profile == pid, do: nil, else: pid
     {:noreply, assign(socket, showing_profile: showing)}
+  end
+
+  def handle_event("diff_profile", %{"profile" => pid}, socket) do
+    diffing = if socket.assigns.diffing_profile == pid, do: nil, else: pid
+    {:noreply, assign(socket, diffing_profile: diffing)}
   end
 
   def handle_event("edit_profile", %{"profile" => pid}, socket),
@@ -562,9 +570,10 @@ defmodule CNCWeb.ConfigLive do
                         Rename
                       </button>
                     </div>
-                    <.all_values
+                    <.yaml_view
                       :if={@showing_profile == @check.profile.id}
-                      values={@check.profile.values}
+                      id="current-yaml"
+                      text={Profiles.render(@controller.board, @check.profile)}
                     />
                   <% end %>
                 </div>
@@ -634,6 +643,15 @@ defmodule CNCWeb.ConfigLive do
                         {if @showing_profile == p.id, do: "Hide", else: "View"}
                       </button>
                       <button
+                        :if={@check}
+                        type="button"
+                        class="cnc-btn"
+                        phx-click="diff_profile"
+                        phx-value-profile={p.id}
+                      >
+                        {if @diffing_profile == p.id, do: "Hide diff", else: "Diff with current"}
+                      </button>
+                      <button
                         type="button"
                         class="cnc-btn"
                         phx-click="edit_profile"
@@ -659,9 +677,34 @@ defmodule CNCWeb.ConfigLive do
                         Delete
                       </button>
                     </div>
+                    <div
+                      :if={(@check && @diffing_profile == p.id) and @editing_profile != p.id}
+                      id={"diff-#{p.id}"}
+                      class="cnc-diff"
+                    >
+                      <%= case Profiles.diff(@controller.board, @check.profile, p) do %>
+                        <% [] -> %>
+                          <p class="cnc-sub">Same settings as {@check.profile.name}.</p>
+                        <% diffs -> %>
+                          <p class="cnc-sub">
+                            {length(diffs)} {if length(diffs) == 1,
+                              do: "setting differs",
+                              else: "settings differ"} from {@check.profile.name} (current → {p.name}):
+                          </p>
+                          <ul class="cnc-changes">
+                            <li :for={d <- diffs}>
+                              <code>{d.path}</code>
+                              <span class="cnc-change-vals">
+                                <span class="cnc-diff-from">{shown(d.from) || "not set"}</span>
+                                → <strong class="cnc-diff-to">{shown(d.to) || "not set"}</strong>
+                              </span>
+                            </li>
+                          </ul>
+                      <% end %>
+                    </div>
                     <div :if={@showing_profile == p.id and @editing_profile != p.id}>
                       <.axes_table values={p.values} id_prefix={"view-#{p.id}"} />
-                      <.all_values values={p.values} />
+                      <.yaml_view id={"yaml-#{p.id}"} text={Profiles.render(@controller.board, p)} />
                     </div>
                   </li>
                 </ul>
@@ -754,7 +797,7 @@ defmodule CNCWeb.ConfigLive do
                     {if @viewing, do: "Hide #{@viewing}", else: "View #{active_file(assigns)}"}
                   </button>
                 </div>
-                <pre :if={@viewing} class="cnc-config-text" id="config-text">{@text}</pre>
+                <.yaml_view :if={@viewing} id="config-text" text={@text} />
 
                 <form
                   id="upload-form"
@@ -813,7 +856,7 @@ defmodule CNCWeb.ConfigLive do
                           Restore
                         </button>
                       </div>
-                      <pre :if={@showing == i} class="cnc-config-text">{v.text}</pre>
+                      <.yaml_view :if={@showing == i} id={"version-text-#{i}"} text={v.text} />
                     </li>
                   </ul>
                 </div>
@@ -881,20 +924,6 @@ defmodule CNCWeb.ConfigLive do
         </tr>
       </tbody>
     </table>
-    """
-  end
-
-  attr :values, :map, required: true
-
-  # Every setting in a profile, read-only.
-  defp all_values(assigns) do
-    ~H"""
-    <dl class="cnc-all-values">
-      <%= for {path, value} <- Enum.sort(@values) do %>
-        <dt>{path}</dt>
-        <dd>{shown(value)}</dd>
-      <% end %>
-    </dl>
     """
   end
 

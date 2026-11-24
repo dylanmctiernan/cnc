@@ -341,6 +341,24 @@ defmodule CNC.Controllers.Profiles do
     end
   end
 
+  @doc """
+  How two profiles differ, as each would be written for a board:
+  `[%{path, from, to}]` (`from` is profile `a`, `to` is `b`; `nil` where
+  one has no value).
+  """
+  @spec diff(atom, profile, profile) :: [
+          %{path: String.t(), from: String.t() | nil, to: String.t() | nil}
+        ]
+  def diff(board, a, b) do
+    from = editable(render(board, a))
+    to = editable(render(board, b))
+
+    for path <- Enum.sort(Enum.uniq(Map.keys(from) ++ Map.keys(to))),
+        {x, y} = {from[path], to[path]},
+        x == nil or y == nil or not Config.same?(x, y),
+        do: %{path: path, from: x, to: y}
+  end
+
   @doc "The file a profile makes for a board: the board's default config with the profile's values."
   @spec render(atom, profile) :: String.t()
   def render(board, profile) do

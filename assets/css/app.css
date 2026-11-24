@@ -1874,19 +1874,6 @@ body {
   color: var(--text-dim);
   font-size: 0.85em;
 }
-.cnc-config-text {
-  margin-top: 0.75rem;
-  max-height: 28rem;
-  overflow: auto;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.25);
-  color: var(--text);
-  font-size: 0.85rem;
-  line-height: 1.45;
-  white-space: pre;
-}
 
 /* Configuration: the axis table, other settings, unsaved changes */
 .cnc-axes {
@@ -2015,27 +2002,6 @@ body {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.cnc-all-values {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.15rem 1rem;
-  margin: 0.75rem 0 0;
-  padding: 0.75rem 1rem;
-  max-height: 24rem;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 0.85rem;
-}
-.cnc-all-values dt {
-  color: var(--text-dim);
-  overflow-wrap: anywhere;
-}
-.cnc-all-values dd {
-  margin: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
 #current .cnc-ctl-card > * + * {
   margin-top: 0.75rem;
 }
@@ -2047,5 +2013,54 @@ body {
 .cnc-file-input {
   color: var(--text-dim);
   font: inherit;
+}
+
+/* YAML: monospace, small, highlighted (CNCWeb.YamlView) */
+.cnc-yaml {
+  margin: 0.75rem 0 0;
+  max-height: 28rem;
+  overflow: auto;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+.cnc-yaml .y-key {
+  color: var(--text);
+}
+.cnc-yaml .y-num {
+  color: var(--cyan);
+}
+.cnc-yaml .y-bool {
+  color: var(--warn);
+}
+.cnc-yaml .y-pin {
+  color: var(--ok);
+}
+.cnc-yaml .y-str,
+.cnc-yaml .y-val {
+  color: var(--yellow);
+}
+.cnc-yaml .y-com {
+  color: var(--text-dim);
+  font-style: italic;
+  opacity: 0.75;
+}
+.cnc-diff {
+  margin-top: 0.75rem;
+}
+.cnc-diff-from {
+  color: var(--red-text);
+  text-decoration: line-through;
+  text-decoration-color: rgba(240, 138, 128, 0.5);
+}
+.cnc-diff-to {
+  color: var(--ok);
 }
 

@@ -97,6 +97,13 @@ defmodule CNC.Controllers.ProfilesTest do
     {:ok, board} = Profiles.create(db, "c1", "Board", :fake_sim, :board)
     assert board.values["axes/x/max_rate_mm_per_min"]
 
+    assert Profiles.diff(:fake_sim, default, fast) == []
+    {:ok, _} = Profiles.edit(db, "c1", fast.id, [{"axes/x/acceleration_mm_per_sec2", "800"}])
+    fast = Enum.find(Profiles.list(db, "c1"), &(&1.id == fast.id))
+
+    assert [%{path: "axes/x/acceleration_mm_per_sec2", to: "800"}] =
+             Profiles.diff(:fake_sim, default, fast)
+
     :ok = Profiles.switch(m, db, ctl, fast.id)
     assert eventually(fn -> Machine.status(m).state == :alarm end)
     assert eventually(fn -> match?({:ok, %{matches?: true}}, Profiles.check(m, db, ctl)) end)
