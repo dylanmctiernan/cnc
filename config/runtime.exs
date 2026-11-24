@@ -27,7 +27,7 @@ config :cnc, CNCWeb.Endpoint, http: [port: String.to_integer(System.get_env("POR
 # and refuses to start without a PIN: anyone who can reach the page can
 # drive the machine.
 if pin = System.get_env("CNC_PIN") do
-  if String.length(pin) < 4, do: raise("CNC_PIN must be at least 4 characters")
+  unless pin =~ ~r/\A\d{4}\z/, do: raise("CNC_PIN must be exactly 4 digits")
   config :cnc, :access_pin, pin
 end
 

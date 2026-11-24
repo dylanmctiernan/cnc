@@ -13,7 +13,7 @@ defmodule CNCWeb.PinController do
     else
       # Slow down guessing.
       Process.sleep(1000)
-      conn |> put_status(:unauthorized) |> render(:new, error: "That PIN didn't match.")
+      conn |> put_status(:unauthorized) |> render(:new, error: "Wrong PIN")
     end
   end
 end

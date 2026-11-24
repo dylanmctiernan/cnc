@@ -11,12 +11,12 @@ defmodule CNCWeb.PinTest do
 
   test "without the PIN, pages redirect to /pin", %{conn: conn} do
     assert redirected_to(get(conn, ~p"/")) == ~p"/pin"
-    assert html_response(get(conn, ~p"/pin"), 200) =~ "Enter the PIN"
+    assert html_response(get(conn, ~p"/pin"), 200) =~ ~s(id="pin-form")
   end
 
   test "a wrong PIN is refused", %{conn: conn} do
     conn = post(conn, ~p"/pin", pin: "0000")
-    assert html_response(conn, 401) =~ "didn&#39;t match"
+    assert html_response(conn, 401) =~ "Wrong PIN"
   end
 
   test "the right PIN grants this browser access", %{conn: conn} do

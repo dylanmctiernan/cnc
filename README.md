@@ -57,7 +57,7 @@ port (`test/support/pty_bridge.py`), not yet against hardware.
 ### From another device on your network
 
 ```sh
-CNC_LAN=1 CNC_PIN=<pin> mix phx.server   # then open http://<this-mac's-ip>:4000
+CNC_LAN=1 CNC_PIN=1234 mix phx.server     # 4 digits; then open http://<this-mac's-ip>:4000
 ```
 
 Dev only. `CNC_LAN=1` refuses to start without a PIN; each browser enters it

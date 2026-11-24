@@ -28,6 +28,7 @@ import JogKeys from "./hooks/jog_keys"
 import BedView from "./hooks/bed_view"
 import ConsoleScroll from "./hooks/console_scroll"
 import ConsoleInput from "./hooks/console_input"
+import {mountPinPad} from "./pin_pad"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -43,6 +44,7 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()
+mountPinPad()
 
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()

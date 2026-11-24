@@ -580,34 +580,107 @@ body {
   color: var(--red-text);
 }
 
-/* PIN page */
+/* PIN page: four readout-style cells and a keypad, centred. */
 
 .cnc-pin {
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: 1.5rem 1rem;
 }
 .cnc-pin-form {
   display: grid;
-  gap: 0.75rem;
-  width: min(100%, 20rem);
+  justify-items: center;
+  gap: 1.5rem;
 }
-.cnc-pin-form input[type="password"] {
-  padding: 0.6rem 0.75rem;
+.cnc-pin-title {
+  color: var(--steel);
+  font-weight: 600;
+  font-size: 1rem;
+}
+.cnc-pin-cells {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 3.5rem);
+  gap: 0.625rem;
+}
+/* The real input covers the cells: taps focus it natively. */
+.cnc-pin-cells input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  font-size: 16px; /* no zoom on iOS focus */
+  caret-color: transparent;
+}
+.cnc-pin-cell {
+  height: 4.25rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-bottom-width: 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, black 25%, var(--graphite));
+  pointer-events: none;
+}
+.cnc-pin-cell.is-filled::after {
+  content: "";
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: var(--alu);
+}
+.is-focused .cnc-pin-cell.is-active {
+  border-bottom-color: var(--yellow);
+}
+.is-error .cnc-pin-cell {
+  border-bottom-color: var(--red);
+}
+.cnc-pin-error {
+  margin-top: -0.75rem;
+  color: var(--red-text);
+  font-size: 0.875rem;
+}
+.cnc-pin-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 4.25rem);
+  gap: 0.5rem;
+}
+.cnc-pin-pad button {
+  height: 3.5rem;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--graphite-raised);
   color: var(--alu);
+  font-family: "Barlow Semi Condensed", "Barlow", system-ui, sans-serif;
+  font-weight: 500;
+  font-size: 1.5rem;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.cnc-pin-pad button:active {
+  background: var(--line);
+}
+.cnc-pin-back {
   font-size: 1.25rem;
-  letter-spacing: 0.2em;
+  color: var(--steel);
 }
-.cnc-pin-form input:focus-visible {
-  outline: 2px solid var(--yellow);
-  outline-offset: 2px;
+.cnc-pin-pad [data-digit="0"] {
+  grid-column: 2;
 }
-.cnc-pin-error {
-  color: var(--red-text);
+.cnc-pin-pad .cnc-pin-back {
+  grid-column: 1;
+  grid-row: 4;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .is-error .cnc-pin-cells {
+    animation: cnc-shake 0.3s ease-in-out;
+  }
+}
+@keyframes cnc-shake {
+  25% { transform: translateX(-6px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-3px); }
 }
 
 @media (max-width: 52rem) {
