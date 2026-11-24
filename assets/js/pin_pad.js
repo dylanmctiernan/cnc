@@ -33,7 +33,26 @@ export function mountPinPad() {
   // won't open the keyboard without a tap; the cells are that tap target.)
   const ready = () => input.focus({preventScroll: true})
   window.addEventListener("pageshow", ready)
+  // Safari can leave focus in its address bar after loading: take it when
+  // the window does get focus
+  window.addEventListener("focus", ready)
   ready()
+  requestAnimationFrame(ready)
+
+  // Whatever has focus, digits typed on the page go into the PIN (and
+  // Backspace takes one off): "just start typing" works everywhere.
+  document.addEventListener("keydown", (e) => {
+    if (e.target === input || e.metaKey || e.ctrlKey || e.altKey) return
+    if (/^[0-9]$/.test(e.key)) {
+      e.preventDefault()
+      ready()
+      set(input.value + e.key)
+    } else if (e.key === "Backspace") {
+      e.preventDefault()
+      ready()
+      set(input.value.slice(0, -1))
+    }
+  })
 
   render()
 }
