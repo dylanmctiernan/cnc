@@ -1,6 +1,6 @@
 defmodule CNCWeb.Instance do
   @moduledoc """
-  Which machine, program store and controllers a screen drives: the app's
+  Which machine, program store, controllers and database a screen drives: the app's
   own (`CNC.Machine`, `CNC.Program`, `CNC.Controllers`) unless the session
   names others.
 
@@ -15,7 +15,8 @@ defmodule CNCWeb.Instance do
             program: CNC.Program,
             program_topic: "program",
             controllers: CNC.Controllers,
-            controllers_topic: "controllers"
+            controllers_topic: "controllers",
+            db: CNC.DB
 
   @type t :: %__MODULE__{
           machine: GenServer.server(),
@@ -23,7 +24,8 @@ defmodule CNCWeb.Instance do
           program: GenServer.server(),
           program_topic: String.t(),
           controllers: GenServer.server(),
-          controllers_topic: String.t()
+          controllers_topic: String.t(),
+          db: GenServer.server()
         }
 
   @from_session? Application.compile_env(:cnc, :instance_from_session, false)

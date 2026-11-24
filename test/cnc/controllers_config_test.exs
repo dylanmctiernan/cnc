@@ -48,6 +48,108 @@ defmodule CNC.Controllers.ConfigTest do
     assert eventually(fn -> match?({:ok, %{active: "other.yaml"}}, Config.files(m)) end, 3000)
   end
 
+  describe "settings" do
+    setup %{tmp_dir: dir} do
+      db = :"config_db_#{System.unique_integer([:positive])}"
+      start_supervised!(Supervisor.child_spec({CubDB, data_dir: dir, name: db}, id: db))
+      %{db: db}
+    end
+
+    @tag :tmp_dir
+    test "get and set live; the read-back catches what FluidNC didn't apply", %{machine: m} do
+      assert Config.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "3000.000"}
+      assert Config.get(m, "axes/x/nope") == {:error, :unknown_setting}
+      assert {:ok, _} = Config.set(m, "axes/X/max_rate_mm_per_min", "2500")
+      assert Config.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "2500"}
+
+      assert Config.set(m, "axes/x/max_rate_mm_per_min", "fast") ==
+               {:error, {:not_applied, "Bad numeric value"}}
+
+      assert Config.set(m, "stepping/engine", "RMT") ==
+               {:error, {:not_applied, "Runtime setting of step_engine objects is not supported"}}
+
+      assert Config.set(m, "axes/x/max_rate_mm_per_min", "1\n$H") == {:error, :invalid_value}
+      assert Config.set(m, "../x", "1") == {:error, :invalid_setting}
+      # The message FluidNC prints after error:3 doesn't confuse the next answer
+      assert Config.set(m, "axes/x/nope", "1") == {:error, :unknown_setting}
+      assert Config.get(m, "axes/y/steps_per_mm") == {:ok, "80.000"}
+    end
+
+    @tag :tmp_dir
+    test "changes are remembered until saved; saving keeps the old file in history",
+         %{machine: m, db: db} do
+      {:ok, _} = Config.change(m, db, "c1", "axes/x/acceleration_mm_per_sec2", "900")
+      {:ok, _} = Config.change(m, db, "c1", "axes/y/acceleration_mm_per_sec2", "800")
+
+      assert {:ok, [%{path: "axes/x/acceleration_mm_per_sec2", from: "500.000", to: "900"}, _]} =
+               Config.changes(m, db, "c1")
+
+      # Changed back by hand: forgotten
+      {:ok, _} = Config.change(m, db, "c1", "axes/y/acceleration_mm_per_sec2", "500")
+      assert {:ok, [%{path: "axes/x/acceleration_mm_per_sec2"}]} = Config.changes(m, db, "c1")
+
+      {:ok, old} = Config.show(m, "config.yaml")
+      assert {:ok, "config.yaml"} = Config.save(m, db, "c1")
+      assert Config.changes(m, db, "c1") == {:ok, []}
+      {:ok, new} = Config.show(m, "config.yaml")
+      assert new =~ "acceleration_mm_per_sec2: 900"
+
+      assert [%{file: "config.yaml", text: ^old, why: "before saving changes"}] =
+               Config.history(db, "c1")
+    end
+
+    @tag :tmp_dir
+    test "unsaved changes come from the board, so a console change shows too", %{
+      machine: m,
+      db: db
+    } do
+      {:ok, _} = Machine.request(m, "$/axes/z/max_rate_mm_per_min=800")
+
+      assert {:ok, [%{path: "axes/z/max_rate_mm_per_min", from: "1000.000", to: "800"}]} =
+               Config.changes(m, db, "c1")
+
+      :ok = Config.undo(m, db, "c1", "axes/z/max_rate_mm_per_min")
+      assert Config.changes(m, db, "c1") == {:ok, []}
+    end
+
+    @tag :tmp_dir
+    test "a setting the file leaves out: the app's record of the change fills in", %{
+      machine: m,
+      db: db
+    } do
+      # A file without Z's max rate (FluidNC would use its default)
+      {:ok, text} = Config.show(m, "config.yaml")
+      sparse = String.replace(text, "    max_rate_mm_per_min: 1000.000\n", "")
+      {:ok, _} = Config.save_running_as(m, "sparse.yaml")
+
+      :sys.replace_state(fake_link(m), fn st ->
+        put_in(st.model.files["sparse.yaml"], sparse)
+        |> then(&%{&1 | model: %{&1.model | config_file: "sparse.yaml"}})
+      end)
+
+      {:ok, _} = Config.change(m, db, "c1", "axes/z/max_rate_mm_per_min", "700")
+
+      assert {:ok, [%{path: "axes/z/max_rate_mm_per_min", from: "1000.000", to: "700"}]} =
+               Config.changes(m, db, "c1")
+    end
+
+    @tag :tmp_dir
+    test "undo; a restart drops unsaved changes", %{machine: m, db: db} do
+      {:ok, _} = Config.change(m, db, "c1", "axes/x/max_travel_mm", "1000")
+      assert :ok = Config.undo(m, db, "c1", "axes/x/max_travel_mm")
+      assert Config.get(m, "axes/x/max_travel_mm") == {:ok, "1250.000"}
+      assert Config.changes(m, db, "c1") == {:ok, []}
+
+      {:ok, _} = Config.change(m, db, "c1", "axes/x/max_travel_mm", "1000")
+      :ok = Config.activate(m, "config.yaml")
+      assert eventually(fn -> Machine.status(m).state == :alarm end, 3000)
+      assert eventually(fn -> Config.changes(m, db, "c1") == {:ok, []} end, 3000)
+    end
+  end
+
+  # The machine's FakeSim process (to set up an unusual controller state).
+  defp fake_link(m), do: :sys.get_state(m) |> elem(1) |> Map.fetch!(:link)
+
   defp eventually(fun, timeout) do
     cond do
       fun.() -> true

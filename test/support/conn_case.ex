@@ -89,7 +89,8 @@ defmodule CNCWeb.ConnCase do
       program: program,
       program_topic: program_topic,
       controllers: controllers,
-      controllers_topic: controllers_topic
+      controllers_topic: controllers_topic,
+      db: db
     }
 
     {Plug.Test.init_test_session(conn, %{"cnc_instance" => instance}), machine, program}

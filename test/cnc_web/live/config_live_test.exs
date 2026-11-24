@@ -49,6 +49,39 @@ defmodule CNCWeb.ConfigLiveTest do
     assert eventually(fn -> has_element?(view, "#config-file-fast-yaml.is-active") end, 3000)
   end
 
+  test "change axis settings live, see them unsaved, undo one, save the rest", %{
+    conn: conn,
+    id: id
+  } do
+    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    assert has_element?(view, "#set-x-max_rate_mm_per_min[value='3000']")
+    refute has_element?(view, "#config-changes")
+
+    view
+    |> form("#axes-form",
+      set: %{"axes/x/max_rate_mm_per_min" => "2500", "axes/y/acceleration_mm_per_sec2" => "fast"}
+    )
+    |> render_submit()
+
+    assert has_element?(view, "#set-x-max_rate_mm_per_min.is-changed")
+    assert has_element?(view, "#set-y-acceleration_mm_per_sec2.is-error")
+    assert has_element?(view, "#change-axes-x-max_rate_mm_per_min")
+
+    view
+    |> form("#other-form", other: %{path: "$/axes/z/max_travel_mm", value: "90"})
+    |> render_submit()
+
+    assert has_element?(view, "#change-axes-z-max_travel_mm")
+
+    view |> element("#change-axes-z-max_travel_mm button", "Undo") |> render_click()
+    refute has_element?(view, "#change-axes-z-max_travel_mm")
+
+    view |> element("#save-changes") |> render_click()
+    refute has_element?(view, "#config-changes")
+    assert has_element?(view, "#config-history #version-0")
+    assert has_element?(view, "#set-x-max_rate_mm_per_min[value='2500']")
+  end
+
   test "a controller not in use offers to connect it", %{conn: conn, cnc: cnc, m: m} do
     {:ok, other} = Controllers.add(cnc.controllers, %{name: "Other", board: :fake_sim})
     {:ok, view, _} = live(conn, ~p"/controllers/#{other.id}/configuration")

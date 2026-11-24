@@ -23,8 +23,11 @@ defmodule CNC.Link.FakeSim.Model do
   FluidNC config files (enough to test config work without a board): a
   local filesystem of `.yaml` files, `$Config/Filename` (which one loads at
   boot; not checked, like FluidNC), `$LocalFS/List|Show|Delete`, `$CD`
-  (the running config), `$CD=<file>` (save it as a file) and `$Bye`
-  (restart: the chosen file becomes the running config).
+  (the running config), `$CD=<file>` (save it as a file), `$Bye`
+  (restart: the chosen file becomes the running config) and `$/path` /
+  `$/path=value` on the running config. Like FluidNC, a bad number or the
+  stepping engine answer `ok` without changing anything, and an unknown
+  path is `error:3` followed by a message.
 
   Travel convention: X/Y run `0..length`, Z runs `-length..0` (origin
   front-left, Z zero at the top after homing).
@@ -35,6 +38,28 @@ defmodule CNC.Link.FakeSim.Model do
   @banner "Grbl 1.1h ['$' for help]"
   @locked "[MSG:'$H'|'$X' to unlock]"
   @planner_blocks 15
+  @config """
+  board: Fake sim (built in)
+  name: Fake sim
+  stepping:
+    engine: Timed
+  axes:
+    X:
+      steps_per_mm: 80.000
+      max_rate_mm_per_min: 3000.000
+      acceleration_mm_per_sec2: 500.000
+      max_travel_mm: 1250.000
+    Y:
+      steps_per_mm: 80.000
+      max_rate_mm_per_min: 3000.000
+      acceleration_mm_per_sec2: 500.000
+      max_travel_mm: 1250.000
+    Z:
+      steps_per_mm: 400.000
+      max_rate_mm_per_min: 1000.000
+      acceleration_mm_per_sec2: 200.000
+      max_travel_mm: 100.000
+  """
 
   @type xyz :: {float, float, float}
   @type t :: %__MODULE__{
@@ -60,9 +85,9 @@ defmodule CNC.Link.FakeSim.Model do
             homing_left: 0,
             wco: {0.0, 0.0, 0.0},
             wco_in: 0,
-            files: %{"config.yaml" => "name: Fake sim\nboard: Fake sim (built in)\n"},
+            files: %{"config.yaml" => @config},
             config_file: "config.yaml",
-            running: "name: Fake sim\nboard: Fake sim (built in)\n"
+            running: @config
 
   @doc """
   Options: `:travel`, `:max_feed` (mm/min), `:homing_ms`, `:pos`, and
@@ -146,6 +171,31 @@ defmodule CNC.Link.FakeSim.Model do
   def line(m, "$Config/Filename=" <> name), do: {%{m | config_file: name}, ["ok"]}
   def line(m, "$CD"), do: {m, text_lines(m.running) ++ ["ok"]}
   def line(m, "$CD=" <> name), do: {%{m | files: Map.put(m.files, name, m.running)}, ["ok"]}
+
+  def line(m, "$/" <> rest) do
+    case String.split(rest, "=", parts: 2) do
+      [path] ->
+        case setting(m.running, path) do
+          {:ok, value} -> {m, ["$/#{path}=#{value}", "ok"]}
+          :error -> {m, ["error:3", "[MSG:ERR: Invalid $ statement]"]}
+        end
+
+      [path, value] ->
+        cond do
+          setting(m.running, path) == :error ->
+            {m, ["error:3", "[MSG:ERR: Invalid $ statement]"]}
+
+          String.downcase(path) == "stepping/engine" ->
+            {m, ["Runtime setting of step_engine objects is not supported", "ok"]}
+
+          numeric?(setting(m.running, path)) and not numeric?({:ok, value}) ->
+            {m, ["[MSG:ERR: Bad numeric value]", "ok"]}
+
+          true ->
+            {%{m | running: put_setting(m.running, path, value)}, ["ok"]}
+        end
+    end
+  end
 
   # Restart: boots the chosen file (nothing if it's missing), locked.
   def line(m, "$Bye") do
@@ -295,6 +345,54 @@ defmodule CNC.Link.FakeSim.Model do
     locked = if m.state == :alarm, do: [@locked], else: []
     {m, alarm ++ [@banner] ++ locked}
   end
+
+  # Settings in the running config's text, by path (any case): the line
+  # whose chain of parent keys matches.
+  defp setting(text, path) do
+    case find_setting(text, path) do
+      {_index, value} -> {:ok, value}
+      nil -> :error
+    end
+  end
+
+  defp put_setting(text, path, value) do
+    {index, _} = find_setting(text, path)
+    lines = String.split(text, "\n")
+    [_, indent, key] = Regex.run(~r/^(\s*)([^:]+):/, Enum.at(lines, index))
+    lines |> List.replace_at(index, "#{indent}#{key}: #{value}") |> Enum.join("\n")
+  end
+
+  defp find_setting(text, path) do
+    want = path |> String.downcase() |> String.split("/")
+
+    text
+    |> String.split("\n")
+    |> Enum.with_index()
+    |> Enum.reduce_while([], fn {line, i}, stack ->
+      case Regex.run(~r/^(\s*)([^:]+):\s?(.*)$/, line) do
+        [_, indent, key, value] ->
+          depth = String.length(indent)
+          stack = Enum.drop_while(stack, fn {d, _} -> d >= depth end)
+          keys = Enum.reverse([String.downcase(key) | for({_, k} <- stack, do: k)])
+
+          cond do
+            value != "" and keys == want -> {:halt, {i, value}}
+            value == "" -> {:cont, [{depth, String.downcase(key)} | stack]}
+            true -> {:cont, stack}
+          end
+
+        nil ->
+          {:cont, stack}
+      end
+    end)
+    |> case do
+      {_, _} = found -> found
+      _ -> nil
+    end
+  end
+
+  defp numeric?({:ok, value}), do: match?({_, ""}, Float.parse(value))
+  defp numeric?(_), do: false
 
   defp text_lines(text), do: String.split(String.trim_trailing(text, "\n"), "\n")
 

@@ -1,9 +1,11 @@
 defmodule CNCWeb.ConfigLive do
   @moduledoc """
-  One controller's configuration (`/controllers/:id/configuration`): the
-  config files on it, which one it loads, reading one, saving what's running
-  as a new file, switching (the controller restarts) and deleting. Needs that
-  controller connected; otherwise it offers to connect it.
+  One controller's configuration (`/controllers/:id/configuration`):
+  changing settings live (per axis, or any setting by path), the changes not
+  saved yet (undo, or save them into the file it loads), the config files on
+  it (view, save what's running as a new file, switch, which restarts it,
+  delete) and earlier versions. Needs that controller connected; otherwise
+  it offers to connect it.
   """
   use CNCWeb, :live_view
 
@@ -11,6 +13,13 @@ defmodule CNCWeb.ConfigLive do
 
   alias CNC.{Controllers, Machine}
   alias CNC.Controllers.Config
+
+  @axis_fields [
+    {"steps_per_mm", "Steps per mm"},
+    {"max_rate_mm_per_min", "Max rate (mm/min)"},
+    {"acceleration_mm_per_sec2", "Acceleration (mm/s²)"},
+    {"max_travel_mm", "Max travel (mm)"}
+  ]
 
   @impl true
   def mount(%{"id" => id}, session, socket) do
@@ -35,6 +44,8 @@ defmodule CNCWeb.ConfigLive do
          |> assign(controller: controller, machine: Machine.status(cnc.machine))
          |> assign(files: nil, active_file: nil, viewing: nil, text: nil, error: nil)
          |> assign(save_name: "", working: nil)
+         |> assign(settings: %{}, paths: [], changes: [], history: [], showing: nil)
+         |> assign(other: %{"path" => "", "value" => ""}, field_errors: %{})
          |> refresh_active()
          |> maybe_load()}
     end
@@ -99,8 +110,75 @@ defmodule CNCWeb.ConfigLive do
     end
   end
 
+  # The axis table: every value that differs from what's running is set.
+  def handle_event("apply_axes", %{"set" => values}, socket) do
+    %{settings: settings} = socket.assigns
+
+    errors =
+      for {path, value} <- values,
+          String.trim(value) != "",
+          not same_value?(settings[path], value),
+          {:error, reason} <- [change(socket, path, value)],
+          into: %{},
+          do: {path, error_text(reason)}
+
+    {:noreply, socket |> assign(field_errors: errors, error: nil) |> maybe_load()}
+  end
+
+  def handle_event("other_change", %{"other" => other}, socket),
+    do: {:noreply, assign(socket, other: other)}
+
+  def handle_event(
+        "apply_other",
+        %{"other" => %{"path" => path, "value" => value} = other},
+        socket
+      ) do
+    path = path |> String.trim() |> String.trim_leading("$/") |> String.trim("/")
+
+    case change(socket, path, value) do
+      {:ok, _} ->
+        {:noreply,
+         socket |> assign(other: %{"path" => "", "value" => ""}, error: nil) |> maybe_load()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, other: other, error: error_text(reason))}
+    end
+  end
+
+  def handle_event("undo", %{"path" => path}, socket) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Config.undo(cnc.machine, cnc.db, c.id, path) do
+      :ok -> {:noreply, socket |> assign(error: nil) |> maybe_load()}
+      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason)) |> maybe_load()}
+    end
+  end
+
+  def handle_event("save_changes", _, socket) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Config.save(cnc.machine, cnc.db, c.id) do
+      {:ok, file} ->
+        {:noreply,
+         socket
+         |> assign(error: nil)
+         |> put_flash(:info, "Saved into #{file}. The previous version is in the history.")
+         |> maybe_load()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  def handle_event("show_version", %{"i" => i}, socket) do
+    i = String.to_integer(i)
+    {:noreply, assign(socket, showing: if(socket.assigns.showing == i, do: nil, else: i))}
+  end
+
   def handle_event("delete", %{"name" => name}, socket) do
-    case Config.delete(machine(socket), name) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Config.delete(machine(socket), name, {cnc.db, c.id}) do
       :ok ->
         socket = if socket.assigns.viewing == name, do: assign(socket, viewing: nil), else: socket
         {:noreply, socket |> assign(error: nil) |> maybe_load()}
@@ -127,9 +205,10 @@ defmodule CNCWeb.ConfigLive do
 
         <main class="cnc-settings">
           <p class="cnc-sub cnc-settings-intro">
-            The configuration lives on the controller as files. It loads one when it starts;
-            keep variations side by side and switch between them (the controller restarts
-            and comes back locked).
+            The configuration lives on the controller as files, and it loads one when it
+            starts. Change settings here to try them on the machine right away; save them
+            into the file to keep them, or restart to drop them. Keep variations as separate
+            files and switch between them (the controller restarts and comes back locked).
           </p>
 
           <p :if={@error} id="config-error" class="cnc-set-error">{@error}</p>
@@ -160,6 +239,127 @@ defmodule CNCWeb.ConfigLive do
                 {waiting_text(@machine.state)}
               </p>
             <% true -> %>
+              <section class="cnc-set-group" aria-label="Settings">
+                <h2 class="cnc-h">Settings</h2>
+                <form
+                  :if={axes(@settings) != []}
+                  id="axes-form"
+                  class="cnc-axes-form"
+                  phx-submit="apply_axes"
+                >
+                  <table class="cnc-axes">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th :for={a <- axes(@settings)} scope="col">{String.upcase(a)}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr :for={{field, label} <- axis_fields()}>
+                        <th scope="row">{label}</th>
+                        <td :for={a <- axes(@settings)}>
+                          <input
+                            name={"set[axes/#{a}/#{field}]"}
+                            id={"set-#{a}-#{field}"}
+                            value={shown(@settings["axes/#{a}/#{field}"])}
+                            inputmode="decimal"
+                            autocomplete="off"
+                            aria-label={"#{String.upcase(a)} #{label}"}
+                            class={[
+                              unsaved?(@changes, "axes/#{a}/#{field}") && "is-changed",
+                              @field_errors["axes/#{a}/#{field}"] && "is-error"
+                            ]}
+                            title={@field_errors["axes/#{a}/#{field}"]}
+                          />
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p :for={{path, msg} <- @field_errors} class="cnc-set-error">{path}: {msg}</p>
+                  <div class="cnc-row">
+                    <button type="submit" class="cnc-btn cnc-btn--primary" id="apply-axes">
+                      Apply
+                    </button>
+                  </div>
+                </form>
+
+                <form
+                  id="other-form"
+                  class="cnc-ctl-form"
+                  phx-change="other_change"
+                  phx-submit="apply_other"
+                >
+                  <h3 class="cnc-sub">Any other setting</h3>
+                  <div class="cnc-other-row">
+                    <label class="cnc-ctl-field">
+                      <span>Setting</span>
+                      <input
+                        name="other[path]"
+                        value={@other["path"]}
+                        list="setting-paths"
+                        placeholder="axes/x/homing/seek_mm_per_min"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <label class="cnc-ctl-field">
+                      <span>
+                        Value<span :if={@settings[clean_path(@other["path"])]} class="cnc-now">
+                          (now {@settings[clean_path(@other["path"])]})
+                        </span>
+                      </span>
+                      <input name="other[value]" value={@other["value"]} autocomplete="off" />
+                    </label>
+                  </div>
+                  <datalist id="setting-paths">
+                    <option :for={p <- @paths} value={p} />
+                  </datalist>
+                  <div class="cnc-row">
+                    <button type="submit" class="cnc-btn">Apply</button>
+                  </div>
+                </form>
+              </section>
+
+              <section
+                :if={@changes != []}
+                class="cnc-set-group"
+                aria-label="Changes not saved"
+                id="config-changes"
+              >
+                <h2 class="cnc-h">Not saved yet</h2>
+                <p class="cnc-sub">
+                  The controller is using these now. Save them into {@active_file} to keep
+                  them; restarting the controller drops them.
+                </p>
+                <ul class="cnc-changes">
+                  <li :for={c <- @changes} id={"change-#{dom_id(c.path)}"}>
+                    <code>{c.path}</code>
+                    <span class="cnc-change-vals">
+                      {shown(c.from)} → <strong>{shown(c.to)}</strong>
+                    </span>
+                    <button
+                      type="button"
+                      class="cnc-btn cnc-btn--quiet"
+                      phx-click="undo"
+                      phx-value-path={c.path}
+                    >
+                      Undo
+                    </button>
+                  </li>
+                </ul>
+                <div class="cnc-row">
+                  <button
+                    type="button"
+                    id="save-changes"
+                    class="cnc-btn cnc-btn--primary"
+                    phx-click="save_changes"
+                    data-confirm={"Save into #{@active_file}? Its current version goes into the history."}
+                  >
+                    Save into {@active_file}
+                  </button>
+                </div>
+              </section>
+
               <section class="cnc-set-group" aria-label="Config files">
                 <h2 class="cnc-h">Config files</h2>
                 <p :if={@files == []} class="cnc-note">No config files found on the controller.</p>
@@ -236,6 +436,30 @@ defmodule CNCWeb.ConfigLive do
                   </div>
                 </form>
               </section>
+
+              <section :if={@history != []} class="cnc-set-group" aria-label="Earlier versions">
+                <h2 class="cnc-h">Earlier versions</h2>
+                <ul class="cnc-ctls" id="config-history">
+                  <li
+                    :for={{v, i} <- Enum.with_index(@history)}
+                    id={"version-#{i}"}
+                    class="cnc-ctl-card"
+                  >
+                    <div class="cnc-ctl-card-head">
+                      <h3 class="cnc-ctl-name">{v.file}</h3>
+                      <span class="cnc-ctl-size">
+                        {Calendar.strftime(v.at, "%Y-%m-%d %H:%M")} UTC, {v.why}
+                      </span>
+                    </div>
+                    <div class="cnc-row">
+                      <button type="button" class="cnc-btn" phx-click="show_version" phx-value-i={i}>
+                        {if @showing == i, do: "Hide", else: "View"}
+                      </button>
+                    </div>
+                    <pre :if={@showing == i} class="cnc-config-text">{v.text}</pre>
+                  </li>
+                </ul>
+              </section>
           <% end %>
         </main>
       </div>
@@ -256,16 +480,74 @@ defmodule CNCWeb.ConfigLive do
   end
 
   defp maybe_load(socket) do
-    if connected?(socket) and ready?(socket.assigns) do
-      case Config.files(machine(socket)) do
-        {:ok, %{files: files, active: active}} ->
-          assign(socket, files: files, active_file: active)
+    %{cnc: cnc, controller: c} = socket.assigns
 
-        {:error, reason} ->
-          assign(socket, error: error_text(reason))
+    if connected?(socket) and ready?(socket.assigns) do
+      with {:ok, %{files: files, active: active}} <- Config.files(cnc.machine),
+           {:ok, running} <- Config.running(cnc.machine) do
+        settings = Config.parse(running)
+
+        assign(socket,
+          files: files,
+          active_file: active,
+          settings: Map.new(settings),
+          paths: Enum.map(settings, &elem(&1, 0)),
+          changes: unsaved(cnc, c),
+          history: Config.history(cnc.db, c.id)
+        )
+      else
+        {:error, reason} -> assign(socket, error: error_text(reason))
       end
     else
-      socket
+      assign(socket, history: Config.history(cnc.db, c.id))
+    end
+  end
+
+  defp unsaved(cnc, c) do
+    case Config.changes(cnc.machine, cnc.db, c.id) do
+      {:ok, list} -> list
+      {:error, _} -> []
+    end
+  end
+
+  defp change(socket, path, value) do
+    %{cnc: cnc, controller: c} = socket.assigns
+    Config.change(cnc.machine, cnc.db, c.id, path, value)
+  end
+
+  defp axis_fields, do: @axis_fields
+
+  # Axes that have the usual settings, in the config's order.
+  defp axes(settings) do
+    for a <- ~w(x y z a b c), Map.has_key?(settings, "axes/#{a}/steps_per_mm"), do: a
+  end
+
+  defp unsaved?(changes, path), do: Enum.any?(changes, &(&1.path == path))
+
+  defp clean_path(path),
+    do: (path || "") |> String.trim() |> String.trim_leading("$/") |> String.downcase()
+
+  # 2500.000000 → 2500, 0.500 → 0.5; text stays as it is.
+  defp shown(nil), do: nil
+
+  defp shown(value) do
+    case Float.parse(value) do
+      {_, ""} ->
+        if String.contains?(value, "."),
+          do: value |> String.trim_trailing("0") |> String.trim_trailing("."),
+          else: value
+
+      _ ->
+        value
+    end
+  end
+
+  defp same_value?(nil, _), do: false
+
+  defp same_value?(a, b) do
+    case {Float.parse(a), Float.parse(String.trim(b))} do
+      {{x, ""}, {y, ""}} -> x == y
+      _ -> String.trim(a) == String.trim(b)
     end
   end
 
@@ -280,6 +562,17 @@ defmodule CNCWeb.ConfigLive do
 
   defp error_text(:invalid_name),
     do: "Use letters, digits, - and _ for the file name (it ends in .yaml)."
+
+  defp error_text(:unknown_setting), do: "The controller has no such setting."
+
+  defp error_text(:invalid_setting),
+    do: "A setting is a path like axes/x/max_rate_mm_per_min."
+
+  defp error_text(:invalid_value), do: "Enter a value (no = or line breaks)."
+  defp error_text(:no_active_file), do: "The controller doesn't say which file it loaded."
+
+  defp error_text({:not_applied, why}),
+    do: "The controller didn't apply it (#{why}). Some settings only change in the file."
 
   defp error_text(:exists), do: "There's already a file with that name."
   defp error_text(:active), do: "That's the file the controller loads: switch to another first."

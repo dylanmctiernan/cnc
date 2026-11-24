@@ -1887,3 +1887,87 @@ body {
   line-height: 1.45;
   white-space: pre;
 }
+
+/* Configuration: the axis table, other settings, unsaved changes */
+.cnc-axes {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 40rem;
+}
+.cnc-axes th {
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  color: var(--text-dim);
+  font-weight: 400;
+  text-align: left;
+  font-size: 0.875rem;
+}
+.cnc-axes thead th {
+  color: var(--text);
+  font-weight: 700;
+}
+.cnc-axes td {
+  padding: 0.2rem 0.25rem;
+}
+.cnc-axes input {
+  width: 100%;
+  min-width: 4.5rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 120ms ease;
+}
+.cnc-axes input:focus {
+  outline: none;
+  border-color: var(--text-dim);
+}
+.cnc-axes input.is-changed {
+  border-color: var(--warn);
+}
+.cnc-axes input.is-error {
+  border-color: var(--red);
+}
+.cnc-axes-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.cnc-other-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0.75rem;
+}
+@media (max-width: 40rem) {
+  .cnc-other-row {
+    grid-template-columns: 1fr;
+  }
+}
+.cnc-now {
+  margin-left: 0.5em;
+  color: var(--text-dim);
+}
+.cnc-changes {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.5rem 0 0.75rem;
+}
+.cnc-changes li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.cnc-changes code {
+  flex: 1 1 16rem;
+  overflow-wrap: anywhere;
+}
+.cnc-change-vals {
+  font-variant-numeric: tabular-nums;
+}
+

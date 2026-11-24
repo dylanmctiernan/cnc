@@ -204,6 +204,8 @@ defmodule CNC.Controllers do
         if ctl.link.type == :fluidnc_sim,
           do: File.rm_rf(Path.join([s.data_dir, "controllers", id]))
 
+        CNC.Controllers.Config.forget(s.db, id)
+
         {:reply, :ok, save(%{s | controllers: Enum.reject(s.controllers, &(&1.id == id))})}
     end
   end
