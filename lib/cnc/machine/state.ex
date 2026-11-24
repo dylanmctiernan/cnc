@@ -21,6 +21,8 @@ defmodule CNC.Machine.State do
     * `jog` — current held-key vector, `{0, 0}` when not jogging
     * `travel` — `{{x0, x1}, {y0, y1}, {z0, z1}}` in mm, the limits the host
       clamps jogs to (the controller's soft limits remain authoritative)
+    * `travel_source` — `:controller` once read from `$130`–`$132` after
+      connecting, otherwise `:config` (the fallback)
   """
 
   @type t :: %__MODULE__{}
@@ -40,5 +42,6 @@ defmodule CNC.Machine.State do
             last_error: nil,
             tier: :normal,
             jog: {0, 0},
-            travel: nil
+            travel: nil,
+            travel_source: :config
 end

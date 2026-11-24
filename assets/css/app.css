@@ -401,6 +401,11 @@ body {
 .cnc-facts dd {
   font-variant-numeric: tabular-nums;
 }
+.cnc-sub-inline {
+  display: block;
+  color: var(--steel);
+  font-size: 0.8125rem;
+}
 
 .cnc-console {
   grid-column: 1;

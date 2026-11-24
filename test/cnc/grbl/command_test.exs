@@ -9,6 +9,7 @@ defmodule CNC.Grbl.CommandTest do
   test "simple commands" do
     assert Command.unlock() == "$X"
     assert Command.home() == "$H"
+    assert Command.settings() == "$$"
   end
 
   test "real-time bytes" do

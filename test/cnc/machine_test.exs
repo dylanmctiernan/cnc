@@ -16,7 +16,7 @@ defmodule CNC.MachineTest do
     end
 
     test "first status locks in :alarm, even if the controller is idle", %{m: m} do
-      report(m, "Idle", {0, 0})
+      connect(m, "Idle", {0, 0})
 
       assert %State{state: :alarm, alarm: :connect, connected?: true, controller: :idle} =
                Machine.status(m)
@@ -24,8 +24,24 @@ defmodule CNC.MachineTest do
       assert Machine.jog(m, {1, 0}, :normal) == {:error, {:invalid_state, :alarm}}
     end
 
+    test "reads travel from the controller's $130-$132", %{m: m} do
+      assert Machine.status(m).travel_source == :config
+      connect(m, "Alarm", {0, 0}, ["$0=10", "$130=500.000", "$131=300.000", "$132=80.000"])
+
+      assert %State{
+               travel: {{+0.0, 500.0}, {+0.0, 300.0}, {-80.0, +0.0}},
+               travel_source: :controller
+             } =
+               Machine.status(m)
+    end
+
+    test "keeps configured travel if the controller's is incomplete", %{m: m} do
+      connect(m, "Alarm", {0, 0}, ["$130=500.000", "$131=0"])
+      assert %State{travel_source: :config, travel: {{+0.0, 1250.0}, _, _}} = Machine.status(m)
+    end
+
     test "unlock waits for the ack", %{m: m} do
-      report(m, "Alarm", {0, 0})
+      connect(m, "Alarm", {0, 0})
       assert :ok = Machine.unlock(m)
       assert_receive {:line, "$X"}
       assert Machine.status(m).state == :alarm
@@ -133,7 +149,7 @@ defmodule CNC.MachineTest do
       idle(m)
       send(m, {:transport, :line, "Grbl 1.1h ['$' for help]"})
       assert Machine.status(m).state == :connecting
-      report(m, "Idle", {0, 0})
+      connect(m, "Idle", {0, 0})
       assert %State{state: :alarm, alarm: :reset} = Machine.status(m)
     end
 
@@ -147,7 +163,7 @@ defmodule CNC.MachineTest do
     end
 
     test "homing goes :homing until acked", %{m: m} do
-      report(m, "Alarm", {0, 0})
+      connect(m, "Alarm", {0, 0})
       :ok = Machine.home(m)
       assert_receive {:line, "$H"}
       report(m, "Home", {0, 0})
@@ -161,7 +177,7 @@ defmodule CNC.MachineTest do
       Process.exit(fake, :kill)
       assert_receive {:fake_transport, _new, ^m}, 500
       assert Machine.status(m).state == :connecting
-      report(m, "Idle", {5, 5})
+      connect(m, "Idle", {5, 5})
       assert %State{state: :alarm, alarm: :connect, mpos: {5.0, 5.0, +0.0}} = Machine.status(m)
     end
 
@@ -200,7 +216,7 @@ defmodule CNC.MachineTest do
     end
 
     test "status polls stream on their own topic and stay out of history", %{m: m, topic: topic} do
-      report(m, "Idle", {0, 0})
+      connect(m, "Idle", {0, 0})
       refute_receive {:machine_console, %{kind: :poll}}, 250
 
       Machine.subscribe_polls(topic)
@@ -263,6 +279,13 @@ defmodule CNC.MachineTest do
       assert Machine.jog_step(m, {1, 0}, 10) == {:error, :at_limit}
     end
 
+    test "travel comes from the Sim's settings" do
+      sim_travel = {{0.0, 400.0}, {0.0, 300.0}, {-50.0, 0.0}}
+      m = start_machine({CNC.Transport.Sim, travel: sim_travel}, "sim-travel")
+      assert eventually(fn -> Machine.status(m).travel_source == :controller end)
+      assert Machine.status(m).travel == sim_travel
+    end
+
     test "disconnect and reconnect lands in :alarm", %{m: m} do
       :ok = Machine.unlock(m)
       assert eventually(fn -> Machine.status(m).state == :idle end)
@@ -285,8 +308,17 @@ defmodule CNC.MachineTest do
 
   defp ok(m), do: send(m, {:transport, :line, "ok"})
 
+  # First status after (re)connect: Machine then asks for settings ($$).
+  # Play the controller: send the given setting lines, then ok.
+  defp connect(m, state, pos, settings \\ []) do
+    report(m, state, pos)
+    assert_receive {:line, "$$"}
+    for line <- settings, do: send(m, {:transport, :line, line})
+    ok(m)
+  end
+
   defp idle(m) do
-    report(m, "Idle", {0, 0})
+    connect(m, "Idle", {0, 0})
     :ok = Machine.unlock(m)
     assert_receive {:line, "$X"}
     ok(m)

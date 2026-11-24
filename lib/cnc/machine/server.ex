@@ -37,6 +37,7 @@ defmodule CNC.Machine.Server do
     :adapter,
     :adapter_opts,
     :travel,
+    :config_travel,
     :transport,
     :pubsub,
     :topic,
@@ -52,6 +53,8 @@ defmodule CNC.Machine.Server do
     in_flight: 0,
     pending: :queue.new(),
     console: Console.new(),
+    settings: %{},
+    travel_source: :config,
     backoff: 0
   ]
 
@@ -72,6 +75,9 @@ defmodule CNC.Machine.Server do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
+    travel =
+      Keyword.get_lazy(opts, :travel, fn -> Application.fetch_env!(:cnc, :machine)[:travel] end)
+
     {adapter, adapter_opts} =
       Keyword.get_lazy(opts, :transport, fn ->
         config = Application.fetch_env!(:cnc, :transport)
@@ -82,8 +88,8 @@ defmodule CNC.Machine.Server do
      %__MODULE__{
        adapter: adapter,
        adapter_opts: adapter_opts,
-       travel:
-         Keyword.get_lazy(opts, :travel, fn -> Application.fetch_env!(:cnc, :machine)[:travel] end),
+       travel: travel,
+       config_travel: travel,
        pubsub: Keyword.get(opts, :pubsub, CNC.PubSub),
        topic: Keyword.get(opts, :topic, "machine")
      }}
@@ -114,6 +120,9 @@ defmodule CNC.Machine.Server do
         alarm: nil,
         pending: :queue.new(),
         in_flight: 0,
+        settings: %{},
+        travel: d.config_travel,
+        travel_source: :config,
         backoff: next_backoff(delay)
     }
 
@@ -243,6 +252,9 @@ defmodule CNC.Machine.Server do
   defp response({:alarm, code}, _s, d),
     do: {:alarm, %{flush_pending(d) | alarm: {:alarm, code}}, []}
 
+  defp response({:setting, n, value}, s, d),
+    do: {s, %{d | settings: Map.put(d.settings, n, value)}, []}
+
   defp response({:banner, _}, s, d) when s in [:disconnected, :connecting], do: {s, d, []}
 
   defp response({:banner, banner}, _s, d) do
@@ -261,6 +273,7 @@ defmodule CNC.Machine.Server do
   # lock until Unlock/Home. A jog left running by a previous session is stopped.
   defp on_status(:connecting, reported, d) do
     d = if reported == :jog, do: realtime(d, Realtime.jog_cancel()), else: d
+    d = send_line(%{d | settings: %{}}, Command.settings(), :settings)
     {:alarm, %{d | alarm: d.alarm || :connect, backoff: 0}, []}
   end
 
@@ -290,6 +303,13 @@ defmodule CNC.Machine.Server do
     end
   end
 
+  defp on_ack(:settings, :ok, s, d), do: {s, apply_settings(d), []}
+
+  defp on_ack(:settings, {:error, _} = err, s, d) do
+    Logger.warning("controller rejected $$ (#{inspect(err)}); using configured travel")
+    {s, d, []}
+  end
+
   defp on_ack(:unlock, :ok, :alarm, d), do: {:idle, %{d | alarm: nil, last_error: nil}, []}
   defp on_ack(:home, :ok, :homing, d), do: {:idle, %{d | alarm: nil, last_error: nil}, []}
   defp on_ack(:home, {:error, _} = err, :homing, d), do: {:alarm, %{d | last_error: err}, []}
@@ -299,6 +319,33 @@ defmodule CNC.Machine.Server do
   defp on_ack(:jog, {:error, _} = err, :jogging, d), do: {:idle, %{d | last_error: err}, []}
   defp on_ack(_tag, {:error, _} = err, s, d), do: {s, %{d | last_error: err}, []}
   defp on_ack(_tag, :ok, s, d), do: {s, d, []}
+
+  ## Settings
+
+  # Max travel $130-$132 are lengths. Mapped to ranges by convention: X/Y run
+  # 0..length, Z runs -length..0 (origin front-left, Z zero at the top).
+  # Anything missing or non-positive keeps the configured travel.
+  defp apply_settings(d) do
+    lengths = for n <- 130..132, do: length_mm(d.settings[n])
+
+    case lengths do
+      [x, y, z] when is_float(x) and is_float(y) and is_float(z) ->
+        %{d | travel: {{0.0, x}, {0.0, y}, {-z, 0.0}}, travel_source: :controller}
+
+      _ ->
+        Logger.warning("controller travel incomplete: #{inspect(d.settings)}")
+        d
+    end
+  end
+
+  defp length_mm(value) when is_binary(value) do
+    case Float.parse(value) do
+      {mm, _} when mm > 0 -> mm
+      _ -> nil
+    end
+  end
+
+  defp length_mm(_), do: nil
 
   ## Jogging
 
@@ -379,7 +426,8 @@ defmodule CNC.Machine.Server do
       last_error: d.last_error,
       tier: d.tier,
       jog: d.vector,
-      travel: d.travel
+      travel: d.travel,
+      travel_source: d.travel_source
     }
   end
 

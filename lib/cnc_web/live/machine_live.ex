@@ -30,8 +30,14 @@ defmodule CNCWeb.MachineLive do
   end
 
   @impl true
-  def handle_info({:machine, %State{} = machine}, socket),
-    do: {:noreply, socket |> assign(machine: machine) |> push_pos(machine)}
+  def handle_info({:machine, %State{} = machine}, socket) do
+    socket =
+      if machine.travel != socket.assigns.machine.travel,
+        do: push_event(socket, "travel", %{travel: travel_list(machine.travel)}),
+        else: socket
+
+    {:noreply, socket |> assign(machine: machine) |> push_pos(machine)}
+  end
 
   def handle_info({:machine_console, entry}, socket),
     do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
@@ -256,7 +262,14 @@ defmodule CNCWeb.MachineLive do
               <dt>Work offset</dt>
               <dd>{xyz_label(@machine.wco)}</dd>
               <dt>Travel</dt>
-              <dd>{travel_label(@machine.travel)}</dd>
+              <dd>
+                {travel_label(@machine.travel)}
+                <span class="cnc-sub-inline">
+                  {if @machine.travel_source == :controller,
+                    do: "from the controller",
+                    else: "from config"}
+                </span>
+              </dd>
               <dt :if={@machine.alarm}>Locked because</dt>
               <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
             </dl>
@@ -366,8 +379,10 @@ defmodule CNCWeb.MachineLive do
   defp fmt(nil), do: "—"
   defp fmt(mm), do: :erlang.float_to_binary(mm / 1, decimals: 3)
 
-  defp travel_json({{x0, x1}, {y0, y1}, _z}), do: Jason.encode!([[x0, x1], [y0, y1]])
-  defp travel_json(_), do: Jason.encode!([[0, 1250], [0, 1250]])
+  defp travel_json(travel), do: Jason.encode!(travel_list(travel))
+
+  defp travel_list({{x0, x1}, {y0, y1}, _z}), do: [[x0, x1], [y0, y1]]
+  defp travel_list(_), do: [[0, 1250], [0, 1250]]
 
   defp adapter_label("Sim"), do: "Simulator"
   defp adapter_label(nil), do: ""

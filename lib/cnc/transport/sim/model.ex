@@ -14,6 +14,10 @@ defmodule CNC.Transport.Sim.Model do
     * feed hold (`!`) during a jog cancels it, like jog cancel (`0x85`)
     * `$H` acks `ok` only when the cycle completes
     * soft reset while moving → `ALARM:3` (jog) / `ALARM:6` (homing)
+    * `$$` lists max travel `$130`–`$132`; `$13x=<mm>` sets it (Idle/Alarm only)
+
+  Travel convention: X/Y run `0..length`, Z runs `-length..0` (origin
+  front-left, Z zero at the top after homing).
   """
 
   alias CNC.Grbl.{Realtime, Status}
@@ -64,6 +68,18 @@ defmodule CNC.Transport.Sim.Model do
     do: {%{m | state: :home, homing_left: m.homing_ms}, []}
 
   def line(m, "$" <> cmd) when cmd in ["X", "H"], do: {m, ["error:8"]}
+
+  def line(%{state: s} = m, "$$") when s in [:alarm, :idle], do: {m, settings(m) ++ ["ok"]}
+  def line(m, "$$"), do: {m, ["error:8"]}
+
+  def line(%{state: s} = m, "$13" <> <<axis, "=", value::binary>>)
+      when s in [:alarm, :idle] and axis in ?0..?2 do
+    case Float.parse(value) do
+      {mm, ""} when mm > 0 -> {%{m | travel: put_travel(m.travel, axis - ?0, mm)}, ["ok"]}
+      {_, ""} -> {m, ["error:4"]}
+      _ -> {m, ["error:2"]}
+    end
+  end
 
   def line(%{state: s} = m, "$J=" <> words) when s in [:idle, :jog] do
     with {:ok, delta, feed} <- parse_jog(words),
@@ -128,6 +144,14 @@ defmodule CNC.Transport.Sim.Model do
   end
 
   ## Helpers
+
+  defp settings(%{travel: {{x0, x1}, {y0, y1}, {z0, z1}}}) do
+    for {n, len} <- [{130, x1 - x0}, {131, y1 - y0}, {132, z1 - z0}],
+        do: "$#{n}=#{:erlang.float_to_binary(len / 1, decimals: 3)}"
+  end
+
+  defp put_travel(travel, 2, mm), do: put_elem(travel, 2, {-mm, 0.0})
+  defp put_travel(travel, axis, mm), do: put_elem(travel, axis, {0.0, mm})
 
   defp status_line(m) do
     planner_free = max(@planner_blocks - :queue.len(m.queue), 0)

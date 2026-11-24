@@ -150,6 +150,30 @@ defmodule CNC.Transport.Sim.ModelTest do
     assert {m.state, :queue.len(m.queue)} == {:alarm, 0}
   end
 
+  describe "settings" do
+    test "$$ lists travel lengths" do
+      assert {_, ["$130=1250.000", "$131=1250.000", "$132=100.000", "ok"]} =
+               Model.new() |> line("$$")
+    end
+
+    test "$13x= sets travel, and soft limits follow" do
+      {m, ["ok"]} = idle() |> line("$130=20")
+      {m, ["ok"]} = line(m, "$132=50.5")
+      assert m.travel == {{0.0, 20.0}, {0.0, 1250.0}, {-50.5, 0.0}}
+      assert {_, ["error:15"]} = jog(m, {21, 0, 0})
+      assert {_, ["ok"]} = jog(m, {19, 0, 0})
+    end
+
+    test "rejects bad values and busy states" do
+      m = idle()
+      assert {_, ["error:4"]} = line(m, "$130=-5")
+      assert {_, ["error:2"]} = line(m, "$130=abc")
+      {m, ["ok"]} = jog(m, {1, 0, 0})
+      assert {_, ["error:8"]} = line(m, "$$")
+      assert {_, ["error:20"]} = line(m, "$130=5")
+    end
+  end
+
   test "malformed or unsupported lines" do
     m = idle()
     assert {_, ["error:20"]} = line(m, "G0 X10")

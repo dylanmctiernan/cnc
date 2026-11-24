@@ -12,6 +12,7 @@ defmodule CNC.Grbl.Response do
           | {:status, Status.t()}
           | {:msg, binary}
           | {:banner, binary}
+          | {:setting, non_neg_integer, binary}
           | {:unknown, binary}
 
   @doc """
@@ -29,6 +30,7 @@ defmodule CNC.Grbl.Response do
   defp classify("ALARM:" <> code), do: code_of(code, :alarm)
   defp classify("[MSG:" <> rest), do: bracketed(rest, &{:msg, &1})
   defp classify("Grbl" <> _ = line), do: {:banner, line}
+  defp classify("$" <> setting), do: setting(setting)
 
   defp classify("<" <> rest) do
     with {:ok, body} <- strip_suffix(rest, ">"),
@@ -40,6 +42,17 @@ defmodule CNC.Grbl.Response do
   end
 
   defp classify(_), do: nil
+
+  # "$130=1250.000" -> {:setting, 130, "1250.000"}. Values stay strings: some
+  # settings are masks or text, so callers convert what they use.
+  defp setting(s) do
+    with [n, value] <- String.split(s, "=", parts: 2),
+         {n, ""} when n >= 0 <- Integer.parse(n) do
+      {:setting, n, value}
+    else
+      _ -> nil
+    end
+  end
 
   # Some firmwares append a description after the code ("error:20 (Unsupported command)").
   defp code_of(s, tag) do

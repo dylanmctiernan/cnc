@@ -22,7 +22,10 @@ defmodule CNC.Grbl.ResponseTest do
     # Not (yet) interpreted
     {"[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]",
      {:unknown, "[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]"}},
-    {"$130=1250.000", {:unknown, "$130=1250.000"}},
+    {"$130=1250.000", {:setting, 130, "1250.000"}},
+    {"$10=511", {:setting, 10, "511"}},
+    {"$N0=", {:unknown, "$N0="}},
+    {"$=5", {:unknown, "$=5"}},
     {"", {:unknown, ""}},
     # Malformed known forms
     {"error:", {:unknown, "error:"}},

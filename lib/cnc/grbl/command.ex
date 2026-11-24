@@ -11,6 +11,9 @@ defmodule CNC.Grbl.Command do
   @doc "Run the homing cycle (`$H`)."
   def home, do: "$H"
 
+  @doc "Print all settings (`$$`): one `$N=value` line each, then `ok`."
+  def settings, do: "$$"
+
   @doc """
   Relative, metric jog: `$J=G91 G21 X.. Y.. Z.. F..`.
 

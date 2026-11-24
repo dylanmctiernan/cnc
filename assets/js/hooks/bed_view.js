@@ -42,6 +42,10 @@ export default {
     }
 
     this.handleEvent("pos", (p) => this.sample(p))
+    this.handleEvent("travel", ({travel}) => {
+      this.travel = travel
+      this.fit()
+    })
     this.el.addEventListener("bed:clear-trail", () => (this.trailLen = 0))
 
     this.resize = new ResizeObserver(() => this.fit())
