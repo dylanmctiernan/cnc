@@ -1,5 +1,6 @@
-// PIN page: mirror the numeric input into four cells, drive it from the
-// on-screen keypad, and submit as soon as four digits are in.
+// PIN page: mirror the numeric input into four cells and submit as soon as
+// four digits are in. Tapping the cells focuses the input (it lies over
+// them), which brings up the phone's own number pad.
 export function mountPinPad() {
   const form = document.getElementById("pin-form")
   if (!form) return
@@ -29,17 +30,6 @@ export function mountPinPad() {
   input.addEventListener("input", () => set(input.value))
   input.addEventListener("focus", () => form.classList.add("is-focused"))
   input.addEventListener("blur", () => form.classList.remove("is-focused"))
-
-  form.querySelectorAll("[data-digit]").forEach((key) =>
-    key.addEventListener("click", () => {
-      set(input.value + key.dataset.digit)
-      input.focus({preventScroll: true})
-    })
-  )
-  form.querySelector("[data-back]").addEventListener("click", () => {
-    set(input.value.slice(0, -1))
-    input.focus({preventScroll: true})
-  })
 
   render()
 }

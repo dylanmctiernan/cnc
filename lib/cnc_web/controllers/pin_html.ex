@@ -3,10 +3,11 @@ defmodule CNCWeb.PinHTML do
 
   attr :error, :string, default: nil
 
-  # A 4-digit pad in the style of the machine's readout. The real field is a
-  # single numeric input laid over the cells (so phone keyboards, paste and
-  # password managers work); assets/js/pin_pad.js mirrors it into the cells,
-  # wires the keypad and submits on the fourth digit.
+  # Four cells in the style of the machine's readout over a single native
+  # numeric input (inputmode="numeric": the phone's own number pad, paste and
+  # password managers work). No on-screen keypad: on iOS it fought the native
+  # keyboard. assets/js/pin_pad.js mirrors the input into the cells and
+  # submits on the fourth digit.
   def new(assigns) do
     ~H"""
     <main class="cnc-pin">
@@ -37,14 +38,6 @@ defmodule CNCWeb.PinHTML do
         </div>
 
         <p :if={@error} id="pin-error" class="cnc-pin-error" role="alert">{@error}</p>
-
-        <div class="cnc-pin-pad" aria-hidden="true">
-          <button :for={d <- ~w(1 2 3 4 5 6 7 8 9)} type="button" tabindex="-1" data-digit={d}>
-            {d}
-          </button>
-          <button type="button" tabindex="-1" data-back class="cnc-pin-back">⌫</button>
-          <button type="button" tabindex="-1" data-digit="0">0</button>
-        </div>
       </form>
     </main>
     """
