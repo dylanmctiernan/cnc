@@ -2,6 +2,11 @@
 
 Manual checks that aren't covered by automated tests. Newest first.
 
+## 2026-11-23 — M2: Sim test sensitivity
+
+- Disabled soft-limit check → 2 tests fail. Dropped leftover-time carry between queued jogs → 1 fails.
+- Process tests run 3× in a row without flakes. Reverted; 68 pass.
+
 ## 2026-11-23 — M1: test sensitivity
 
 - Mutated `Status.derive` (wpos = mpos + wco) and `Command.jog` zero-axis check (never zero).

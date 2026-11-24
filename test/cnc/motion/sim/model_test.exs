@@ -1,0 +1,160 @@
+defmodule CNC.Motion.Sim.ModelTest do
+  use ExUnit.Case, async: true
+
+  alias CNC.Grbl.{Command, Realtime, Response}
+  alias CNC.Motion.Sim.Model
+
+  # 600 mm/min = 10 mm/s = 0.01 mm/ms
+  @feed 600
+
+  defp idle(opts \\ []) do
+    {m, _} = Model.new(opts) |> Model.line("$X")
+    m
+  end
+
+  defp line(m, l), do: Model.line(m, l)
+  defp jog(m, delta, feed \\ @feed), do: Model.line(m, Command.jog(delta, feed))
+  defp rt(m, byte), do: Model.realtime(m, byte)
+
+  defp status(m) do
+    {_, [line]} = rt(m, Realtime.status())
+    {:status, status} = Response.parse(line)
+    status
+  end
+
+  defp assert_pos(m, {x, y, z}) do
+    {a, b, c} = m.pos
+    assert_in_delta a, x, 1.0e-9
+    assert_in_delta b, y, 1.0e-9
+    assert_in_delta c, z, 1.0e-9
+  end
+
+  test "boots into alarm with banner and unlock hint" do
+    {m, lines} = Model.new() |> Model.boot()
+    assert m.state == :alarm
+
+    assert Enum.map(lines, &Response.parse/1) == [
+             {:banner, "Grbl 1.1h ['$' for help]"},
+             {:msg, "'$H'|'$X' to unlock"}
+           ]
+  end
+
+  test "$X unlocks" do
+    {m, lines} = Model.new() |> line("$X")
+    assert m.state == :idle
+    assert lines == ["[MSG:Caution: Unlocked]", "ok"]
+    assert {_, ["ok"]} = line(m, "$X")
+  end
+
+  test "jog is rejected in alarm" do
+    {m, lines} = Model.new() |> jog({10, 0, 0})
+    assert {m.state, lines} == {:alarm, ["error:8"]}
+  end
+
+  test "jog integrates position at the commanded feed" do
+    {m, ["ok"]} = idle() |> jog({10, 0, 0})
+    assert m.state == :jog
+
+    {m, []} = Model.advance(m, 500)
+    assert_pos(m, {5.0, 0.0, 0.0})
+    assert %{state: :jog, feed: 600.0} = status(m)
+
+    {m, []} = Model.advance(m, 600)
+    assert_pos(m, {10.0, 0.0, 0.0})
+    assert %{state: :idle, feed: +0.0, mpos: {10.0, +0.0, +0.0}} = status(m)
+  end
+
+  test "queued jogs chain, carrying leftover time into the next segment" do
+    {m, ["ok"]} = idle() |> jog({10, 0, 0})
+    {m, ["ok"]} = jog(m, {0, 10, 0})
+    assert %{buffer: {13, 128}} = status(m)
+
+    {m, []} = Model.advance(m, 1500)
+    assert_pos(m, {10.0, 5.0, 0.0})
+    assert m.state == :jog
+  end
+
+  test "diagonal moves at path speed" do
+    {m, ["ok"]} = idle() |> jog({30, 40, 0})
+    {m, []} = Model.advance(m, 1000)
+    assert_pos(m, {6.0, 8.0, 0.0})
+  end
+
+  test "feed is clamped to max_feed" do
+    {m, ["ok"]} = idle(max_feed: 60.0) |> jog({10, 0, 0}, 6000)
+    {m, []} = Model.advance(m, 1000)
+    assert_pos(m, {1.0, 0.0, 0.0})
+  end
+
+  describe "soft limits" do
+    test "jog beyond travel is error:15 and not queued" do
+      {m, lines} = idle() |> jog({-1, 0, 0})
+      assert lines == ["error:15"]
+      assert m.state == :idle
+    end
+
+    test "checked against the end of the queue, not the current position" do
+      m = idle(pos: {1240.0, 0.0, 0.0})
+      {m, ["ok"]} = jog(m, {5, 0, 0})
+      {_m, lines} = jog(m, {6, 0, 0})
+      assert lines == ["error:15"]
+    end
+  end
+
+  test "jog cancel and feed hold both stop and flush the queue" do
+    for byte <- [Realtime.jog_cancel(), Realtime.feed_hold()] do
+      {m, ["ok"]} = idle() |> jog({10, 0, 0})
+      {m, ["ok"]} = jog(m, {10, 0, 0})
+      {m, []} = Model.advance(m, 100)
+      {m, []} = rt(m, byte)
+      assert {m.state, :queue.len(m.queue)} == {:idle, 0}
+      assert_pos(m, {1.0, 0.0, 0.0})
+    end
+  end
+
+  test "homing acks only when complete, at the origin" do
+    m = idle(pos: {100.0, 100.0, 0.0}, homing_ms: 300)
+    {m, []} = line(m, "$H")
+    assert status(m).state == :home
+    assert {_, ["error:8"]} = jog(m, {1, 0, 0})
+
+    {m, []} = Model.advance(m, 200)
+    {m, ["ok"]} = Model.advance(m, 100)
+    assert m.state == :idle
+    assert_pos(m, {0.0, 0.0, 0.0})
+  end
+
+  describe "soft reset" do
+    test "while jogging raises ALARM:3 and needs unlocking" do
+      {m, ["ok"]} = idle() |> jog({10, 0, 0})
+      {m, lines} = rt(m, Realtime.reset())
+      assert m.state == :alarm
+      assert ["ALARM:3", "Grbl" <> _, "[MSG:" <> _] = lines
+    end
+
+    test "while homing raises ALARM:6" do
+      {m, []} = idle() |> line("$H")
+      assert {%{state: :alarm}, ["ALARM:6" | _]} = rt(m, Realtime.reset())
+    end
+
+    test "while idle just reboots" do
+      {m, lines} = idle() |> rt(Realtime.reset())
+      assert m.state == :idle
+      assert ["Grbl" <> _] = lines
+    end
+  end
+
+  test "injected alarm stops motion" do
+    {m, ["ok"]} = idle() |> jog({10, 0, 0})
+    {m, ["ALARM:1"]} = Model.alarm(m, 1)
+    assert {m.state, :queue.len(m.queue)} == {:alarm, 0}
+  end
+
+  test "malformed or unsupported lines" do
+    m = idle()
+    assert {_, ["error:20"]} = line(m, "G0 X10")
+    assert {_, ["error:20"]} = line(m, "$J=G90 G21 X1 F100")
+    assert {_, ["error:22"]} = line(m, "$J=G91 G21 X1")
+    assert {_, ["error:2"]} = line(m, "$J=G91 G21 Xabc F100")
+  end
+end

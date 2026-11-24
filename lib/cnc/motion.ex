@@ -9,7 +9,7 @@ defmodule CNC.Motion do
     * `{:motion, :line, binary}`
     * `{:motion, :disconnected}`
   """
-  use Boundary, deps: [CNC.Grbl], exports: []
+  use Boundary, deps: [CNC.Grbl], exports: [Sim]
 
   @callback start_link(owner :: pid, opts :: keyword) :: GenServer.on_start()
   @callback write_line(pid, iodata) :: :ok
