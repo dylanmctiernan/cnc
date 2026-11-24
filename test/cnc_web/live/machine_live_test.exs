@@ -392,6 +392,25 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> Machine.status(m).travel_issues == [] end)
   end
 
+  test "the bed in 2D or 3D; the 3D view gets the program and position when it asks", %{
+    conn: conn
+  } do
+    {:ok, view, _} = live(conn, ~p"/")
+    assert has_element?(view, "#bed")
+    refute has_element?(view, "#viewport")
+
+    view |> element("#view-3d") |> render_click()
+    assert has_element?(view, "#viewport[phx-hook=Viewport] canvas")
+    assert has_element?(view, "#viewport-iso")
+    refute has_element?(view, "#bed")
+
+    render_hook(view, "viewport_ready", %{})
+    assert_push_event(view, "program", %{path: nil})
+
+    view |> element("#view-top") |> render_click()
+    assert has_element?(view, "#bed")
+  end
+
   defp eventually(fun, timeout \\ 2000, every \\ 20) do
     cond do
       fun.() -> true

@@ -40,7 +40,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
      |> assign(work_edit: nil)
-     |> assign(zoom: if(program, do: :file, else: :bed))
+     |> assign(zoom: if(program, do: :file, else: :bed), view_mode: :top)
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
        max_entries: 1,
@@ -229,6 +229,14 @@ defmodule CNCWeb.MachineLive do
          update(socket, :work_edit, &%{&1 | error: "Only when the machine is Ready and stopped."})}
     end
   end
+
+  # The bed view in 2D (top down, with the speed meters) or 3D.
+  def handle_event("view_mode", %{"mode" => mode}, socket) when mode in ["top", "3d"],
+    do: {:noreply, assign(socket, view_mode: String.to_existing_atom(mode))}
+
+  # A view that just appeared asks for what there is now.
+  def handle_event("viewport_ready", _, socket),
+    do: {:noreply, socket |> push_program() |> push_pos(socket.assigns.machine)}
 
   def handle_event("toggle_zoom", _, socket) do
     zoom = if socket.assigns.zoom == :file, do: :bed, else: :file
@@ -532,8 +540,27 @@ defmodule CNCWeb.MachineLive do
         </div>
 
         <section class="cnc-view" aria-label="Bed and Z">
+          <div class="cnc-view-switch ui-actions" role="group" aria-label="View">
+            <UI.button
+              :for={{mode, label} <- [top: "2D", "3d": "3D"]}
+              size="sm"
+              variant={if @view_mode == mode, do: "primary", else: "secondary"}
+              id={"view-#{mode}"}
+              phx-click="view_mode"
+              phx-value-mode={mode}
+              aria-pressed={to_string(@view_mode == mode)}
+            >
+              {label}
+            </UI.button>
+          </div>
+          <UI.viewport
+            :if={@view_mode == :"3d"}
+            id="viewport"
+            travel={travel_json(@machine.travel)}
+            class="cnc-bed"
+          />
           <button
-            :if={@program}
+            :if={@program != nil and @view_mode == :top}
             id="zoom-toggle"
             type="button"
             class="cnc-btn cnc-zoom"
@@ -543,6 +570,7 @@ defmodule CNCWeb.MachineLive do
             {if @zoom == :file, do: "Whole bed", else: "Zoom to file"}
           </button>
           <div
+            :if={@view_mode == :top}
             id="bed"
             class="cnc-bed"
             phx-hook="BedView"

@@ -13,6 +13,9 @@ defmodule CNCWeb.UI do
     * `stop_button/1` — Stop: cancel motion and hold, never refused
     * `dialog/1` — a modal: title, body, actions
     * `empty/1` — nothing here yet, and what to do about it
+    * `viewport/1` — the 3D view of the machine (three.js, the `Viewport`
+      hook): the page sends it the standard machine-view events ("pos",
+      "program", "travel") and answers its "viewport_ready"
   """
   use Phoenix.Component
 
@@ -222,6 +225,41 @@ defmodule CNCWeb.UI do
     <div class="ui-empty" id={@id}>
       <p>{render_slot(@inner_block)}</p>
       <div :if={@action != []} class="ui-actions">{render_slot(@action)}</div>
+    </div>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :travel, :string, required: true, doc: "JSON [[x0, x1], [y0, y1], [z0, z1]]"
+  attr :label, :string, default: "3D view of the machine, the toolpath and the tool"
+  attr :class, :any, default: nil
+
+  @doc """
+  The 3D viewport. Drag to orbit, right-drag (or two fingers) to pan, wheel
+  or pinch to zoom; File frames the loaded toolpath, Iso, Top and Front the
+  whole machine.
+  """
+  def viewport(assigns) do
+    ~H"""
+    <div
+      class={["ui-viewport", @class]}
+      id={@id}
+      phx-hook="Viewport"
+      phx-update="ignore"
+      data-travel={@travel}
+    >
+      <canvas role="img" aria-label={@label}></canvas>
+      <div class="ui-viewport-views" role="group" aria-label="View">
+        <button
+          :for={{view, label} <- [file: "File", iso: "Iso", top: "Top", front: "Front"]}
+          type="button"
+          class="ui-btn ui-btn--sm"
+          id={"#{@id}-#{view}"}
+          phx-click={JS.dispatch("viewport:view", to: "##{@id}", detail: %{view: view})}
+        >
+          {label}
+        </button>
+      </div>
     </div>
     """
   end
