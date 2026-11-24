@@ -14,7 +14,7 @@ defmodule CNC.Link.FluidNCSim do
       directory has none yet: after that the sim's own file is the source of
       truth and persists, like a board's flash
     * `:run_dir` — FluidNC's own folder (config, settings); one per
-      controller (`CNC.Controllers` gives each FluidNC sim profile its own)
+      controller (`CNC.Controllers` gives each FluidNC sim its own)
 
   Stock FluidNC, set up from outside rather than patched:
 

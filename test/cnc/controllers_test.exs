@@ -3,7 +3,7 @@ defmodule CNC.ControllersTest do
   @moduletag :tmp_dir
 
   alias CNC.{Boards, Controllers, Machine}
-  alias CNC.Controllers.Profile
+  alias CNC.Controllers.Controller
 
   describe "boards" do
     test "every board renders a config with its own pins and stepping engine" do
@@ -36,18 +36,18 @@ defmodule CNC.ControllersTest do
     end
   end
 
-  describe "profiles" do
+  describe "controller records" do
     test "survive a JSON round trip" do
-      p = %Profile{
+      p = %Controller{
         id: "ab2c",
         name: "Bench",
         board: :esp32_devkit,
         link: %{type: :serial, port: "/dev/cu.x", speed: 115_200}
       }
 
-      assert {:ok, ^p} = p |> Jason.encode!() |> Jason.decode!() |> Profile.from_json()
+      assert {:ok, ^p} = p |> Jason.encode!() |> Jason.decode!() |> Controller.from_json()
 
-      assert Profile.from_json(%{"id" => "x", "name" => "n", "board" => "nope", "link" => %{}}) ==
+      assert Controller.from_json(%{"id" => "x", "name" => "n", "board" => "nope", "link" => %{}}) ==
                :error
     end
   end
@@ -147,7 +147,26 @@ defmodule CNC.ControllersTest do
       assert File.exists?(Path.join(ctx.dir, "controllers.json.migrated"))
     end
 
-    test "adding profiles: board defaults for the link, serial needs a port", ctx do
+    test "data stored before the Profile rename still loads", ctx do
+      CubDB.put(db_for(ctx.dir), :controllers, %{
+        profiles: [
+          %{
+            id: "ab2c",
+            name: "Old",
+            board: :fake_sim,
+            firmware: :fluidnc,
+            link: %{type: :fake_sim}
+          }
+        ],
+        active: "ab2c"
+      })
+
+      c = start_controllers(ctx)
+      assert [%Controller{id: "ab2c", name: "Old"}] = Controllers.list(c)
+      assert %{controllers: [_], active: "ab2c"} = CubDB.get(db_for(ctx.dir), :controllers)
+    end
+
+    test "adding controllers: board defaults for the link, serial needs a port", ctx do
       c = start_controllers(ctx)
 
       assert Controllers.add(c, %{name: "Bench", board: :esp32_devkit}) ==

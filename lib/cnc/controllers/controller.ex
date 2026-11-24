@@ -1,10 +1,10 @@
-defmodule CNC.Controllers.Profile do
+defmodule CNC.Controllers.Controller do
   @moduledoc """
-  A controller you can select: a board plus a link, with the controller's
-  own configuration (which lives on the controller; the app keeps its
-  history alongside the profile).
+  A controller: a board plus a link (how the app reaches it). Setting one up
+  is just this; its configuration is a separate thing that lives on the
+  controller and is managed once connected.
 
-    * `id` — short and random, stable for the profile's life
+    * `id` — short and random, stable for the controller's life
     * `name` — yours, e.g. "Bench ESP32"
     * `board` — the hardware (`CNC.Boards`): sets the defaults
     * `firmware` — `:fluidnc` for now; recorded for later
@@ -42,10 +42,10 @@ defmodule CNC.Controllers.Profile do
   def to_map(%__MODULE__{} = p),
     do: %{id: p.id, name: p.name, board: p.board, firmware: p.firmware, link: p.link}
 
-  @doc "From a stored map back to a profile; :error if it doesn't fit anymore."
+  @doc "From a stored map back to a controller; :error if it doesn't fit anymore."
   def from_map(map) when is_map(map), do: map |> Jason.encode!() |> Jason.decode!() |> from_json()
 
-  @doc "From stored JSON (string keys) back to a profile; :error if it doesn't fit."
+  @doc "From stored JSON (string keys) back to a controller; :error if it doesn't fit."
   def from_json(%{"id" => id, "name" => name, "board" => board, "link" => link} = map) do
     with {:ok, board} <- known_atom(board, CNC.Boards.ids()),
          {:ok, link} <- link_from_json(link) do

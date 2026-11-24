@@ -9,7 +9,7 @@ defmodule CNCWeb.ControllersLive do
   on_mount CNCWeb.Pin
 
   alias CNC.{Boards, Controllers, Machine}
-  alias CNC.Controllers.Profile
+  alias CNC.Controllers.Controller
 
   @link_labels %{
     fluidnc_sim: "On this computer",
@@ -48,8 +48,8 @@ defmodule CNCWeb.ControllersLive do
   end
 
   def handle_event("edit_link", %{"id" => id}, socket) do
-    profile = Enum.find(socket.assigns.profiles, &(&1.id == id))
-    {:noreply, assign(socket, editing: id, edit: link_params(profile.link), error: nil)}
+    ctl = Enum.find(socket.assigns.controllers, &(&1.id == id))
+    {:noreply, assign(socket, editing: id, edit: link_params(ctl.link), error: nil)}
   end
 
   def handle_event("cancel_edit", _, socket), do: {:noreply, assign(socket, editing: nil)}
@@ -142,13 +142,13 @@ defmodule CNCWeb.ControllersLive do
 
           <section class="cnc-set-group" aria-label="Your controllers">
             <h2 class="cnc-h">Your controllers</h2>
-            <p :if={@profiles == []} id="no-controllers" class="cnc-note">
+            <p :if={@controllers == []} id="no-controllers" class="cnc-note">
               No controllers yet. Add one below: the FluidNC sim to try things on this
               computer, or your board (USB or Wi-Fi).
             </p>
             <ul class="cnc-ctls" id="controllers">
               <li
-                :for={p <- @profiles}
+                :for={p <- @controllers}
                 id={"controller-#{p.id}"}
                 class={["cnc-ctl-card", p.id == @active_id && "is-active"]}
               >
@@ -162,7 +162,7 @@ defmodule CNCWeb.ControllersLive do
                   <dt>board</dt>
                   <dd>{Boards.label(p.board)}</dd>
                   <dt>link</dt>
-                  <dd>{Profile.describe_link(p.link)}</dd>
+                  <dd>{Controller.describe_link(p.link)}</dd>
                 </dl>
 
                 <form
@@ -334,7 +334,7 @@ defmodule CNCWeb.ControllersLive do
     active = Controllers.active(c)
 
     assign(socket,
-      profiles: Controllers.list(c),
+      controllers: Controllers.list(c),
       active_id: active && active.id,
       overridden?: Controllers.overridden?(c)
     )
@@ -371,12 +371,12 @@ defmodule CNCWeb.ControllersLive do
 
   defp drop_blank(map, key), do: if(map[key] == "", do: Map.delete(map, key), else: map)
 
-  defp remove_confirm(%Profile{name: name, link: %{type: :fluidnc_sim}}),
+  defp remove_confirm(%Controller{name: name, link: %{type: :fluidnc_sim}}),
     do: "Remove #{name}? Its config and settings are deleted with it."
 
-  defp remove_confirm(%Profile{name: name, link: %{type: :fake_sim}}), do: "Remove #{name}?"
+  defp remove_confirm(%Controller{name: name, link: %{type: :fake_sim}}), do: "Remove #{name}?"
 
-  defp remove_confirm(%Profile{name: name}),
+  defp remove_confirm(%Controller{name: name}),
     do: "Remove #{name} from this list? Its config stays on the board."
 
   defp error_text(:moving), do: "Wait for the machine to stop before switching controllers."

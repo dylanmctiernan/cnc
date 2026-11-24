@@ -1,30 +1,30 @@
 defmodule CNC.Controllers do
   @moduledoc """
   The controllers you have and which one the machine is using. A controller
-  profile (`CNC.Controllers.Profile`) is a board plus a link; its
-  configuration lives on the controller itself.
+  (`CNC.Controllers.Controller`) is a board plus a link; its configuration
+  lives on the controller itself and is managed separately, once connected.
 
-  Profiles and the active choice are kept in the app's CubDB (`CNC.DB`,
+  Controllers and the active choice are kept in the app's CubDB (`CNC.DB`,
   `<data_dir>/db`): crash-safe, synced on every write. A `controllers.json`
   from before is imported once and renamed `controllers.json.migrated`.
   The list starts empty: you add (import) your controllers. Experiments are
   configs on a controller (several can live on it), not extra controllers. With none active the machine stays disconnected.
-  Selecting a profile tells `CNC.Machine` to connect to it (the controller
+  Selecting a controller tells `CNC.Machine` to connect to it (the controller
   starts locked, as on any connect).
 
   A link set in config (`config :cnc, :link`, e.g. from `CNC_LINK=…`)
-  overrides the active profile: the machine uses it directly and selecting
+  overrides the active controller: the machine uses it directly and selecting
   is refused, so scripts and tests stay explicit.
 
-  Each FluidNC sim profile runs in its own folder under the data dir, so its
+  Each FluidNC sim runs in its own folder under the data dir, so its
   config and settings persist across restarts, like a board's flash.
   """
-  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Profile]
+  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Controller]
   use GenServer
   require Logger
 
   alias CNC.Boards, as: Board
-  alias CNC.Controllers.Profile
+  alias CNC.Controllers.Controller
   alias CNC.Machine
 
   @topic "controllers"
@@ -34,17 +34,17 @@ defmodule CNC.Controllers do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "All profiles, in the order added."
+  @doc "All controllers, in the order added."
   def list(server \\ __MODULE__), do: GenServer.call(server, :list)
 
-  @doc "The active profile, or nil (none yet, or a link override is in use)."
+  @doc "The active controller, or nil (none yet, or a link override is in use)."
   def active(server \\ __MODULE__), do: GenServer.call(server, :active)
 
-  @doc "True when a configured link overrides the profiles (CNC_LINK, tests)."
+  @doc "True when a configured link overrides the controllers (CNC_LINK, tests)."
   def overridden?(server \\ __MODULE__), do: GenServer.call(server, :overridden?)
 
   @doc """
-  Make a profile active and connect the machine to it. Refused while the
+  Make a controller active and connect the machine to it. Refused while the
   machine is moving (switching drops the link).
   """
   @spec select(GenServer.server(), String.t()) ::
@@ -56,7 +56,7 @@ defmodule CNC.Controllers do
   controller and its config stay the same; if it's the active one, the
   machine reconnects over the new link.
   """
-  @spec update_link(GenServer.server(), String.t(), map) :: {:ok, Profile.t()} | {:error, term}
+  @spec update_link(GenServer.server(), String.t(), map) :: {:ok, Controller.t()} | {:error, term}
   def update_link(server \\ __MODULE__, id, link),
     do: GenServer.call(server, {:update_link, id, link}, 10_000)
 
@@ -67,7 +67,7 @@ defmodule CNC.Controllers do
   @spec deactivate(GenServer.server()) :: :ok | {:error, :overridden | :moving}
   def deactivate(server \\ __MODULE__), do: GenServer.call(server, :deactivate, 10_000)
 
-  @doc "Remove a profile (not the active one)."
+  @doc "Remove a controller (not the active one)."
   @spec remove(GenServer.server(), String.t()) :: :ok | {:error, :active | :not_found}
   def remove(server \\ __MODULE__, id), do: GenServer.call(server, {:remove, id})
 
@@ -84,31 +84,31 @@ defmodule CNC.Controllers do
   end
 
   @doc """
-  Add a profile: `%{name: ..., board: ..., link: ...}`. The link defaults to
+  Add a controller: `%{name: ..., board: ..., link: ...}`. The link defaults to
   the board's usual kind (a serial link needs its `port`).
   """
-  @spec add(GenServer.server(), map) :: {:ok, Profile.t()} | {:error, term}
+  @spec add(GenServer.server(), map) :: {:ok, Controller.t()} | {:error, term}
   def add(server \\ __MODULE__, attrs), do: GenServer.call(server, {:add, attrs})
 
-  @doc "Receive `{:controllers, %{profiles: [...], active: id | nil}}` on changes."
+  @doc "Receive `{:controllers, %{controllers: [...], active: id | nil}}` on changes."
   def subscribe(topic \\ @topic), do: Phoenix.PubSub.subscribe(CNC.PubSub, topic)
 
   @doc """
-  The `CNC.Link` adapter and options for a profile. A FluidNC sim gets its
+  The `CNC.Link` adapter and options for a controller. A FluidNC sim gets its
   own run folder under `data_dir`, starting from its board's default config.
   """
-  @spec link_spec(Profile.t(), Path.t()) :: {module, keyword}
-  def link_spec(%Profile{link: %{type: :fluidnc_sim}} = p, data_dir) do
+  @spec link_spec(Controller.t(), Path.t()) :: {module, keyword}
+  def link_spec(%Controller{link: %{type: :fluidnc_sim}} = p, data_dir) do
     {CNC.Link.FluidNCSim,
      run_dir: Path.join([data_dir, "controllers", p.id, "fluidnc"]), config: Board.config(p.board)}
   end
 
-  def link_spec(%Profile{link: %{type: :fake_sim}}, _), do: {CNC.Link.FakeSim, []}
+  def link_spec(%Controller{link: %{type: :fake_sim}}, _), do: {CNC.Link.FakeSim, []}
 
-  def link_spec(%Profile{link: %{type: :serial, port: port, speed: speed}}, _),
+  def link_spec(%Controller{link: %{type: :serial, port: port, speed: speed}}, _),
     do: {CNC.Link.UART, port: port, speed: speed}
 
-  def link_spec(%Profile{link: %{type: :tcp, host: host, port: port}}, _),
+  def link_spec(%Controller{link: %{type: :tcp, host: host, port: port}}, _),
     do: {CNC.Link.TCP, host: host, port: port}
 
   ## Server
@@ -124,7 +124,7 @@ defmodule CNC.Controllers do
       machine: Keyword.get(opts, :machine, Machine),
       overridden?:
         Keyword.get_lazy(opts, :overridden?, fn -> Application.get_env(:cnc, :link) != nil end),
-      profiles: [],
+      controllers: [],
       active: nil,
       # Tests seed just the fake sim (no FluidNC process, no dev data)
       seed: Keyword.get(opts, :seed, :none),
@@ -137,7 +137,7 @@ defmodule CNC.Controllers do
   end
 
   @impl true
-  def handle_call(:list, _from, s), do: {:reply, s.profiles, s}
+  def handle_call(:list, _from, s), do: {:reply, s.controllers, s}
   def handle_call(:active, _from, %{overridden?: true} = s), do: {:reply, nil, s}
   def handle_call(:active, _from, s), do: {:reply, find(s, s.active), s}
   def handle_call(:overridden?, _from, s), do: {:reply, s.overridden?, s}
@@ -163,13 +163,13 @@ defmodule CNC.Controllers do
   def handle_call({:update_link, id, link}, _from, s) do
     active? = id == s.active and not s.overridden?
 
-    with %Profile{} = profile <- find(s, id) || {:error, :not_found},
+    with %Controller{} = ctl <- find(s, id) || {:error, :not_found},
          false <- (active? and moving?(s)) && {:error, :moving},
-         {:ok, link} <- link_for(profile.board, link) do
-      profile = %{profile | link: link}
-      s = save(%{s | profiles: Enum.map(s.profiles, &if(&1.id == id, do: profile, else: &1))})
+         {:ok, link} <- link_for(ctl.board, link) do
+      ctl = %{ctl | link: link}
+      s = save(%{s | controllers: Enum.map(s.controllers, &if(&1.id == id, do: ctl, else: &1))})
       if active?, do: connect_active(s)
-      {:reply, {:ok, profile}, s}
+      {:reply, {:ok, ctl}, s}
     else
       {:error, _} = error -> {:reply, error, s}
     end
@@ -189,30 +189,30 @@ defmodule CNC.Controllers do
   end
 
   # A FluidNC sim's folder is its flash: nothing else can use it, so it goes
-  # with the profile. A board keeps its config (it's on the board).
+  # with the controller. A board keeps its config (it's on the board).
   def handle_call({:remove, id}, _from, s) do
-    profile = find(s, id)
+    ctl = find(s, id)
 
     cond do
-      profile == nil ->
+      ctl == nil ->
         {:reply, {:error, :not_found}, s}
 
       id == s.active ->
         {:reply, {:error, :active}, s}
 
       true ->
-        if profile.link.type == :fluidnc_sim,
+        if ctl.link.type == :fluidnc_sim,
           do: File.rm_rf(Path.join([s.data_dir, "controllers", id]))
 
-        {:reply, :ok, save(%{s | profiles: Enum.reject(s.profiles, &(&1.id == id))})}
+        {:reply, :ok, save(%{s | controllers: Enum.reject(s.controllers, &(&1.id == id))})}
     end
   end
 
   def handle_call({:add, attrs}, _from, s) do
     case build(attrs) do
-      {:ok, profile} ->
-        s = save(%{s | profiles: s.profiles ++ [profile]})
-        {:reply, {:ok, profile}, s}
+      {:ok, ctl} ->
+        s = save(%{s | controllers: s.controllers ++ [ctl]})
+        {:reply, {:ok, ctl}, s}
 
       error ->
         {:reply, error, s}
@@ -222,7 +222,7 @@ defmodule CNC.Controllers do
   defp build(%{name: name, board: board} = attrs) when is_binary(name) and name != "" do
     with true <- board in Board.ids() || {:error, :unknown_board},
          {:ok, link} <- link_for(board, Map.get(attrs, :link)) do
-      {:ok, %Profile{id: Profile.new_id(), name: name, board: board, link: link}}
+      {:ok, %Controller{id: Controller.new_id(), name: name, board: board, link: link}}
     end
   end
 
@@ -244,7 +244,7 @@ defmodule CNC.Controllers do
 
   defp link_for(_board, _), do: {:error, :invalid_link}
 
-  defp find(s, id), do: Enum.find(s.profiles, &(&1.id == id))
+  defp find(s, id), do: Enum.find(s.controllers, &(&1.id == id))
 
   defp moving?(s) do
     status = Machine.status(s.machine)
@@ -254,7 +254,7 @@ defmodule CNC.Controllers do
   defp connect_active(s) do
     case find(s, s.active) do
       nil -> :ok
-      profile -> Machine.connect(s.machine, link_spec(profile, s.data_dir))
+      ctl -> Machine.connect(s.machine, link_spec(ctl, s.data_dir))
     end
   end
 
@@ -264,8 +264,20 @@ defmodule CNC.Controllers do
 
   defp load(s) do
     case CubDB.get(s.db, @key) do
+      %{controllers: maps, active: active} ->
+        %{
+          s
+          | controllers: for(m <- maps, {:ok, c} <- [Controller.from_map(m)], do: c),
+            active: active
+        }
+
+      # Stored before the rename from Profile
       %{profiles: maps, active: active} ->
-        %{s | profiles: for(m <- maps, {:ok, p} <- [Profile.from_map(m)], do: p), active: active}
+        save(%{
+          s
+          | controllers: for(m <- maps, {:ok, c} <- [Controller.from_map(m)], do: c),
+            active: active
+        })
 
       nil ->
         import_json(s) || seed(s)
@@ -278,10 +290,10 @@ defmodule CNC.Controllers do
 
     with {:ok, json} <- File.read(file),
          {:ok, %{"profiles" => raw} = data} <- Jason.decode(json) do
-      profiles = for map <- raw, {:ok, p} <- [Profile.from_json(map)], do: p
-      s = save(%{s | profiles: profiles, active: data["active"]})
+      controllers = for map <- raw, {:ok, p} <- [Controller.from_json(map)], do: p
+      s = save(%{s | controllers: controllers, active: data["active"]})
       File.rename(file, file <> ".migrated")
-      Logger.info("imported #{length(profiles)} controllers from controllers.json")
+      Logger.info("imported #{length(controllers)} controllers from controllers.json")
       s
     else
       _ -> nil
@@ -291,26 +303,29 @@ defmodule CNC.Controllers do
   # First run starts empty: you add (import) your controllers. Tests seed
   # just the fake sim.
   defp seed(%{seed: :fake_only} = s) do
-    fake = %Profile{
-      id: Profile.new_id(),
+    fake = %Controller{
+      id: Controller.new_id(),
       name: "Fake sim",
       board: :fake_sim,
       link: %{type: :fake_sim}
     }
 
-    save(%{s | profiles: [fake], active: fake.id})
+    save(%{s | controllers: [fake], active: fake.id})
   end
 
-  defp seed(s), do: save(%{s | profiles: [], active: nil})
+  defp seed(s), do: save(%{s | controllers: [], active: nil})
 
   defp save(s) do
     :ok =
-      CubDB.put(s.db, @key, %{profiles: Enum.map(s.profiles, &Profile.to_map/1), active: s.active})
+      CubDB.put(s.db, @key, %{
+        controllers: Enum.map(s.controllers, &Controller.to_map/1),
+        active: s.active
+      })
 
     Phoenix.PubSub.broadcast(
       CNC.PubSub,
       s.topic,
-      {:controllers, %{profiles: s.profiles, active: s.active}}
+      {:controllers, %{controllers: s.controllers, active: s.active}}
     )
 
     s

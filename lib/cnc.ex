@@ -11,7 +11,7 @@ defmodule CNC do
     * `CNC.Program` — the loaded G-code file, shared by every device.
     * `CNC.Boards`      — the catalogue of boards (hardware types) and their
       defaults, including the config template. Pure data.
-    * `CNC.Controllers` — your controllers (profiles: a board + a link, the
+    * `CNC.Controllers` — your controllers (each a board + a link, the
       config on the controller) and which one the machine is using.
 
   Only `CNC.Machine` is exported, so callers outside the domain (the web UI)
@@ -26,7 +26,7 @@ defmodule CNC do
       Program,
       GCode.Program,
       Controllers,
-      Controllers.Profile,
+      Controllers.Controller,
       Boards
     ]
 end

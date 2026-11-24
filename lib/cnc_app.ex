@@ -16,7 +16,7 @@ defmodule CNCApp do
       {Phoenix.PubSub, name: CNC.PubSub},
       CNC.Machine,
       CNC.Program,
-      # The app's own data (controller profiles, ...): embedded, crash-safe
+      # The app's own data (controllers, ...): embedded, crash-safe
       {CubDB, data_dir: Path.join(Application.fetch_env!(:cnc, :data_dir), "db"), name: CNC.DB},
       # After Machine and the database: connects the machine to the active controller
       CNC.Controllers,

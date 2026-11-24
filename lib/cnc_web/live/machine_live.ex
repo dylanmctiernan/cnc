@@ -1545,7 +1545,7 @@ defmodule CNCWeb.MachineLive do
   defp travel_list(_), do: [[0, 1250], [0, 1250], [-100, 0]]
 
   # The active controller's name; with a link override (CNC_LINK), the link.
-  defp controller_name(%CNC.Controllers.Profile{name: name}, _machine), do: name
+  defp controller_name(%CNC.Controllers.Controller{name: name}, _machine), do: name
   defp controller_name(nil, %State{adapter: nil}), do: "No controller"
   defp controller_name(nil, machine), do: adapter_label(machine.adapter)
 
