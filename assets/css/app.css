@@ -1192,7 +1192,7 @@ body {
 }
 .cnc-ctl {
   /* joystick size; also sets the controller's height in every mode */
-  --joy: min(calc(100vw - 7rem), clamp(8.5rem, calc(100dvh - 30rem), 13rem));
+  --joy: min(calc(100vw - 7rem), clamp(8rem, calc(100dvh - 33rem), 11rem));
 }
 .cnc-ctl-body {
   display: flex;
@@ -1559,7 +1559,7 @@ body {
 }
 
 /* Short screens (iPhone SE, phones sideways): drop the Zero explainer */
-@media (max-height: 40rem) {
+@media (max-height: 46rem) {
   .cnc-zero > .cnc-sub {
     display: none;
   }
