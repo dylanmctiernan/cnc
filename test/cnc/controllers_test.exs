@@ -27,6 +27,12 @@ defmodule CNC.ControllersTest do
 
       # Same machine everywhere
       for id <- Boards.ids(), do: assert(Boards.config(id) =~ "max_travel_mm: 1250")
+
+      # Which links each board's hardware can use, the usual one first
+      assert Boards.links(:fluidnc_sim) == [:fluidnc_sim]
+      assert Boards.links(:fake_sim) == [:fake_sim]
+      assert Boards.links(:esp32_devkit) == [:serial, :tcp]
+      assert Boards.links(:six_x) == [:serial, :tcp]
     end
   end
 
@@ -73,7 +79,7 @@ defmodule CNC.ControllersTest do
     test "first run: sim (when built) and fake sim, the first one active and connected", ctx do
       c = start_controllers(ctx)
       profiles = Controllers.list(c)
-      assert List.last(profiles).link == %{type: :fake_sim}
+      assert %{board: :fake_sim, link: %{type: :fake_sim}} = List.last(profiles)
       assert Controllers.active(c) == hd(profiles)
       assert File.exists?(Path.join(ctx.dir, "controllers.json"))
       assert eventually(fn -> Machine.status(ctx.machine).connected? end, 5000)
@@ -115,6 +121,18 @@ defmodule CNC.ControllersTest do
 
       assert wifi.link.port == 23
       assert Controllers.add(c, %{name: "?", board: :nope}) == {:error, :unknown_board}
+
+      # A link the board can't use is refused (the sim runs on this computer)
+      assert Controllers.add(c, %{
+               name: "x",
+               board: :fluidnc_sim,
+               link: %{type: :serial, port: "/dev/x"}
+             }) ==
+               {:error, {:link_not_supported, :serial}}
+
+      assert Controllers.add(c, %{name: "x", board: :six_x, link: %{type: :tcp}}) ==
+               {:error, :tcp_host_required}
+
       assert Enum.map(Controllers.list(c), & &1.name) |> Enum.take(-2) == ["Bench", "6x"]
     end
 

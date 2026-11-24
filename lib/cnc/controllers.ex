@@ -126,43 +126,29 @@ defmodule CNC.Controllers do
   end
 
   defp build(%{name: name, board: board} = attrs) when is_binary(name) and name != "" do
-    if board in Board.ids() do
-      link = Map.get(attrs, :link) || %{type: Board.default_link(board)}
-
-      case link do
-        %{type: :serial} = l when not is_map_key(l, :port) ->
-          {:error, :serial_port_required}
-
-        %{type: :serial} = l ->
-          {:ok,
-           %Profile{
-             id: Profile.new_id(),
-             name: name,
-             board: board,
-             link: Map.put_new(l, :speed, 115_200)
-           }}
-
-        %{type: :tcp} = l ->
-          {:ok,
-           %Profile{
-             id: Profile.new_id(),
-             name: name,
-             board: board,
-             link: Map.put_new(l, :port, 23)
-           }}
-
-        %{type: type} = l when type in [:fluidnc_sim, :fake_sim] ->
-          {:ok, %Profile{id: Profile.new_id(), name: name, board: board, link: l}}
-
-        _ ->
-          {:error, :invalid_link}
-      end
-    else
-      {:error, :unknown_board}
+    with true <- board in Board.ids() || {:error, :unknown_board},
+         {:ok, link} <- link_for(board, Map.get(attrs, :link)) do
+      {:ok, %Profile{id: Profile.new_id(), name: name, board: board, link: link}}
     end
   end
 
   defp build(_), do: {:error, :invalid}
+
+  # Only a link the board can use (CNC.Boards.links/1), with its defaults.
+  defp link_for(board, nil), do: link_for(board, %{type: Board.default_link(board)})
+
+  defp link_for(board, %{type: type} = link) do
+    cond do
+      type not in Board.links(board) -> {:error, {:link_not_supported, type}}
+      type == :serial and not is_map_key(link, :port) -> {:error, :serial_port_required}
+      type == :serial -> {:ok, Map.put_new(link, :speed, 115_200)}
+      type == :tcp and not is_map_key(link, :host) -> {:error, :tcp_host_required}
+      type == :tcp -> {:ok, Map.put_new(link, :port, 23)}
+      true -> {:ok, link}
+    end
+  end
+
+  defp link_for(_board, _), do: {:error, :invalid_link}
 
   defp find(s, id), do: Enum.find(s.profiles, &(&1.id == id))
 
@@ -199,7 +185,7 @@ defmodule CNC.Controllers do
     fake = %Profile{
       id: Profile.new_id(),
       name: "Fake sim",
-      board: :fluidnc_sim,
+      board: :fake_sim,
       link: %{type: :fake_sim}
     }
 

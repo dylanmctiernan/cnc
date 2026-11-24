@@ -7,8 +7,13 @@ defmodule CNC.Boards do
   a new controller's starting `config.yaml`. Pure data: no processes, no
   dependencies.
 
+  Each board also says which links it can use (`links/1`, the usual one
+  first): that's a property of the hardware. Wi-Fi needs FluidNC's Wi-Fi
+  build on the board (the bench ESP32 is flashed with the USB-only one).
+
   Boards:
 
+    * `:fake_sim` — the built-in imitation (dev, tests); no FluidNC config.
     * `:fluidnc_sim` — FluidNC as a program on this computer (dev). Its
       native build accepts ESP32-S3 pin numbers only, has no RMT engine
       (timed: moves in real time), and its inputs never trigger, so no
@@ -32,7 +37,8 @@ defmodule CNC.Boards do
 
   use Boundary, deps: [], exports: []
 
-  @type id :: :fluidnc_sim | :esp32_devkit | :six_x
+  @type id :: :fake_sim | :fluidnc_sim | :esp32_devkit | :six_x
+  @type link_type :: :fake_sim | :fluidnc_sim | :serial | :tcp
 
   @six_x_extra """
   i2so:
@@ -51,12 +57,27 @@ defmodule CNC.Boards do
   """
 
   @boards %{
+    fake_sim: %{
+      label: "Fake sim (built in)",
+      firmware: :fluidnc,
+      links: [:fake_sim],
+      engine: "timed",
+      switches?: false,
+      pins: %{
+        x_step: "gpio.1",
+        x_dir: "gpio.2",
+        y_step: "gpio.3",
+        y_dir: "gpio.4",
+        z_step: "gpio.5",
+        z_dir: "gpio.6"
+      }
+    },
     fluidnc_sim: %{
       label: "This computer (FluidNC sim)",
       firmware: :fluidnc,
+      links: [:fluidnc_sim],
       engine: "timed",
       switches?: false,
-      link: :fluidnc_sim,
       pins: %{
         x_step: "gpio.1",
         x_dir: "gpio.2",
@@ -69,9 +90,9 @@ defmodule CNC.Boards do
     esp32_devkit: %{
       label: "ESP32 DevKit (bench)",
       firmware: :fluidnc,
+      links: [:serial, :tcp],
       engine: "RMT",
       switches?: true,
-      link: :serial,
       pins: %{
         disable: "gpio.13",
         x_step: "gpio.25",
@@ -89,9 +110,9 @@ defmodule CNC.Boards do
     six_x: %{
       label: "6x CNC Controller",
       firmware: :fluidnc,
+      links: [:serial, :tcp],
       engine: "I2S_STREAM",
       switches?: true,
-      link: :serial,
       extra: @six_x_extra,
       pins: %{
         x_step: "I2SO.2",
@@ -113,7 +134,8 @@ defmodule CNC.Boards do
   }
 
   @doc "All boards, `[{id, label}]`, in a stable order."
-  def all, do: for(id <- [:fluidnc_sim, :esp32_devkit, :six_x], do: {id, @boards[id].label})
+  def all,
+    do: for(id <- [:fluidnc_sim, :esp32_devkit, :six_x, :fake_sim], do: {id, @boards[id].label})
 
   def ids, do: Map.keys(@boards)
 
@@ -122,8 +144,12 @@ defmodule CNC.Boards do
 
   def label(id), do: get!(id).label
 
+  @doc "The links this board can use, the usual one first."
+  @spec links(id) :: [link_type]
+  def links(id), do: get!(id).links
+
   @doc "The kind of link a new controller on this board uses by default."
-  def default_link(id), do: get!(id).link
+  def default_link(id), do: hd(links(id))
 
   @doc "The starting config.yaml for a controller on this board."
   @spec config(id) :: String.t()
