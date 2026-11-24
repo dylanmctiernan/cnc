@@ -1679,10 +1679,13 @@ body {
 
 /* Readout values are buttons: tap to type a work position */
 .cnc-num--edit {
+  /* Keep .cnc-num's size: only reset what a button changes */
+  padding: 0;
   border: 0;
   background: none;
   color: inherit;
-  font: inherit;
+  font-family: inherit;
+  letter-spacing: inherit;
   text-align: right;
   cursor: pointer;
   border-radius: 2px;
@@ -1735,4 +1738,42 @@ body {
 .cnc-fit-issues {
   margin: 0.25rem 0 0;
   padding-left: 1.1rem;
+}
+
+/* Work zero on the bed: three tappable values, on the machine tab */
+.cnc-zero-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+.cnc-zero-val {
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: baseline;
+  min-height: 2rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.cnc-zero-val:hover,
+.cnc-zero-val:focus-visible {
+  border-color: var(--edge);
+}
+.cnc-zero-val .cnc-axis {
+  font-size: 0.8125rem;
+}
+/* In the readout only on the workstation; phones show it in Zero mode */
+.cnc-dro > .cnc-zero-row {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) {
+  .cnc-dro > .cnc-zero-row {
+    display: flex;
+  }
 }

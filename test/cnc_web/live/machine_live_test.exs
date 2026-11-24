@@ -121,13 +121,17 @@ defmodule CNCWeb.MachineLiveTest do
     assert has_element?(view, "#work-dialog .cnc-set-error", "Type a number")
   end
 
-  test "on the machine tab, the dialog sets the work zero on the bed", %{conn: conn} do
+  test "tapping the work zero row sets it on the bed; machine positions aren't editable", %{
+    conn: conn
+  } do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
     assert eventually(fn -> Machine.status().state == :idle and Machine.status().wpos end)
 
     view |> element(".cnc-dro-head button[phx-value-frame=machine]") |> render_click()
-    view |> element(~s|.cnc-num--edit[phx-value-axis="x"]|) |> render_click()
+    # The machine position isn't editable; the work zero row is.
+    refute has_element?(view, ".cnc-num--edit")
+    view |> element(~s|.cnc-dro .cnc-zero-val[phx-value-axis="x"]|) |> render_click()
     assert has_element?(view, "#work-dialog", "Set X work zero")
     assert has_element?(view, "#work-dialog", "Work zero at machine X =")
 

@@ -151,6 +151,18 @@ defmodule CNCWeb.MachineLive do
      )}
   end
 
+  # The work zero row: always an absolute spot on the bed, whichever tab.
+  def handle_event("edit_zero", %{"axis" => axis}, socket) when axis in ~w(x y z) do
+    axis = String.to_existing_atom(axis)
+    i = Enum.find_index([:x, :y, :z], &(&1 == axis))
+    current = socket.assigns.machine.wco |> elem(i) |> fmt()
+
+    {:noreply,
+     assign(socket,
+       work_edit: %{axis: axis, frame: :machine, value: "", current: current, error: nil}
+     )}
+  end
+
   def handle_event("work_negate", _, socket) do
     negate = fn
       "-" <> rest -> rest
@@ -524,8 +536,10 @@ defmodule CNCWeb.MachineLive do
           </span>
           <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
             <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
+            <%!-- Work tab: tap the work position to type it. Machine tab: the
+                 machine's actual position, which only jogging changes. --%>
             <button
-              :if={@machine.wpos}
+              :if={@machine.wpos && frame(@machine, @frame) == :work}
               type="button"
               class="cnc-num cnc-num--edit"
               phx-click="edit_work"
@@ -535,7 +549,7 @@ defmodule CNCWeb.MachineLive do
             >
               {fmt(axis_value(shown(@machine, @frame), i))}
             </button>
-            <span :if={!@machine.wpos} class="cnc-num">
+            <span :if={!@machine.wpos || frame(@machine, @frame) == :machine} class="cnc-num">
               {fmt(axis_value(shown(@machine, @frame), i))}
             </span>
           </div>
@@ -544,6 +558,8 @@ defmodule CNCWeb.MachineLive do
               if(frame(@machine, @frame) == :work, do: @machine.mpos, else: @machine.wpos)
             )}
           </p>
+          <%!-- On both tabs, so switching doesn't move anything --%>
+          <.work_zero_row :if={@machine.wco} machine={@machine} />
           <div class="cnc-row cnc-dro-tools">
             <button
               type="button"
@@ -719,9 +735,10 @@ defmodule CNCWeb.MachineLive do
                   Go to work zero
                 </button>
               </div>
+              <.work_zero_row :if={@machine.wco} machine={@machine} />
               <p class="cnc-sub">
-                Zero X/Y at the stock's corner, Zero Z on its surface; tap a position
-                above to type any value. Go to work zero lifts Z, then moves to X0 Y0.
+                Zero X/Y at the stock's corner, Zero Z on its surface. To type a value,
+                tap a work position, or the work zero above.
               </p>
             </div>
           </div>
@@ -1100,6 +1117,30 @@ defmodule CNCWeb.MachineLive do
   end
 
   defp push_pos(socket, _), do: socket
+
+  # Where the work zero sits on the bed (machine coordinates). Each value is
+  # tappable: it's the number you change.
+  attr :machine, State, required: true
+  attr :class, :string, default: nil
+
+  defp work_zero_row(assigns) do
+    ~H"""
+    <div class={["cnc-zero-row", @class]} role="group" aria-label="Work zero on the bed">
+      <span class="cnc-sub">Work zero at</span>
+      <button
+        :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]}
+        type="button"
+        class="cnc-zero-val"
+        phx-click="edit_zero"
+        phx-value-axis={String.downcase(axis)}
+        aria-label={"Set the work #{axis} zero on the bed"}
+      >
+        <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
+        {fmt(elem(@machine.wco, i))}
+      </button>
+    </div>
+    """
+  end
 
   attr :program, Program, required: true
   attr :fit, :any, required: true
