@@ -9,7 +9,7 @@ defmodule CNCWeb.ControllersLive do
   on_mount CNCWeb.Pin
 
   alias CNC.{Boards, Controllers, Machine}
-  alias CNC.Controllers.Controller
+  alias CNC.Controllers.{Controller, Profiles}
 
   @link_labels %{
     fluidnc_sim: "On this computer",
@@ -37,7 +37,13 @@ defmodule CNCWeb.ControllersLive do
 
   @impl true
   def handle_info({:controllers, _}, socket), do: {:noreply, load(socket)}
-  def handle_info({:machine, machine}, socket), do: {:noreply, assign(socket, machine: machine)}
+
+  def handle_info({:machine, machine}, socket) do
+    ready? = fn m -> m.connected? and m.state in [:alarm, :idle] end
+    came_up? = ready?.(machine) and not ready?.(socket.assigns.machine)
+    socket = assign(socket, machine: machine)
+    {:noreply, if(came_up?, do: load(socket), else: socket)}
+  end
 
   @impl true
   def handle_event("use", %{"id" => id}, socket) do
@@ -163,6 +169,10 @@ defmodule CNCWeb.ControllersLive do
                   <dd>{Boards.label(p.board)}</dd>
                   <dt>link</dt>
                   <dd>{Controller.describe_link(p.link)}</dd>
+                  <dt :if={@profile_labels[p.id]}>profile</dt>
+                  <dd :if={@profile_labels[p.id]} id={"profile-of-#{p.id}"}>
+                    {@profile_labels[p.id]}
+                  </dd>
                 </dl>
 
                 <form
@@ -340,11 +350,38 @@ defmodule CNCWeb.ControllersLive do
     c = socket.assigns.cnc.controllers
     active = Controllers.active(c)
 
+    controllers = Controllers.list(c)
+
     assign(socket,
-      controllers: Controllers.list(c),
+      controllers: controllers,
       active_id: active && active.id,
-      overridden?: Controllers.overridden?(c)
+      overridden?: Controllers.overridden?(c),
+      profile_labels: Map.new(controllers, &{&1.id, profile_label(socket, &1, active)})
     )
+  end
+
+  # The selected profile and whether the controller's file matches it:
+  # checked on the connected controller, the last check for the others.
+  defp profile_label(socket, ctl, active) do
+    %{cnc: cnc, machine: m} = socket.assigns
+    live? = active != nil and active.id == ctl.id and m.connected? and m.state in [:alarm, :idle]
+
+    seen =
+      with true <- live? and connected?(socket),
+           {:ok, %{profile: p, matches?: matches?}} <- Profiles.check(cnc.machine, cnc.db, ctl) do
+        %{name: p.name, matches?: matches?}
+      else
+        _ -> Profiles.last_seen(cnc.db, ctl.id)
+      end
+
+    case seen do
+      %{name: name} = seen ->
+        status = if Map.get(seen, :matches?, true), do: "", else: ", controller differs"
+        "#{name}#{status}#{if live?, do: "", else: " (last checked)"}"
+
+      nil ->
+        nil
+    end
   end
 
   defp new_add,

@@ -1971,3 +1971,43 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Profiles */
+.cnc-in-use {
+  margin: 0 0 1.25rem;
+  font-size: 1rem;
+}
+.cnc-dim {
+  color: var(--text-dim);
+  font-size: 0.875em;
+}
+.cnc-rename {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.cnc-rename input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+.cnc-advanced summary {
+  cursor: pointer;
+  list-style: revert;
+}
+.cnc-advanced[open] summary {
+  margin-bottom: 0.5rem;
+}
+.cnc-ok {
+  color: var(--ok);
+}
+.cnc-warn {
+  color: var(--warn);
+}
+.cnc-ctls + .cnc-ctl-form {
+  margin-top: 1.25rem;
+}
+

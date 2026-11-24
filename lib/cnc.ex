@@ -27,6 +27,7 @@ defmodule CNC do
       Controllers,
       Controllers.Controller,
       Controllers.Config,
+      Controllers.Profiles,
       Boards
     ]
 end

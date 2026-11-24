@@ -77,71 +77,7 @@ defmodule CNC.Controllers.ConfigTest do
     end
 
     @tag :tmp_dir
-    test "changes are remembered until saved; saving keeps the old file in history",
-         %{machine: m, db: db} do
-      {:ok, _} = Config.change(m, db, "c1", "axes/x/acceleration_mm_per_sec2", "900")
-      {:ok, _} = Config.change(m, db, "c1", "axes/y/acceleration_mm_per_sec2", "800")
-
-      assert {:ok, [%{path: "axes/x/acceleration_mm_per_sec2", from: "500.000", to: "900"}, _]} =
-               Config.changes(m, db, "c1")
-
-      # Changed back by hand: forgotten
-      {:ok, _} = Config.change(m, db, "c1", "axes/y/acceleration_mm_per_sec2", "500")
-      assert {:ok, [%{path: "axes/x/acceleration_mm_per_sec2"}]} = Config.changes(m, db, "c1")
-
-      {:ok, old} = Config.show(m, "config.yaml")
-      assert {:ok, "config.yaml"} = Config.save(m, db, "c1")
-      assert Config.changes(m, db, "c1") == {:ok, []}
-      {:ok, new} = Config.show(m, "config.yaml")
-      assert new =~ "acceleration_mm_per_sec2: 900"
-
-      assert [%{file: "config.yaml", text: ^old, why: "before saving changes"}] =
-               Config.history(db, "c1")
-    end
-
-    @tag :tmp_dir
-    test "unsaved changes come from the board, so a console change shows too", %{
-      machine: m,
-      db: db
-    } do
-      {:ok, _} = Machine.request(m, "$/axes/z/max_rate_mm_per_min=800")
-
-      assert {:ok, [%{path: "axes/z/max_rate_mm_per_min", from: "1000.000", to: "800"}]} =
-               Config.changes(m, db, "c1")
-
-      :ok = Config.undo(m, db, "c1", "axes/z/max_rate_mm_per_min")
-      assert Config.changes(m, db, "c1") == {:ok, []}
-    end
-
-    @tag :tmp_dir
-    test "a setting the file leaves out: the app's record of the change fills in", %{
-      machine: m,
-      db: db
-    } do
-      # A file without Z's max rate (FluidNC would use its default)
-      {:ok, text} = Config.show(m, "config.yaml")
-      sparse = String.replace(text, "    max_rate_mm_per_min: 1000.000\n", "")
-      {:ok, _} = Config.save_running_as(m, "sparse.yaml")
-
-      :sys.replace_state(fake_link(m), fn st ->
-        put_in(st.model.files["sparse.yaml"], sparse)
-        |> then(&%{&1 | model: %{&1.model | config_file: "sparse.yaml"}})
-      end)
-
-      {:ok, _} = Config.change(m, db, "c1", "axes/z/max_rate_mm_per_min", "700")
-
-      assert {:ok, [%{path: "axes/z/max_rate_mm_per_min", from: "1000.000", to: "700"}]} =
-               Config.changes(m, db, "c1")
-    end
-
-    @tag :tmp_dir
-    test "wiring isn't changed live; it's checked against the board's pin map", %{
-      machine: m,
-      db: db
-    } do
-      assert Config.change(m, db, "c1", "axes/x/motor0/standard_stepper/step_pin", "gpio.4") ==
-               {:error, :wiring}
-
+    test "wiring is checked against the board's pin map" do
       board = Config.parse(CNC.Boards.config(:esp32_devkit))
       assert %{checked: n, differences: []} = Config.wiring_check(:esp32_devkit, board)
       assert n > 5
@@ -165,8 +101,7 @@ defmodule CNC.Controllers.ConfigTest do
       db: db
     } do
       {:ok, original} = Config.show(m, "config.yaml")
-      {:ok, _} = Config.change(m, db, "c1", "axes/x/max_rate_mm_per_min", "2500")
-      {:ok, _} = Config.save(m, db, "c1")
+      {:ok, _} = Config.upload(m, "config.yaml", "name: changed\n", {db, "c1"})
       [before] = Config.history(db, "c1")
 
       assert {:ok, "config.yaml"} = Config.restore(m, db, "c1", before)
@@ -178,23 +113,7 @@ defmodule CNC.Controllers.ConfigTest do
       {:ok, six} = Config.show(m, "six.yaml")
       assert six =~ "engine: I2S_STREAM"
     end
-
-    @tag :tmp_dir
-    test "undo; a restart drops unsaved changes", %{machine: m, db: db} do
-      {:ok, _} = Config.change(m, db, "c1", "axes/x/max_travel_mm", "1000")
-      assert :ok = Config.undo(m, db, "c1", "axes/x/max_travel_mm")
-      assert Config.get(m, "axes/x/max_travel_mm") == {:ok, "1250.000"}
-      assert Config.changes(m, db, "c1") == {:ok, []}
-
-      {:ok, _} = Config.change(m, db, "c1", "axes/x/max_travel_mm", "1000")
-      :ok = Config.activate(m, "config.yaml")
-      assert eventually(fn -> Machine.status(m).state == :alarm end, 3000)
-      assert eventually(fn -> Config.changes(m, db, "c1") == {:ok, []} end, 3000)
-    end
   end
-
-  # The machine's FakeSim process (to set up an unusual controller state).
-  defp fake_link(m), do: :sys.get_state(m) |> elem(1) |> Map.fetch!(:link)
 
   defp eventually(fun, timeout) do
     cond do

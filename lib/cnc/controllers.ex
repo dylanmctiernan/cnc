@@ -19,7 +19,7 @@ defmodule CNC.Controllers do
   Each FluidNC sim runs in its own folder under the data dir, so its
   config and settings persist across restarts, like a board's flash.
   """
-  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Controller, Config]
+  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Controller, Config, Profiles]
   use GenServer
   require Logger
 

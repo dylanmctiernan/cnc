@@ -1,32 +1,27 @@
 defmodule CNC.Controllers.Config do
   @moduledoc """
-  A connected controller's configuration, which lives on the controller.
+  The controller's side of configuration: what's on it and what it runs.
 
   FluidNC keeps config files (YAML) on its local filesystem and loads one at
-  boot, named by `$Config/Filename`. Several can sit side by side (a
-  baseline, a variation you're trying), and switching is choosing another
-  file and restarting. What's running can differ from the file once settings
-  are changed live; `save_running_as/2` writes it out.
+  boot, named by `$Config/Filename`. This module lists, shows, writes
+  (`upload/4`: XModem on hardware), switches (`activate/2`: choose, then
+  restart) and deletes them, reads the running config (`$CD`) and gets or
+  sets one setting live (`$/path=value`, read back, since FluidNC answers
+  `ok` even when it didn't apply a value). Wiring (`CNC.Boards.wiring?/1`)
+  isn't set live. Before a file is rewritten or deleted its text goes into
+  the controller's history (in the app's database).
 
-  Settings can be changed live (`change/5`: FluidNC's `$/path=value`, read
-  back to confirm it took), except wiring (`CNC.Boards.wiring?/1`: pins,
-  stepping engine, buses), which only changes in a file. What's not saved yet comes from the controller:
-  the running config (`$CD`) against the file it loaded, so changes made any
-  way (the console too) show. A file leaves defaults out, so for a setting
-  it doesn't mention the app's own record of what it was (kept per
-  controller in the app's database) fills in. `save/3` writes the running
-  config over the loaded file, keeping the file's previous text in the
-  controller's history first. A restart drops unsaved changes (the
-  controller reloads its file).
+  The happy path on top of this is `CNC.Controllers.Profiles`: named sets
+  of values, each rendered (board + profile) into its own file.
 
   Everything goes through `CNC.Machine.request/3`, so it needs the machine
   connected and `:idle` or `:alarm`.
   """
 
+  alias CNC.Controllers.Yaml
   alias CNC.Machine
 
   @type file :: %{name: String.t(), size: non_neg_integer}
-  @type change :: %{path: String.t(), from: String.t(), to: String.t()}
   @type snapshot :: %{at: DateTime.t(), file: String.t(), text: String.t(), why: String.t()}
 
   @history_max 30
@@ -116,41 +111,7 @@ defmodule CNC.Controllers.Config do
       [{"name", "R"}, {"axes/x/steps_per_mm", "80"}, {"axes/x/motor0/pulloff_mm", "2"}]
   """
   @spec parse(String.t()) :: [{String.t(), String.t()}]
-  def parse(text) do
-    text
-    |> String.split("\n")
-    |> Enum.reduce({[], []}, fn line, {stack, acc} ->
-      case Regex.run(~r/^(\s*)([^:#\s][^:]*):\s?(.*)$/, line) do
-        [_, indent, key, value] ->
-          depth = String.length(indent)
-          stack = Enum.drop_while(stack, fn {d, _} -> d >= depth end)
-          key = key |> String.trim() |> String.downcase()
-
-          case unquote_value(String.trim(value)) do
-            "" ->
-              {[{depth, key} | stack], acc}
-
-            value ->
-              path = Enum.join(Enum.reverse(for({_, k} <- stack, do: k), [key]), "/")
-              {stack, [{path, value} | acc]}
-          end
-
-        nil ->
-          {stack, acc}
-      end
-    end)
-    |> elem(1)
-    |> Enum.reverse()
-  end
-
-  # YAML quoting: FluidNC's dump writes strings bare.
-  defp unquote_value(<<q, rest::binary>> = value) when q in [?", ?'] do
-    if String.ends_with?(rest, <<q>>) and rest != "",
-      do: String.slice(rest, 0..-2//1),
-      else: value
-  end
-
-  defp unquote_value(value), do: value
+  def parse(text), do: text |> Yaml.parse() |> Yaml.leaves()
 
   @doc """
   The controller's wiring against its board's pin map (`CNC.Boards.config/1`):
@@ -217,104 +178,18 @@ defmodule CNC.Controllers.Config do
   end
 
   @doc """
-  Change a setting live and remember it as not saved yet. Changing it back
-  to where it was forgets it.
-  """
-  @spec change(GenServer.server(), GenServer.server(), String.t(), String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, term}
-  def change(machine, db, id, path, value) do
-    with :ok <- valid_path(path),
-         false <- CNC.Boards.wiring?(path) && {:error, :wiring},
-         {:ok, before} <- get(machine, path),
-         {:ok, now} <- set(machine, path, value) do
-      path = String.downcase(path)
-      list = CubDB.get(db, {:config_changes, id}, [])
-      from = Enum.find_value(list, before, &(&1.path == path && &1.from))
-      list = Enum.reject(list, &(&1.path == path))
-      list = if same?(now, from), do: list, else: list ++ [%{path: path, from: from, to: now}]
-      :ok = CubDB.put(db, {:config_changes, id}, list)
-      {:ok, now}
-    end
-  end
-
-  @doc """
-  What's not saved yet: settings where the controller is running something
-  other than the file it loaded (in the file's order), then settings the
-  file doesn't mention that were changed through the app. One back at its
-  old value (undone, or the controller restarted) is gone.
-  """
-  @spec changes(GenServer.server(), GenServer.server(), String.t()) ::
-          {:ok, [change]} | {:error, term}
-  def changes(machine, db, id) do
-    with {:ok, %{active: file}} when is_binary(file) <- files(machine),
-         {:ok, file_text} <- show(machine, file),
-         {:ok, running_text} <- running(machine) do
-      in_file = parse(file_text)
-      in_file_paths = MapSet.new(in_file, &elem(&1, 0))
-      running = Map.new(parse(running_text))
-
-      from_board =
-        for {path, was} <- in_file,
-            now = running[path],
-            now != nil and not same?(now, was),
-            do: %{path: path, from: was, to: now}
-
-      recorded = recorded(db, id)
-
-      from_app =
-        for c <- recorded,
-            not MapSet.member?(in_file_paths, c.path),
-            now = running[c.path],
-            now != nil and not same?(now, c.from),
-            do: %{c | to: now}
-
-      if from_app != recorded, do: CubDB.put(db, {:config_changes, id}, from_app)
-      {:ok, from_board ++ from_app}
-    else
-      {:ok, %{active: nil}} -> {:error, :no_active_file}
-      other -> other
-    end
-  end
-
-  @doc "Put a changed setting back to what it was (in the file, or before the app changed it)."
-  @spec undo(GenServer.server(), GenServer.server(), String.t(), String.t()) ::
-          :ok | {:error, term}
-  def undo(machine, db, id, path) do
-    with {:ok, list} <- changes(machine, db, id),
-         %{from: from} <- Enum.find(list, &(&1.path == path)) || {:error, :not_found},
-         {:ok, _} <- set(machine, path, from) do
-      CubDB.put(db, {:config_changes, id}, Enum.reject(recorded(db, id), &(&1.path == path)))
-    end
-  end
-
-  defp recorded(db, id), do: CubDB.get(db, {:config_changes, id}, [])
-
-  @doc """
-  Save what's running over the file the controller loads (`$CD=<file>`),
-  keeping the file's previous text in the history. FluidNC writes every
-  setting, defaults included, so the file gets longer.
-  """
-  @spec save(GenServer.server(), GenServer.server(), String.t()) ::
-          {:ok, String.t()} | {:error, term}
-  def save(machine, db, id) do
-    with {:ok, %{active: file}} when is_binary(file) <- files(machine),
-         :ok <- keep_in_history(machine, {db, id}, file, "before saving changes"),
-         {:ok, _} <- Machine.request(machine, "$CD=" <> file) do
-      :ok = CubDB.put(db, {:config_changes, id}, [])
-      {:ok, file}
-    else
-      {:ok, %{active: nil}} -> {:error, :no_active_file}
-      other -> other
-    end
-  end
-
-  @doc """
   Write a whole config file onto the controller (`CNC.Machine.upload/4`:
   XModem on hardware). To use it, switch to it (`activate/2`).
   """
-  @spec upload(GenServer.server(), String.t(), String.t()) :: {:ok, String.t()} | {:error, term}
-  def upload(machine, name, text) do
+  @spec upload(
+          GenServer.server(),
+          String.t(),
+          String.t(),
+          {GenServer.server(), String.t()} | nil
+        ) :: {:ok, String.t()} | {:error, term}
+  def upload(machine, name, text, keep \\ nil) do
     with {:ok, name} <- valid_name(name),
+         :ok <- keep_in_history(machine, keep, name, "before it was rewritten"),
          {:ok, _bytes} <- Machine.upload(machine, name, text),
          do: {:ok, name}
   end
@@ -341,8 +216,9 @@ defmodule CNC.Controllers.Config do
   @spec history(GenServer.server(), String.t()) :: [snapshot]
   def history(db, id), do: CubDB.get(db, {:config_history, id}, [])
 
-  @doc "Forget a controller's changes and history (it was removed)."
-  def forget(db, id), do: CubDB.delete_multi(db, [{:config_changes, id}, {:config_history, id}])
+  @doc "Forget a controller's profiles and history (it was removed)."
+  def forget(db, id),
+    do: CubDB.delete_multi(db, [{:config_history, id}, {:profiles, id}])
 
   defp keep_in_history(_machine, nil, _file, _why), do: :ok
 
@@ -378,8 +254,8 @@ defmodule CNC.Controllers.Config do
     end)
   end
 
-  # Numbers compare as numbers (FluidNC prints 900 as 900.000).
-  defp same?(a, b) do
+  @doc "Two setting values mean the same: numbers as numbers (FluidNC prints 900 as 900.000), text in any case."
+  def same?(a, b) do
     case {Float.parse(a), Float.parse(b)} do
       {{x, ""}, {y, ""}} -> abs(x - y) < 1.0e-6
       _ -> String.downcase(String.trim(a)) == String.downcase(String.trim(b))
