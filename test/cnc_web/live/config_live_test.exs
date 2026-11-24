@@ -19,7 +19,7 @@ defmodule CNCWeb.ConfigLiveTest do
 
     {:ok, _view, _} =
       view
-      |> element("#to-configuration")
+      |> element("#nav-configuration")
       |> render_click()
       |> follow_redirect(conn, ~p"/configuration")
 
@@ -27,7 +27,7 @@ defmodule CNCWeb.ConfigLiveTest do
 
     {:ok, config, _} =
       view
-      |> element("#to-configuration")
+      |> element("#nav-configuration")
       |> render_click()
       |> follow_redirect(conn, ~p"/configuration")
 
@@ -70,7 +70,7 @@ defmodule CNCWeb.ConfigLiveTest do
 
     # Staged, not applied
     assert has_element?(view, "#pending-bar", "1 value staged")
-    assert has_element?(view, "#tab-profiles .cnc-tab-count", "1")
+    assert has_element?(view, "#tab-profiles .ui-count", "1")
     assert has_element?(view, "#view-#{pid}-x-max_rate_mm_per_min.is-staged", "2500")
     assert FluidNC.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "3000"}
 

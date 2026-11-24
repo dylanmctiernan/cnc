@@ -42,7 +42,6 @@ defmodule CNCWeb.ConfigLive do
     cnc = CNCWeb.Instance.from_session(session)
 
     if connected?(socket) do
-      Machine.subscribe(cnc.topic)
       Controllers.subscribe(cnc.controllers_topic)
       Changes.subscribe(cnc.db)
     end
@@ -598,18 +597,16 @@ defmodule CNCWeb.ConfigLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
-      <div class={["cnc-page", @staged != [] && "has-pending"]}>
-        <header class="cnc-bar">
-          <.link navigate={~p"/"} class="cnc-btn" id="back-to-machine">Back to machine</.link>
-          <h1 class="cnc-page-title">Configuration</h1>
-          <.link navigate={~p"/controllers"} class="cnc-btn" id="to-controllers">Controllers</.link>
-          <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
-            {state_word(@machine.state)}
-          </div>
-        </header>
+    <Layouts.app flash={@flash} current={:configuration} machine={@shell_machine}>
+      <div class={["ui-page", "cnc-config", @staged != [] && "has-pending"]}>
+        <UI.page_header title="Configuration">
+          <:description>
+            How the machine is built, wired and run, and the config file on the controller in
+            use. Edits are staged, then reviewed and applied together.
+          </:description>
+        </UI.page_header>
 
-        <main class="cnc-settings cnc-config">
+        <div>
           <p :if={@error} id="config-error" class="cnc-set-error">{@error}</p>
 
           <%= cond do %>
@@ -620,9 +617,9 @@ defmodule CNCWeb.ConfigLive do
                   machine's build and profiles are kept here and written to it.
                 </p>
                 <div class="cnc-row">
-                  <.link navigate={~p"/controllers"} class="cnc-btn cnc-btn--primary">
+                  <UI.button variant="primary" navigate={~p"/controllers"}>
                     Go to Controllers
-                  </.link>
+                  </UI.button>
                 </div>
               </section>
             <% @working -> %>
@@ -632,23 +629,17 @@ defmodule CNCWeb.ConfigLive do
             <% true -> %>
               <.status_strip check={@check} controller={@controller} staged={@staged} />
 
-              <nav class="cnc-tabs" aria-label="Configuration">
-                <.link
-                  :for={{tab, label} <- tabs()}
-                  patch={tab_path(tab)}
-                  id={"tab-#{tab}"}
-                  class={["cnc-tab", @tab == tab && "is-current"]}
-                  aria-current={if(@tab == tab, do: "page", else: "false")}
-                >
-                  {label}<span :if={staged_in(@staged, tab) > 0} class="cnc-tab-count">
-                    {staged_in(@staged, tab)}
-                  </span>
-                </.link>
-              </nav>
+              <UI.tabs
+                label="Configuration"
+                current={@tab}
+                items={
+                  for {tab, label} <- tabs(), do: {tab, label, tab_path(tab), staged_in(@staged, tab)}
+                }
+              />
 
               {tab_content(assigns)}
           <% end %>
-        </main>
+        </div>
 
         <div :if={@staged != [] and @controller} class="cnc-pending" id="pending-bar" role="status">
           <span class="cnc-pending-what">
@@ -659,23 +650,21 @@ defmodule CNCWeb.ConfigLive do
             </span>
           </span>
           <span class="cnc-row">
-            <button
-              type="button"
-              class="cnc-btn cnc-btn--quiet"
+            <UI.button
+              variant="quiet"
               id="discard-staged"
               phx-click="discard"
               data-confirm={"Discard the #{count_label(length(@staged))} staged?"}
             >
               Discard
-            </button>
-            <button
-              type="button"
-              class="cnc-btn cnc-btn--primary"
+            </UI.button>
+            <UI.button
+              variant="primary"
               id="review-staged"
               phx-click="review"
             >
               Review &amp; apply
-            </button>
+            </UI.button>
           </span>
         </div>
 
@@ -753,61 +742,54 @@ defmodule CNCWeb.ConfigLive do
           </div>
 
           <div :if={@renaming != p.id and @editing != {"profile", p.id}} class="cnc-row">
-            <button
+            <UI.button
               :if={not selected?(@check, p)}
-              type="button"
-              class="cnc-btn cnc-btn--primary"
+              variant="primary"
               phx-click="switch"
               phx-value-profile={p.id}
               disabled={@machine.moving?}
             >
               Switch to this
-            </button>
-            <button
-              type="button"
-              class="cnc-btn"
+            </UI.button>
+            <UI.button
               id={"edit-#{p.id}"}
               phx-click="edit"
               phx-value-part="profile"
               phx-value-target={p.id}
             >
               Edit
-            </button>
-            <button type="button" class="cnc-btn" phx-click="toggle" phx-value-key={"file-#{p.id}"}>
+            </UI.button>
+            <UI.button type="button" phx-click="toggle" phx-value-key={"file-#{p.id}"}>
               {if MapSet.member?(@showing, "file-#{p.id}"), do: "Hide file", else: "View file"}
-            </button>
-            <button
+            </UI.button>
+            <UI.button
               :if={not selected?(@check, p)}
-              type="button"
-              class="cnc-btn"
               phx-click="toggle"
               phx-value-key={"diff-#{p.id}"}
             >
               {if MapSet.member?(@showing, "diff-#{p.id}"),
                 do: "Hide diff",
                 else: "Diff with selected"}
-            </button>
-            <button type="button" class="cnc-btn" phx-click="toggle" phx-value-key={"history-#{p.id}"}>
+            </UI.button>
+            <UI.button type="button" phx-click="toggle" phx-value-key={"history-#{p.id}"}>
               {if MapSet.member?(@showing, "history-#{p.id}"), do: "Hide history", else: "History"}
-            </button>
-            <button
-              type="button"
-              class="cnc-btn cnc-btn--quiet"
+            </UI.button>
+            <UI.button
+              variant="quiet"
               phx-click="rename"
               phx-value-profile={p.id}
             >
               Rename
-            </button>
-            <button
+            </UI.button>
+            <UI.button
               :if={not selected?(@check, p)}
-              type="button"
-              class="cnc-btn cnc-btn--quiet"
+              variant="quiet"
               phx-click="delete_profile"
               phx-value-profile={p.id}
               data-confirm={"Delete the profile #{p.name}?"}
             >
               Delete
-            </button>
+            </UI.button>
           </div>
 
           <div :if={MapSet.member?(@showing, "diff-#{p.id}")} id={"diff-#{p.id}"} class="cnc-diff">
@@ -860,7 +842,7 @@ defmodule CNCWeb.ConfigLive do
           </label>
         </div>
         <div class="cnc-row">
-          <button type="submit" class="cnc-btn">Make profile</button>
+          <UI.button type="submit">Make profile</UI.button>
         </div>
       </form>
     </section>
@@ -882,15 +864,13 @@ defmodule CNCWeb.ConfigLive do
         errors={@field_errors}
       />
       <div class="cnc-row">
-        <button
-          type="button"
-          class="cnc-btn"
+        <UI.button
           id="build-history"
           phx-click="toggle"
           phx-value-key="history-build"
         >
           {if MapSet.member?(@showing, "history-build"), do: "Hide history", else: "History"}
-        </button>
+        </UI.button>
       </div>
       <.revisions
         :if={MapSet.member?(@showing, "history-build")}
@@ -937,15 +917,13 @@ defmodule CNCWeb.ConfigLive do
         errors={@field_errors}
       />
       <div class="cnc-row">
-        <button
-          type="button"
-          class="cnc-btn"
+        <UI.button
           id="wiring-history"
           phx-click="toggle"
           phx-value-key="history-wiring"
         >
           {if MapSet.member?(@showing, "history-wiring"), do: "Hide history", else: "History"}
-        </button>
+        </UI.button>
       </div>
       <.revisions
         :if={MapSet.member?(@showing, "history-wiring")}
@@ -980,26 +958,23 @@ defmodule CNCWeb.ConfigLive do
         <p class="cnc-sub">configuration → file:</p>
         <.diff_list diffs={check_diffs(@check)} id="check-diff" />
         <div class="cnc-row">
-          <button
-            type="button"
+          <UI.button
+            variant="primary"
             id="write-profile"
-            class="cnc-btn cnc-btn--primary"
             phx-click="switch"
             phx-value-profile={@check.profile.id}
             disabled={@machine.moving?}
           >
             Write the configuration and restart
-          </button>
-          <button
+          </UI.button>
+          <UI.button
             :if={not @check.override?}
-            type="button"
             id="take-file"
-            class="cnc-btn"
             phx-click="take_file"
             disabled={@machine.moving?}
           >
             Keep the controller's values
-          </button>
+          </UI.button>
         </div>
       </div>
       <p :if={@check.matches?} class="cnc-ok" id="check-ok">
@@ -1013,24 +988,23 @@ defmodule CNCWeb.ConfigLive do
         </p>
         <.diff_list diffs={for d <- @drift, do: %{path: d.path, from: d.profile, to: d.controller}} />
         <div class="cnc-row">
-          <button
-            type="button"
+          <UI.button
+            variant="primary"
             id="keep-drift"
-            class="cnc-btn cnc-btn--primary"
             phx-click="keep_drift"
           >
             Keep them
-          </button>
-          <button type="button" id="put-back" class="cnc-btn" phx-click="put_back">
+          </UI.button>
+          <UI.button type="button" id="put-back" phx-click="put_back">
             Put the configuration's back
-          </button>
+          </UI.button>
         </div>
       </div>
 
       <div class="cnc-row">
-        <button type="button" id="view-file" class="cnc-btn" phx-click="view">
+        <UI.button type="button" id="view-file" phx-click="view">
           {if @viewing, do: "Hide #{@viewing}", else: "View #{active_file(assigns)}"}
-        </button>
+        </UI.button>
       </div>
       <.yaml_view :if={@viewing} id="config-text" text={@text} />
 
@@ -1073,16 +1047,15 @@ defmodule CNCWeb.ConfigLive do
           {upload_error(err)}
         </p>
         <div class="cnc-row">
-          <button
+          <UI.button
             type="submit"
             id="review-override"
-            class="cnc-btn"
             disabled={
               (@uploads.config_file.entries == [] and String.trim(@paste) == "") or @machine.moving?
             }
           >
             Review changes
-          </button>
+          </UI.button>
         </div>
       </form>
     </section>
@@ -1179,16 +1152,15 @@ defmodule CNCWeb.ConfigLive do
       <.axes_table values={@shown} staged={@staged} id_prefix={"view-#{@part}"} />
       <.values_list id={"values-#{@part}"} values={@values} staged={@staged} skip={axis_paths()} />
       <div class="cnc-row">
-        <button
-          type="button"
-          class="cnc-btn cnc-btn--primary"
+        <UI.button
+          variant="primary"
           id={"edit-#{@part}-button"}
           phx-click="edit"
           phx-value-part={@part}
           phx-value-target={@target}
         >
           Edit
-        </button>
+        </UI.button>
       </div>
     <% end %>
     """
@@ -1200,11 +1172,11 @@ defmodule CNCWeb.ConfigLive do
       Staged changes are applied together from the bar below; Apply now reviews just these.
     </p>
     <div class="cnc-row">
-      <button type="submit" name="intent" value="stage" class="cnc-btn cnc-btn--primary">
+      <UI.button variant="primary" type="submit" name="intent" value="stage">
         Stage changes
-      </button>
-      <button type="submit" name="intent" value="now" class="cnc-btn">Apply now</button>
-      <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="done_editing">Cancel</button>
+      </UI.button>
+      <UI.button type="submit" name="intent" value="now">Apply now</UI.button>
+      <UI.button variant="quiet" type="button" phx-click="done_editing">Cancel</UI.button>
     </div>
     """
   end
@@ -1268,69 +1240,54 @@ defmodule CNCWeb.ConfigLive do
       )
 
     ~H"""
-    <div class="cnc-modal" id="review-modal" phx-window-keydown="close_review" phx-key="Escape">
-      <div
-        class="cnc-modal-box"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="review-title"
-        phx-click-away="close_review"
-      >
-        <h2 id="review-title" class="cnc-modal-title">
-          Apply {count_label(length(@changes))}
-        </h2>
-        <p class="cnc-sub">
-          <%= if @restart? do %>
-            Values are set on the controller, then its file is written once and it restarts
-            (wiring only changes at startup) and comes back locked.
-          <% else %>
-            Values are set on the controller straight away, then its file is written once.
-          <% end %>
-          Changes to a profile that isn't selected are only stored.
-        </p>
-        <div :for={{{part, target}, group} <- @groups} class="cnc-review-group">
-          <h3 class="cnc-review-part">{part_label(assigns, part, target)}</h3>
-          <ul class="cnc-changes">
-            <li :for={c <- group} id={"review-" <> dom_id(Changes.key(c))}>
-              <code>{c.path}</code>
-              <span class="cnc-change-vals">
-                <span class="cnc-diff-from">{shown(c.from) || "not set"}</span>
-                → <strong class="cnc-diff-to">{shown(c.to)}</strong>
-                <span
-                  :if={Changes.key(c) in @stale}
-                  class="cnc-warn"
-                  title="Changed elsewhere since it was staged"
-                >
-                  changed since
-                </span>
-              </span>
-              <button
-                type="button"
-                class="cnc-btn cnc-btn--quiet"
-                phx-click="drop_change"
-                phx-value-key={Changes.key(c)}
+    <UI.dialog
+      id="review-modal"
+      title={"Apply #{count_label(length(@changes))}"}
+      on_cancel="close_review"
+    >
+      <p class="ui-muted">
+        <%= if @restart? do %>
+          Values are set on the controller, then its file is written once and it restarts
+          (wiring only changes at startup) and comes back locked.
+        <% else %>
+          Values are set on the controller straight away, then its file is written once.
+        <% end %>
+        Changes to a profile that isn't selected are only stored.
+      </p>
+      <div :for={{{part, target}, group} <- @groups} class="cnc-review-group">
+        <h3 class="cnc-review-part">{part_label(assigns, part, target)}</h3>
+        <ul class="cnc-changes">
+          <li :for={c <- group} id={"review-" <> dom_id(Changes.key(c))}>
+            <code>{c.path}</code>
+            <span class="cnc-change-vals">
+              <span class="cnc-diff-from">{shown(c.from) || "not set"}</span>
+              → <strong class="cnc-diff-to">{shown(c.to)}</strong>
+              <span
+                :if={Changes.key(c) in @stale}
+                class="cnc-warn"
+                title="Changed elsewhere since it was staged"
               >
-                Remove
-              </button>
-            </li>
-          </ul>
-        </div>
-        <div class="cnc-row">
-          <button
-            type="button"
-            id="apply-staged"
-            class="cnc-btn cnc-btn--primary"
-            phx-click="apply"
-            disabled={@machine.moving?}
-          >
-            {if @restart?, do: "Apply and restart", else: "Apply"}
-          </button>
-          <button type="button" class="cnc-btn" id="close-review" phx-click="close_review">
-            Not yet
-          </button>
-        </div>
+                changed since
+              </span>
+            </span>
+            <UI.button
+              variant="quiet"
+              size="sm"
+              phx-click="drop_change"
+              phx-value-key={Changes.key(c)}
+            >
+              Remove
+            </UI.button>
+          </li>
+        </ul>
       </div>
-    </div>
+      <:actions>
+        <UI.button variant="primary" id="apply-staged" phx-click="apply" disabled={@machine.moving?}>
+          {if @restart?, do: "Apply and restart", else: "Apply"}
+        </UI.button>
+        <UI.button id="close-review" phx-click="close_review">Not yet</UI.button>
+      </:actions>
+    </UI.dialog>
     """
   end
 
@@ -1340,37 +1297,20 @@ defmodule CNCWeb.ConfigLive do
   # Approving one action from its diff.
   defp dialog(assigns) do
     ~H"""
-    <div class="cnc-modal" id="approve-modal" phx-window-keydown="cancel_dialog" phx-key="Escape">
-      <div
-        class="cnc-modal-box"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="approve-title"
-        phx-click-away="cancel_dialog"
-      >
-        <h2 id="approve-title" class="cnc-modal-title">{@dialog.title}</h2>
-        <p class="cnc-sub">{@dialog.note}</p>
-        <p :if={@dialog.diffs == []} class="cnc-sub" id="approve-nothing">No values change.</p>
-        <div :if={@dialog.diffs != []} class="cnc-modal-diffs">
-          <p class="cnc-sub">{@dialog.from_label} → {@dialog.to_label}:</p>
-          <.diff_list diffs={@dialog.diffs} id="approve-diffs" />
-        </div>
-        <div class="cnc-row">
-          <button
-            type="button"
-            id="approve"
-            class="cnc-btn cnc-btn--primary"
-            phx-click="approve"
-            disabled={@machine.moving?}
-          >
-            {@dialog.approve}
-          </button>
-          <button type="button" id="cancel-approve" class="cnc-btn" phx-click="cancel_dialog">
-            Cancel
-          </button>
-        </div>
+    <UI.dialog id="approve-modal" title={@dialog.title} on_cancel="cancel_dialog">
+      <p class="ui-muted">{@dialog.note}</p>
+      <p :if={@dialog.diffs == []} class="ui-muted" id="approve-nothing">No values change.</p>
+      <div :if={@dialog.diffs != []} class="cnc-modal-diffs">
+        <p class="ui-muted">{@dialog.from_label} → {@dialog.to_label}:</p>
+        <.diff_list diffs={@dialog.diffs} id="approve-diffs" />
       </div>
-    </div>
+      <:actions>
+        <UI.button variant="primary" id="approve" phx-click="approve" disabled={@machine.moving?}>
+          {@dialog.approve}
+        </UI.button>
+        <UI.button id="cancel-approve" phx-click="cancel_dialog">Cancel</UI.button>
+      </:actions>
+    </UI.dialog>
     """
   end
 
@@ -1472,27 +1412,24 @@ defmodule CNCWeb.ConfigLive do
           <.diff_list :if={e.diff != []} diffs={e.diff} />
           <p :if={e.diff == []} class="cnc-sub">No values changed.</p>
           <div class="cnc-row">
-            <button
+            <UI.button
               :if={i > 0 and (not @files or is_binary(e.text))}
-              type="button"
-              class="cnc-btn"
               phx-click={@restore}
               phx-value-i={i}
               {for {k, v} <- @values, into: %{}, do: {"phx-value-#{k}", v}}
             >
               Restore v{e.version}
-            </button>
-            <button
+            </UI.button>
+            <UI.button
               :if={@files and is_binary(e.text)}
-              type="button"
-              class="cnc-btn cnc-btn--quiet"
+              variant="quiet"
               phx-click="toggle_rev"
               phx-value-key={"#{@prefix}-#{e.version}-file"}
             >
               {if MapSet.member?(@expanded, "#{@prefix}-#{e.version}-file"),
                 do: "Hide file",
                 else: "View file"}
-            </button>
+            </UI.button>
           </div>
           <.yaml_view
             :if={
@@ -1582,10 +1519,10 @@ defmodule CNCWeb.ConfigLive do
     <form id={"rename-#{@profile.id}"} class="cnc-rename" phx-submit="save_name">
       <input type="hidden" name="profile" value={@profile.id} />
       <input name="name" value={@profile.name} autocomplete="off" aria-label="Profile name" />
-      <button type="submit" class="cnc-btn">Save</button>
-      <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="cancel_rename">
+      <UI.button type="submit">Save</UI.button>
+      <UI.button variant="quiet" type="button" phx-click="cancel_rename">
         Cancel
-      </button>
+      </UI.button>
     </form>
     """
   end
@@ -1798,17 +1735,4 @@ defmodule CNCWeb.ConfigLive do
   defp error_text({:invalid_state, _}), do: "The controller is busy: try again once it's idle."
   defp error_text(code) when is_integer(code), do: "The controller refused it (error #{code})."
   defp error_text(other), do: "That didn't work: #{inspect(other)}."
-
-  defp state_word(state) do
-    %{
-      disconnected: "Not connected",
-      connecting: "Connecting",
-      alarm: "Locked",
-      idle: "Ready",
-      jogging: "Jogging",
-      uploading: "Uploading",
-      homing: "Homing",
-      busy: "Busy"
-    }[state]
-  end
 end

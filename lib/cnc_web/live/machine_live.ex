@@ -23,8 +23,8 @@ defmodule CNCWeb.MachineLive do
   def mount(_params, session, socket) do
     cnc = CNCWeb.Instance.from_session(session)
 
+    # (The shell, CNCWeb.Shell, subscribes to the machine.)
     if connected?(socket) do
-      Machine.subscribe(cnc.topic)
       Program.subscribe(cnc.program_topic)
       CNC.Controllers.subscribe(cnc.controllers_topic)
     end
@@ -345,7 +345,7 @@ defmodule CNCWeb.MachineLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
+    <Layouts.app flash={@flash} current={:machine} machine={@shell_machine}>
       <div id="jog-keys" phx-hook="JogKeys" data-tier={@tier} hidden></div>
 
       <%!-- One structure, two layouts (assets/css/app.css):
@@ -410,9 +410,6 @@ defmodule CNCWeb.MachineLive do
             <button type="button" id="open-file" class="cnc-btn" phx-click="open_file">
               Open file
             </button>
-            <.link navigate={~p"/configuration"} class="cnc-btn" id="to-configuration">
-              Configuration
-            </.link>
             <button
               type="button"
               class="cnc-btn"
@@ -468,10 +465,6 @@ defmodule CNCWeb.MachineLive do
               >
                 {if @details?, do: "Hide console", else: "Console"}
               </button>
-              <.link navigate={~p"/controllers"} class="cnc-btn">
-                Controller: {controller_name(@controller, @machine)}
-              </.link>
-              <.link navigate={~p"/configuration"} class="cnc-btn">Configuration</.link>
               <button
                 type="button"
                 class="cnc-btn"

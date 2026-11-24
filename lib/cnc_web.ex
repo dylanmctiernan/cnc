@@ -87,6 +87,8 @@ defmodule CNCWeb do
       # Common modules used in templates
       alias Phoenix.LiveView.JS
       alias CNCWeb.Layouts
+      # The component kit: <UI.button>, <UI.section>, ...
+      alias CNCWeb.UI
 
       # Routes generation with the ~p sigil
       unquote(verified_routes())

@@ -21,7 +21,8 @@ defmodule CNCWeb.Router do
     get "/pin", PinController, :new
     post "/pin", PinController, :create
 
-    live_session :machine, on_mount: CNCWeb.Pin do
+    # The workstation: pages in the console shell
+    live_session :machine, on_mount: [CNCWeb.Pin, CNCWeb.Shell] do
       live "/", MachineLive
       live "/controllers", ControllersLive
       live "/configuration", ConfigLive, :profiles

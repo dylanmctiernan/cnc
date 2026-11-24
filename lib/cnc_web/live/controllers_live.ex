@@ -23,10 +23,7 @@ defmodule CNCWeb.ControllersLive do
   def mount(_params, session, socket) do
     cnc = CNCWeb.Instance.from_session(session)
 
-    if connected?(socket) do
-      Machine.subscribe(cnc.topic)
-      Controllers.subscribe(cnc.controllers_topic)
-    end
+    if connected?(socket), do: Controllers.subscribe(cnc.controllers_topic)
 
     {:ok,
      socket
@@ -123,27 +120,16 @@ defmodule CNCWeb.ControllersLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.app flash={@flash}>
-      <div class="cnc-page">
-        <header class="cnc-bar">
-          <.link navigate={~p"/"} class="cnc-btn">Back to machine</.link>
-          <h1 class="cnc-page-title">Controllers</h1>
-          <.link navigate={~p"/configuration"} class="cnc-btn" id="to-configuration">
-            Configuration
-          </.link>
-          <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
-            {state_word(@machine.state)}
-          </div>
-        </header>
-
-        <main class="cnc-settings">
-          <p class="cnc-sub cnc-settings-intro">
-            A controller is a board plus how the app reaches it. Its configuration lives on
-            the controller, so changing the link (USB to Wi-Fi, say) keeps it. Connect one
-            to drive the machine with it (it starts locked until you unlock or home);
-            Disconnect to use none.
-          </p>
-
+    <Layouts.app flash={@flash} current={:controllers} machine={@shell_machine}>
+      <div class="ui-page">
+        <UI.page_header title="Controllers">
+          <:description>
+            The boards that drive the machine, and how the app reaches each (USB or Wi-Fi).
+            Connect one to drive the machine with it (it starts locked until you unlock or
+            home); Disconnect to use none. The machine's configuration carries over.
+          </:description>
+        </UI.page_header>
+        <div>
           <p :if={@overridden?} class="cnc-note cnc-note--warn">
             CNC_LINK is set, so the machine uses that link and these controllers are
             ignored until the app restarts without it.
@@ -188,51 +174,45 @@ defmodule CNCWeb.ControllersLive do
                 >
                   <.link_fields name="link" params={@edit} board={p.board} ports={@ports} />
                   <div class="cnc-row">
-                    <button type="button" class="cnc-btn" phx-click="cancel_edit">Cancel</button>
-                    <button type="submit" class="cnc-btn cnc-btn--primary">Save link</button>
+                    <UI.button type="button" phx-click="cancel_edit">Cancel</UI.button>
+                    <UI.button variant="primary" type="submit">Save link</UI.button>
                   </div>
                 </form>
 
                 <div :if={@editing != p.id} class="cnc-row">
-                  <button
+                  <UI.button
                     :if={p.id != @active_id}
-                    type="button"
-                    class="cnc-btn cnc-btn--primary"
+                    variant="primary"
                     phx-click="use"
                     phx-value-id={p.id}
                     disabled={@overridden? or @machine.moving?}
                   >
                     Connect
-                  </button>
-                  <button
+                  </UI.button>
+                  <UI.button
                     :if={p.id == @active_id}
-                    type="button"
-                    class="cnc-btn"
                     phx-click="deactivate"
                     disabled={@overridden? or @machine.moving?}
                     data-confirm={"Stop using #{p.name}? The machine disconnects."}
                   >
                     Disconnect
-                  </button>
-                  <button
+                  </UI.button>
+                  <UI.button
                     :if={length(Boards.links(p.board)) > 1 or p.link.type in [:serial, :tcp]}
-                    type="button"
-                    class="cnc-btn"
                     phx-click="edit_link"
                     phx-value-id={p.id}
                   >
                     Change link
-                  </button>
-                  <button
+                  </UI.button>
+                  <UI.button
                     :if={p.id != @active_id}
-                    type="button"
-                    class="cnc-btn cnc-btn--quiet"
+                    variant="quiet"
                     phx-click="remove"
                     phx-value-id={p.id}
                     data-confirm={remove_confirm(p)}
                   >
                     Remove
-                  </button>
+                  </UI.button>
                 </div>
               </li>
             </ul>
@@ -264,11 +244,11 @@ defmodule CNCWeb.ControllersLive do
               </label>
               <.link_fields name="add" params={@add} board={board(@add["board"])} ports={@ports} />
               <div class="cnc-row">
-                <button type="submit" class="cnc-btn cnc-btn--primary">Add controller</button>
+                <UI.button variant="primary" type="submit">Add controller</UI.button>
               </div>
             </form>
           </section>
-        </main>
+        </div>
       </div>
     </Layouts.app>
     """
@@ -316,9 +296,9 @@ defmodule CNCWeb.ControllersLive do
           placeholder="/dev/cu.usbserial-0001"
           autocomplete="off"
         />
-        <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="refresh_ports">
+        <UI.button variant="quiet" type="button" phx-click="refresh_ports">
           Find ports
-        </button>
+        </UI.button>
       </div>
       <datalist id={"#{@name}-ports"}>
         <option :for={{device, info} <- @ports} value={device}>{info}</option>
@@ -432,17 +412,4 @@ defmodule CNCWeb.ControllersLive do
   defp error_text(:invalid), do: "Give the controller a name."
   defp error_text({:link_not_supported, _}), do: "That board can't use that link."
   defp error_text(reason), do: "That didn't work (#{inspect(reason)})."
-
-  defp state_word(state) do
-    %{
-      disconnected: "Not connected",
-      connecting: "Connecting",
-      alarm: "Locked",
-      idle: "Ready",
-      jogging: "Jogging",
-      uploading: "Uploading",
-      homing: "Homing",
-      busy: "Busy"
-    }[state]
-  end
 end
