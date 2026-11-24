@@ -45,6 +45,12 @@ export default {
       bg: css("--bg"),
       yellow: css("--yellow"),
       red: css("--red"),
+      ok: css("--ok"),
+      move: css("--move"),
+      warn: css("--warn"),
+      x: css("--x"),
+      y: css("--y"),
+      z: css("--z"),
     }
 
     this.handleEvent("pos", (p) => this.sample(p))
@@ -149,7 +155,7 @@ export default {
 
   markerColor() {
     const c = this.colors
-    return {jogging: c.yellow, homing: c.yellow, alarm: c.red}[this.state] || c.text
+    return {idle: c.ok, jogging: c.move, homing: c.warn, busy: c.warn, alarm: c.red}[this.state] || c.text
   },
 
   drawBed() {
@@ -187,18 +193,20 @@ export default {
     ctx.textBaseline = "middle"
     for (let mm = v.y0; mm <= v.y1; mm += 250) ctx.fillText(mm, l - 6, this.px(0, mm)[1])
 
-    // Origin axes, front-left
+    // Origin axes, front-left, in axis colours
     const [ox, oy] = this.px(0, 0)
-    ctx.strokeStyle = c.edge
     ctx.lineWidth = 2
-    line(ctx, ox, oy, ox + 24, oy)
-    line(ctx, ox, oy, ox, oy - 24)
-    ctx.fillStyle = c.dim
-    ctx.font = `500 11px ${FONT}`
+    ctx.strokeStyle = c.x
+    line(ctx, ox, oy, ox + 28, oy)
+    ctx.strokeStyle = c.y
+    line(ctx, ox, oy, ox, oy - 28)
+    ctx.font = `700 11px ${FONT}`
     ctx.textAlign = "left"
     ctx.textBaseline = "bottom"
-    ctx.fillText("X", ox + 27, oy - 1)
-    ctx.fillText("Y", ox + 4, oy - 26)
+    ctx.fillStyle = c.x
+    ctx.fillText("X", ox + 31, oy - 1)
+    ctx.fillStyle = c.y
+    ctx.fillText("Y", ox + 4, oy - 30)
   },
 
   // Work origin (G54): small axes and a label, in neutral text colour.
@@ -260,7 +268,7 @@ export default {
       ctx.strokeStyle = c.bg
       ctx.lineWidth = 5
       line(ctx, px, py, ex, ey)
-      ctx.strokeStyle = c.yellow
+      ctx.strokeStyle = c.move
       ctx.lineWidth = 2.5
       line(ctx, px, py, ex, ey)
     }
@@ -309,7 +317,8 @@ export default {
     }
     ctx.textAlign = "center"
     ctx.textBaseline = "bottom"
-    ctx.font = `500 11px ${FONT}`
+    ctx.font = `700 11px ${FONT}`
+    ctx.fillStyle = c.z
     ctx.fillText("Z", x + w / 2, top - 6)
 
     // Work Z0
@@ -344,7 +353,7 @@ export default {
     // Commanded Z direction
     const jz = (this.jog || [0, 0, 0])[2]
     if (jz) {
-      ctx.strokeStyle = c.yellow
+      ctx.strokeStyle = c.move
       ctx.lineWidth = 2.5
       line(ctx, x + w / 2, y, x + w / 2, y - jz * 26)
     }

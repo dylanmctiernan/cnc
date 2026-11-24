@@ -144,6 +144,15 @@
   --yellow: #f2c230;
   --red: #d23b2e;
   --red-text: #f08a80;
+  /* State colours: what the machine is doing, at a glance */
+  --ok: #3fb950;
+  --move: #4c9aff;
+  --warn: #e3a008;
+  --cyan: #56d4dd;
+  /* Axis colours, CAD convention */
+  --x: #ff6b6b;
+  --y: #51cf66;
+  --z: #4dabf7;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --touch: 2.75rem;
 }
@@ -198,10 +207,20 @@ button {
   font-weight: 700;
   font-size: 1rem;
 }
-.cnc-state--jogging,
-.cnc-state--homing {
-  background: var(--yellow);
-  border-color: var(--yellow);
+.cnc-state--idle {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: var(--bg);
+}
+.cnc-state--jogging {
+  background: var(--move);
+  border-color: var(--move);
+  color: var(--bg);
+}
+.cnc-state--homing,
+.cnc-state--busy {
+  background: var(--warn);
+  border-color: var(--warn);
   color: var(--bg);
 }
 .cnc-state--alarm {
@@ -230,8 +249,21 @@ button {
   color: var(--text-dim);
   font-size: 0.75rem;
 }
+.cnc-meta dd.is-on::before,
+.cnc-meta dd.is-off::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.375rem;
+  border-radius: 50%;
+  background: var(--ok);
+}
 .cnc-meta dd.is-off {
   color: var(--red-text);
+}
+.cnc-meta dd.is-off::before {
+  background: var(--red);
 }
 .cnc-actions {
   display: flex;
@@ -364,6 +396,18 @@ button {
   border-radius: 3px;
   background: var(--bg);
 }
+.cnc-axis--x { color: var(--x); }
+.cnc-axis--y { color: var(--y); }
+.cnc-axis--z { color: var(--z); }
+.cnc-dro-row:has(.cnc-axis--x) { border-left: 3px solid var(--x); }
+.cnc-dro-row:has(.cnc-axis--y) { border-left: 3px solid var(--y); }
+.cnc-dro-row:has(.cnc-axis--z) { border-left: 3px solid var(--z); }
+.cnc-btn.is-x { color: var(--x); }
+.cnc-btn.is-y { color: var(--y); }
+.cnc-btn.is-z { color: var(--z); }
+.cnc-joy-label.is-x { color: var(--x); }
+.cnc-joy-label.is-y { color: var(--y); }
+.cnc-joy-label.is-z { color: var(--z); }
 .cnc-axis {
   color: var(--text-dim);
   font-weight: 700;
@@ -479,8 +523,8 @@ button {
   cursor: grabbing;
 }
 .is-active .cnc-joy-knob {
-  border-color: var(--yellow);
-  background: var(--yellow);
+  border-color: var(--move);
+  background: var(--move);
   transition: none;
 }
 .cnc-joy-label {
@@ -622,7 +666,16 @@ button {
   color: var(--text-dim);
 }
 .cnc-log-row.is-out .cnc-log-dir {
-  color: var(--yellow);
+  color: var(--move);
+}
+.cnc-log-row.is-ok .cnc-log-text {
+  color: var(--ok);
+}
+.cnc-log-row.is-setting .cnc-log-text {
+  color: var(--cyan);
+}
+.cnc-log-row.is-msg .cnc-log-text {
+  color: var(--warn);
 }
 .cnc-log-row.is-in .cnc-log-dir {
   color: var(--text-dim);
@@ -648,7 +701,7 @@ button {
   border-top: 1px solid var(--line);
 }
 .cnc-term-prompt {
-  color: var(--yellow);
+  color: var(--move);
 }
 .cnc-term input {
   flex: 1;
@@ -856,6 +909,47 @@ button {
     overflow-y: visible;
   }
   .cnc-joy {
-    grid-template-columns: minmax(0, 17rem) 4.5rem;
+    grid-template-columns: minmax(0, 15rem) 4.5rem;
+  }
+  /* Compact: get the jog controls onto the first screen */
+  .cnc-bar {
+    gap: 0.375rem 0.75rem;
+    padding: 0.375rem 0.5rem;
+  }
+  .cnc-state {
+    min-width: 6.5rem;
+    min-height: 2.25rem;
+    font-size: 0.875rem;
+  }
+  .cnc-meta {
+    order: 3;
+    width: 100%;
+    gap: 0.125rem 1rem;
+    font-size: 0.75rem;
+  }
+  .cnc-meta div {
+    display: flex;
+    gap: 0.375rem;
+  }
+  .cnc-actions .cnc-btn {
+    min-height: 2.25rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8125rem;
+  }
+  .cnc-rail {
+    gap: 0.625rem;
+    padding: 0.5rem;
+  }
+  .cnc-dro {
+    gap: 0.125rem;
+  }
+  .cnc-dro-row {
+    padding: 0 0.5rem;
+  }
+  .cnc-num {
+    font-size: 1.375rem;
+  }
+  .cnc-btn--zero {
+    min-height: 1.875rem;
   }
 }

@@ -24,6 +24,9 @@ defmodule CNCWeb.Endpoint do
     at: "/",
     from: :cnc,
     gzip: not code_reloading?,
+    # In dev, assets keep fixed names, so make browsers revalidate (Safari
+    # otherwise reuses stale CSS/JS). Prod uses digested names.
+    cache_control_for_etags: if(code_reloading?, do: "no-cache", else: "public"),
     only: CNCWeb.static_paths(),
     raise_on_missing_only: code_reloading?
 

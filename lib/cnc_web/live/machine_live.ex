@@ -193,7 +193,7 @@ defmodule CNCWeb.MachineLive do
           <dl class="cnc-meta">
             <div>
               <dt>link</dt>
-              <dd class={!@machine.connected? && "is-off"}>
+              <dd class={if @machine.connected?, do: "is-on", else: "is-off"}>
                 {adapter_label(@machine.adapter)} {if @machine.connected?,
                   do: "connected",
                   else: "not connected"}
@@ -322,7 +322,7 @@ defmodule CNCWeb.MachineLive do
               </div>
             </div>
             <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
-              <span class="cnc-axis">{axis}</span>
+              <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
               <span class="cnc-num">{fmt(axis_value(shown(@machine, @frame), i))}</span>
               <button
                 :if={frame(@machine, @frame) == :work}
@@ -363,7 +363,7 @@ defmodule CNCWeb.MachineLive do
           </section>
 
           <section class="cnc-group cnc-jog" aria-label="Jog">
-            <h2 class="cnc-h">Jog <span class="cnc-unit">X/Y and Z, mm/s at full push</span></h2>
+            <h2 class="cnc-h">Jog</h2>
             <div class="cnc-seg cnc-seg--small" role="group" aria-label="Control mode">
               <button
                 :for={{mode, label} <- [joystick: "Joystick", step: "Step"]}
@@ -391,6 +391,9 @@ defmodule CNCWeb.MachineLive do
                 {tier}<span class="cnc-unit">{xy}/{z}</span>
               </button>
             </div>
+            <p class="cnc-sub">
+              Speed in mm/s, X/Y then Z{if @control_mode == :joystick, do: ", at full push"}
+            </p>
             <div
               :if={@control_mode == :joystick}
               id="joystick"
@@ -405,10 +408,10 @@ defmodule CNCWeb.MachineLive do
                 role="application"
                 aria-label="X/Y joystick: drag to jog, release to stop"
               >
-                <span class="cnc-joy-label" style="top: 0.25rem; left: 50%">Y+</span>
-                <span class="cnc-joy-label" style="bottom: 0.25rem; left: 50%">Y−</span>
-                <span class="cnc-joy-label" style="left: 0.5rem; top: 50%">X−</span>
-                <span class="cnc-joy-label" style="right: 0.5rem; top: 50%">X+</span>
+                <span class="cnc-joy-label is-y" style="top: 0.25rem; left: 50%">Y+</span>
+                <span class="cnc-joy-label is-y" style="bottom: 0.25rem; left: 50%">Y−</span>
+                <span class="cnc-joy-label is-x" style="left: 0.5rem; top: 50%">X−</span>
+                <span class="cnc-joy-label is-x" style="right: 0.5rem; top: 50%">X+</span>
                 <span class="cnc-joy-knob"></span>
               </div>
               <div
@@ -416,8 +419,8 @@ defmodule CNCWeb.MachineLive do
                 role="application"
                 aria-label="Z slider: drag up or down to jog, release to stop"
               >
-                <span class="cnc-joy-label" style="top: 0.25rem; left: 50%">Z+</span>
-                <span class="cnc-joy-label" style="bottom: 0.25rem; left: 50%">Z−</span>
+                <span class="cnc-joy-label is-z" style="top: 0.25rem; left: 50%">Z+</span>
+                <span class="cnc-joy-label is-z" style="bottom: 0.25rem; left: 50%">Z−</span>
                 <span class="cnc-joy-knob"></span>
               </div>
             </div>
@@ -619,7 +622,7 @@ defmodule CNCWeb.MachineLive do
     ~H"""
     <button
       type="button"
-      class="cnc-btn"
+      class={["cnc-btn", "is-#{String.first(@area)}"]}
       style={"grid-area: #{@area}"}
       phx-click="step"
       phx-value-x={@x}
@@ -767,6 +770,9 @@ defmodule CNCWeb.MachineLive do
 
   defp tone(%{dir: :in, text: "error:" <> _}), do: "is-error"
   defp tone(%{dir: :in, text: "ALARM:" <> _}), do: "is-alarm"
+  defp tone(%{dir: :in, text: "ok"}), do: "is-ok"
+  defp tone(%{dir: :in, text: "$" <> _}), do: "is-setting"
+  defp tone(%{dir: :in, text: "[MSG:" <> _}), do: "is-msg"
   defp tone(%{kind: :poll}), do: "is-poll"
   defp tone(%{kind: :realtime}), do: "is-realtime"
   defp tone(_), do: nil
