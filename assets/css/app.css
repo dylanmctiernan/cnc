@@ -111,61 +111,168 @@
    large touch targets, units always shown.
    --------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------
+   Design tokens. The one place colours, type, spacing and sizes are set;
+   components (CNCWeb.UI) and pages use the semantic names only.
+   Three tiers: reference palette -> semantic tokens -> component sizes.
+   --------------------------------------------------------------------- */
+
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-400.woff2") format("woff2");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-500.woff2") format("woff2");
   font-weight: 500;
   font-display: swap;
 }
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2");
-  font-weight: 700;
+  font-family: "IBM Plex Sans";
+  src: url("/fonts/IBMPlexSans-600.woff2") format("woff2");
+  font-weight: 600 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/IBMPlexMono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/IBMPlexMono-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("/fonts/IBMPlexMono-600.woff2") format("woff2");
+  font-weight: 600 700;
   font-display: swap;
 }
 
 :root {
-  --bg: #1d2124;
-  --panel: #252a2e;
-  --raised: #30363b;
-  --line: #3f464c;
-  --text: #e4e7e9;
-  --text-dim: #9aa3aa;
-  --bed: #2a2f33;
-  --grid: #343a3f;
-  --grid-major: #424a51;
-  --edge: #7a848c;
-  --yellow: #f2c230;
-  --red: #d23b2e;
-  --red-text: #f08a80;
-  /* State colours: what the machine is doing, at a glance */
-  --ok: #3fb950;
-  --move: #4c9aff;
-  --warn: #e3a008;
-  --cyan: #56d4dd;
-  /* Axis colours, CAD convention */
+  /* Reference palette: raw values, never used directly by components */
+  --ref-gray-950: #191c1f;
+  --ref-gray-900: #1d2124;
+  --ref-gray-850: #22272a;
+  --ref-gray-800: #252a2e;
+  --ref-gray-750: #2a2f33;
+  --ref-gray-700: #30363b;
+  --ref-gray-600: #3f464c;
+  --ref-gray-500: #5a636b;
+  --ref-gray-400: #9aa3aa;
+  --ref-gray-100: #e4e7e9;
+  --ref-green: #3fb950;
+  --ref-amber: #e3a008;
+  --ref-red: #d23b2e;
+  --ref-red-light: #f08a80;
+  --ref-blue: #4c9aff;
+  --ref-cyan: #56d4dd;
+  --ref-violet: #c792ea;
+  --ref-yellow: #f2c230;
+
+  /* Surfaces, from the page back to raised controls */
+  --surface-0: var(--ref-gray-900);
+  --surface-1: var(--ref-gray-800);
+  --surface-2: var(--ref-gray-750);
+  --surface-3: var(--ref-gray-700);
+  --surface-rail: var(--ref-gray-950);
+  --border: var(--ref-gray-600);
+  --border-faint: var(--ref-gray-700);
+
+  /* Text */
+  --text: var(--ref-gray-100);
+  --text-muted: var(--ref-gray-400);
+  --text-faint: var(--ref-gray-500);
+
+  /* Meaning */
+  --ok: var(--ref-green);
+  --warn: var(--ref-amber);
+  --danger: var(--ref-red);
+  --danger-text: var(--ref-red-light);
+  --info: var(--ref-blue);
+  --accent: var(--ref-cyan);
+
+  /* Machine states and axes (CAD convention); the toolpath */
+  --move: var(--ref-blue);
   --x: #ff6b6b;
   --y: #51cf66;
   --z: #4dabf7;
-  /* Toolpath: not a state or an axis colour */
-  --path: #c792ea;
-  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --path: var(--ref-violet);
+  --bed: var(--ref-gray-750);
+  --grid: #343a3f;
+  --grid-major: #424a51;
+  --edge: #7a848c;
+
+  /* Type: a sans for the interface, a mono for numbers, paths and code */
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+  --leading-tight: 1.25;
+  --leading: 1.5;
+
+  /* Space: a 4px base, only these steps */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+
+  /* Shape and size */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
   --touch: 2.75rem;
+  --rail: 14rem;
+  --rail-collapsed: 3.75rem;
+  --content: 60rem;
+
+  /* Older names, kept while pages move onto CNCWeb.UI */
+  --bg: var(--surface-0);
+  --panel: var(--surface-1);
+  --raised: var(--surface-3);
+  --line: var(--border);
+  --text-dim: var(--text-muted);
+  --red: var(--danger);
+  --red-text: var(--danger-text);
+  --yellow: var(--ref-yellow);
+  --cyan: var(--ref-cyan);
+  --mono: var(--font-mono);
 }
 
 body {
-  background: var(--bg);
+  background: var(--surface-0);
   color: var(--text);
-  font-family: var(--mono);
-  font-size: 0.875rem;
-  line-height: 1.5;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--leading);
   font-variant-numeric: tabular-nums;
+}
+
+/* Numbers, coordinates, paths and code: the mono face */
+code,
+pre,
+kbd,
+.num,
+.cnc-dro,
+.cnc-meta dd,
+.cnc-axes td,
+.cnc-change-vals,
+.cnc-rev-v,
+.cnc-yaml,
+.cnc-console,
+input[inputmode="decimal"] {
+  font-family: var(--font-mono);
 }
 
 button {

@@ -8,7 +8,10 @@ const PAD = 40
 const GAUGE = 72 // px reserved on the right for the Z gauge
 const METERS = 72 // px reserved on the left for the X/Y and Z speed meters
 const METERS_COMPACT = 56
-const FONT = '"JetBrains Mono", ui-monospace, monospace'
+// The mono face from the design tokens (--font-mono), read once.
+const FONT =
+  getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() ||
+  "ui-monospace, monospace"
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 
