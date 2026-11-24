@@ -162,7 +162,7 @@ defmodule CNCWeb.ConfigLiveTest do
     assert has_element?(view, "#view-#{slow}-x-max_rate_mm_per_min", "1000")
 
     view |> element("#profile-#{slow} button", "Diff with current") |> render_click()
-    assert has_element?(view, "#diff-#{slow}", "1 setting differs")
+    assert has_element?(view, "#diff-#{slow}", "1 value differs")
     assert has_element?(view, "#diff-#{slow} li", "axes/x/max_rate_mm_per_min")
     assert has_element?(view, "#yaml-#{slow} .y-key", "max_rate_mm_per_min")
 

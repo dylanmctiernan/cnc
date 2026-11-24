@@ -418,7 +418,7 @@ defmodule CNCWeb.ControllersLive do
   defp drop_blank(map, key), do: if(map[key] == "", do: Map.delete(map, key), else: map)
 
   defp remove_confirm(%Controller{name: name, link: %{type: :fluidnc_sim}}),
-    do: "Remove #{name}? Its config and settings are deleted with it."
+    do: "Remove #{name}? Its configuration files are deleted with it."
 
   defp remove_confirm(%Controller{name: name, link: %{type: :fake_sim}}), do: "Remove #{name}?"
 

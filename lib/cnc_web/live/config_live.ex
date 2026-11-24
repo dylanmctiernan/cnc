@@ -2,7 +2,7 @@ defmodule CNCWeb.ConfigLive do
   @moduledoc """
   One controller's configuration (`/controllers/:id/configuration`), by
   profile (`CNC.Controllers.Profiles`): which profile is in use (from the
-  controller), switching and making profiles, changing the settings of the
+  controller), switching and making profiles, changing the values of the
   one in use (applied straight away), what the controller runs that the
   profile doesn't (keep or put back), the wiring check, and under Advanced
   the files themselves (view, load one directly as an override, history).
@@ -277,7 +277,7 @@ defmodule CNCWeb.ConfigLive do
     end
   end
 
-  ## Settings of the profile in use
+  ## Values of the configuration in use
 
   # The axis table: every value that differs from what's running is set.
   def handle_event("edit_current", _, socket),
@@ -482,10 +482,11 @@ defmodule CNCWeb.ConfigLive do
 
         <main class="cnc-settings">
           <p class="cnc-sub cnc-settings-intro">
-            A profile is a set of this controller's settings. The selected one is written to
+            The controller's configuration is its wiring, the machine's build and a profile
+            (how the machine is run). The selected profile is written to
             the controller, with the board's wiring, as its config file. Make profiles to try
             variations and switch between them (the controller restarts and comes back
-            locked). Changes to a setting apply straight away.
+            locked). A changed value applies straight away (wiring after a restart).
           </p>
 
           <p :if={@error} id="config-error" class="cnc-set-error">{@error}</p>
@@ -518,9 +519,9 @@ defmodule CNCWeb.ConfigLive do
                 :if={@check}
                 class="cnc-set-group"
                 id="current"
-                aria-label="Current settings"
+                aria-label="Current configuration"
               >
-                <h2 class="cnc-h">Current settings</h2>
+                <h2 class="cnc-h">Current configuration</h2>
                 <div class="cnc-ctl-card is-active" id={"profile-#{@check.profile.id}"}>
                   <div class="cnc-ctl-card-head">
                     <h3 :if={@renaming != @check.profile.id} class="cnc-ctl-name" id="current-name">
@@ -631,10 +632,10 @@ defmodule CNCWeb.ConfigLive do
                       phx-change="other_change"
                       phx-submit="apply_other"
                     >
-                      <h3 class="cnc-sub">Any other setting</h3>
+                      <h3 class="cnc-sub">Any other value</h3>
                       <div class="cnc-other-row">
                         <label class="cnc-ctl-field">
-                          <span>Setting</span>
+                          <span>Path</span>
                           <input
                             name="other[path]"
                             value={@other["path"]}
@@ -869,12 +870,12 @@ defmodule CNCWeb.ConfigLive do
                     >
                       <%= case Profiles.diff(@check.profile, p) do %>
                         <% [] -> %>
-                          <p class="cnc-sub">Same settings as {@check.profile.name}.</p>
+                          <p class="cnc-sub">Same values as {@check.profile.name}.</p>
                         <% diffs -> %>
                           <p class="cnc-sub">
                             {length(diffs)} {if length(diffs) == 1,
-                              do: "setting differs",
-                              else: "settings differ"} from {@check.profile.name} (current → {p.name}):
+                              do: "value differs",
+                              else: "values differ"} from {@check.profile.name} (current → {p.name}):
                           </p>
                           <.diff_list diffs={diffs} />
                       <% end %>
@@ -951,7 +952,7 @@ defmodule CNCWeb.ConfigLive do
                 <h2 class="cnc-h">Wiring</h2>
                 <p :if={@wiring.differences == []} class="cnc-sub" id="wiring-ok">
                   Pins and stepping match the {Boards.label(@controller.board)} pin map
-                  ({@wiring.checked} settings). Wiring comes from the board, not the profile.
+                  ({@wiring.checked} values). Wiring is this controller's, not the profile's.
                 </p>
                 <div :if={@wiring.differences != []} id="wiring-differences">
                   <p class="cnc-note cnc-note--warn">
@@ -1076,7 +1077,7 @@ defmodule CNCWeb.ConfigLive do
               <h2 id="approve-title" class="cnc-modal-title">{@pending.title}</h2>
               <p class="cnc-sub">{@pending.note}</p>
               <p :if={@pending.diffs == []} class="cnc-sub" id="approve-nothing">
-                No settings change.
+                No values change.
               </p>
               <div :if={@pending.diffs != []} class="cnc-modal-diffs">
                 <p class="cnc-sub">{@pending.from_label} → {@pending.to_label}:</p>
@@ -1383,7 +1384,7 @@ defmodule CNCWeb.ConfigLive do
         </button>
         <div :if={MapSet.member?(@expanded, "#{@prefix}-#{e.version}")} class="cnc-rev-body">
           <.diff_list :if={e.diff != []} diffs={e.diff} />
-          <p :if={e.diff == []} class="cnc-sub">No settings changed.</p>
+          <p :if={e.diff == []} class="cnc-sub">No values changed.</p>
           <div class="cnc-row">
             <button
               :if={i > 0 and (not @files or is_binary(e.text))}
@@ -1438,7 +1439,7 @@ defmodule CNCWeb.ConfigLive do
       <p :if={@changed == []} class="cnc-sub">No values changed.</p>
       <details :if={@added != []} class="cnc-diff-more">
         <summary>
-          {settings_count(length(@added))} added (FluidNC's defaults were in use for them)
+          {values_count(length(@added))} added (FluidNC's defaults were in use for them)
         </summary>
         <ul class="cnc-changes">
           <.diff_row :for={d <- @added} d={d} list={@id} />
@@ -1446,7 +1447,7 @@ defmodule CNCWeb.ConfigLive do
       </details>
       <details :if={@removed != []} class="cnc-diff-more">
         <summary>
-          {settings_count(length(@removed))} removed (left to FluidNC's defaults)
+          {values_count(length(@removed))} removed (left to FluidNC's defaults)
         </summary>
         <ul class="cnc-changes">
           <.diff_row :for={d <- @removed} d={d} list={@id} />
@@ -1472,19 +1473,19 @@ defmodule CNCWeb.ConfigLive do
     """
   end
 
-  defp settings_count(1), do: "1 setting"
-  defp settings_count(n), do: "#{n} settings"
+  defp values_count(1), do: "1 value"
+  defp values_count(n), do: "#{n} values"
 
-  defp changes_label([]), do: "no settings changed"
+  defp changes_label([]), do: "no values changed"
 
   defp changes_label(diff) do
     changed = Enum.count(diff, &(&1.from != nil and &1.to != nil))
     other = length(diff) - changed
 
     case {changed, other} do
-      {c, 0} -> "#{settings_count(c)} changed"
-      {0, o} -> "#{settings_count(o)} added or removed"
-      {c, o} -> "#{settings_count(c)} changed, #{o} added or removed"
+      {c, 0} -> "#{values_count(c)} changed"
+      {0, o} -> "#{values_count(o)} added or removed"
+      {c, o} -> "#{values_count(c)} changed, #{o} added or removed"
     end
   end
 
@@ -1617,11 +1618,11 @@ defmodule CNCWeb.ConfigLive do
   defp error_text(:in_use), do: "That's the selected profile: switch to another first."
   defp error_text(:no_profile), do: "No profile is selected."
 
-  defp error_text(:not_profile_setting),
+  defp error_text(:not_profile_value),
     do:
       "That's part of the machine's build or the wiring, the same for every profile: change it in the current configuration."
 
-  defp error_text(:not_editable), do: "That's a name in the file, not a setting."
+  defp error_text(:not_editable), do: "That's a name in the file, not a value."
   defp error_text(:nothing_to_use), do: "Choose a file, or paste a config."
   defp error_text(:no_file), do: "That version has no file (a live change)."
   defp error_text(:not_yaml), do: "Choose a FluidNC config file (.yaml or .yml)."
@@ -1630,13 +1631,13 @@ defmodule CNCWeb.ConfigLive do
   defp error_text(:not_a_number), do: "That needs a number."
 
   defp error_text(:override),
-    do: "The controller loaded a file directly: switch to a profile to change settings."
+    do: "The controller loaded a file directly: switch to a profile to change values."
 
   defp error_text({:not_written, reason}),
     do: "Applied, but writing the profile's file failed: #{error_text(reason)}"
 
-  defp error_text(:unknown_setting), do: "The controller has no such setting."
-  defp error_text(:invalid_setting), do: "A setting is a path like axes/x/max_rate_mm_per_min."
+  defp error_text(:unknown_setting), do: "The controller has no such value."
+  defp error_text(:invalid_setting), do: "A value's path looks like axes/x/max_rate_mm_per_min."
   defp error_text(:invalid_value), do: "Enter a value (no = or line breaks)."
   defp error_text(:no_active_file), do: "The controller doesn't say which file it loaded."
 
