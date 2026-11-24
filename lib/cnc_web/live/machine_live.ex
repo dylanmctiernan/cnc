@@ -156,6 +156,13 @@ defmodule CNCWeb.MachineLive do
       {:error, :invalid_value} ->
         {:noreply, update(socket, :work_edit, &%{&1 | error: "That's outside ±100 000 mm."})}
 
+      {:error, :outside_travel} ->
+        {:noreply,
+         update(socket, :work_edit, &%{&1 | error: "That puts the work zero off the machine."})}
+
+      {:error, :moving} ->
+        {:noreply, update(socket, :work_edit, &%{&1 | error: "Wait for the machine to stop."})}
+
       {:error, _} ->
         {:noreply,
          update(socket, :work_edit, &%{&1 | error: "Only when the machine is Ready and stopped."})}
@@ -780,14 +787,22 @@ defmodule CNCWeb.MachineLive do
               />
               <span class="cnc-unit">mm</span>
             </label>
-            <p class="cnc-sub">{work_preview(@work_edit, @machine)}</p>
+            <p class={[
+              "cnc-sub",
+              match?({:outside, _, _}, work_check(@work_edit, @machine)) && "cnc-set-error"
+            ]}>
+              {work_preview(@work_edit, @machine)}
+            </p>
             <p :if={@work_edit.error} class="cnc-set-error">{@work_edit.error}</p>
             <div class="cnc-row">
               <button type="button" class="cnc-btn" phx-click="cancel_work">Cancel</button>
               <button
                 type="submit"
                 class="cnc-btn cnc-btn--primary"
-                disabled={@machine.state != :idle}
+                disabled={
+                  @machine.state != :idle or
+                    not match?({:ok, _}, work_check(@work_edit, @machine))
+                }
               >
                 Set {String.upcase(to_string(@work_edit.axis))}
               </button>
@@ -1090,21 +1105,43 @@ defmodule CNCWeb.MachineLive do
     end
   end
 
-  # What a typed work position means for the work zero, in machine terms.
-  defp work_preview(%{axis: axis, value: value}, %State{mpos: mpos}) when mpos != nil do
+  # Where a typed work position puts the work zero, in machine coordinates,
+  # and whether that's inside the travel (Machine refuses it otherwise).
+  defp work_check(%{axis: axis, value: value}, %State{mpos: mpos, travel: travel})
+       when mpos != nil do
     i = Enum.find_index([:x, :y, :z], &(&1 == axis))
-    name = String.upcase(to_string(axis))
+    {lo, hi} = elem(travel, i)
 
     case parse_mm(value) do
       {:ok, v} ->
-        "Nothing moves. Work #{name}0 will be at machine #{name} #{fmt(elem(mpos, i) - v)}."
+        zero = elem(mpos, i) - v
+
+        if zero >= lo - 0.001 and zero <= hi + 0.001,
+          do: {:ok, zero},
+          else: {:outside, zero, {lo, hi}}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp work_check(_, _), do: :error
+
+  defp work_preview(%{axis: axis} = edit, machine) do
+    name = String.upcase(to_string(axis))
+
+    case work_check(edit, machine) do
+      {:ok, zero} ->
+        "Nothing moves. Work #{name}0 will be at machine #{name} #{fmt(zero)}."
+
+      {:outside, zero, {lo, hi}} ->
+        "That puts work #{name}0 at machine #{name} #{fmt(zero)}, off the machine " <>
+          "(#{name} runs #{mm(lo)} to #{mm(hi)})."
 
       :error ->
         "Nothing moves."
     end
   end
-
-  defp work_preview(_, _), do: "Nothing moves."
 
   defp size_label(nil), do: "no cutting moves"
 

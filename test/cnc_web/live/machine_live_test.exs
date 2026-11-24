@@ -90,14 +90,20 @@ defmodule CNCWeb.MachineLiveTest do
     assert has_element?(view, "#work-dialog", "Set work X")
 
     # The preview says where the work zero lands, in machine terms.
-    html = view |> form("#work-form", %{value: "12,5"}) |> render_change()
-    assert html =~ "Nothing moves. Work X0 will be at machine X #{fmt(elem(mpos, 0) - 12.5)}"
+    # A value that would put the work zero off the machine is refused as you type.
+    html = view |> form("#work-form", %{value: "99999"}) |> render_change()
+    assert html =~ "off the machine"
+    assert has_element?(view, "#work-dialog button[type=submit][disabled]")
 
-    view |> form("#work-form", %{value: "12,5"}) |> render_submit()
+    # -12.5 here: the work zero is 12.5 mm in +X, on the bed.
+    html = view |> form("#work-form", %{value: "-12,5"}) |> render_change()
+    assert html =~ "Nothing moves. Work X0 will be at machine X #{fmt(elem(mpos, 0) + 12.5)}"
+
+    view |> form("#work-form", %{value: "-12,5"}) |> render_submit()
     refute has_element?(view, "#work-dialog")
 
     assert eventually(fn ->
-             match?({wx, _, _} when abs(wx - 12.5) < 0.001, Machine.status().wpos)
+             match?({wx, _, _} when abs(wx + 12.5) < 0.001, Machine.status().wpos)
            end)
 
     assert Machine.status().mpos == mpos

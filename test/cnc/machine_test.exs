@@ -397,9 +397,15 @@ defmodule CNC.MachineTest do
 
     test "set_work_position names the current position without moving", %{m: m} do
       idle(m)
+      idle_at(m, {100, 100}, -20)
+      # Work zero lands at machine X 87.5, Z -17: inside the travel.
       :ok = Machine.set_work_position(m, x: 12.5, z: -3)
       assert_receive {:line, "G10 L20 P1 X12.500 Z-3.000"}
       refute_received {:line, "$J=" <> _}
+
+      # X 200 here would put the work zero at machine X -100: off the machine.
+      assert Machine.set_work_position(m, x: 200) == {:error, :outside_travel}
+      refute_received {:line, "G10" <> _}
 
       assert Machine.set_work_position(m, x: 200_000) == {:error, :invalid_value}
       assert Machine.set_work_position(m, a: 1) == {:error, :invalid_value}

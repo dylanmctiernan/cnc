@@ -338,8 +338,21 @@ defmodule CNC.Machine.Server do
 
   # G10 L20: the controller applies it in order after queued motion, so it
   # names the position the machine is at once that's done. Nothing moves.
+  # The work zero must land inside the travel: one outside it is almost
+  # always a typo, and every program would then leave the machine. Checked
+  # against the reported position, so that must be final (not moving).
   defp event({:call, from}, {:work_position, values}, :idle, d) do
-    {:idle, send_line(d, Command.set_work(values), :raw), [{:reply, from, :ok}]}
+    reply =
+      cond do
+        d.motion_unsettled? or d.status.state in [:run, :jog, :home] -> {:error, :moving}
+        not work_zero_in_travel?(values, d.status.mpos, d.travel) -> {:error, :outside_travel}
+        true -> :ok
+      end
+
+    # Its own tag, not :raw: G10 doesn't move, so it mustn't mark motion unsettled
+    # (Zero X/Y then Zero Z straight after would be refused as "moving").
+    d = if reply == :ok, do: send_line(d, Command.set_work(values), :work), else: d
+    {:idle, d, [{:reply, from, reply}]}
   end
 
   # Lift Z to near the top of travel (never lower it), then move X/Y to the
@@ -606,6 +619,16 @@ defmodule CNC.Machine.Server do
   defp length_mm(_), do: nil
 
   ## Work coordinates
+
+  # Where the work zero would be, in machine coordinates, for each axis set.
+  defp work_zero_in_travel?(values, mpos, travel) do
+    Enum.all?(values, fn {axis, v} ->
+      i = Enum.find_index([:x, :y, :z], &(&1 == axis))
+      {lo, hi} = elem(travel, i)
+      zero = elem(mpos, i) - v
+      zero >= lo - 0.001 and zero <= hi + 0.001
+    end)
+  end
 
   defp work_zero_moves(%{status: %{wco: nil}}), do: {:error, :no_work_offset}
 

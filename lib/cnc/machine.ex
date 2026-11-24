@@ -137,9 +137,11 @@ defmodule CNC.Machine do
   @doc """
   Set what the current position reads in work coordinates (G54), without
   moving: `[x: 10.0]` makes here X = 10, so the work zero is 10 mm in −X.
-  Only when `:idle`. Values must be numbers within ±100 000 mm.
+  Only when `:idle` and stopped. The work zero this implies must be inside
+  the travel (`{:error, :outside_travel}` otherwise).
   """
-  @spec set_work_position(server, [{:x | :y | :z, number}]) :: reply | {:error, :invalid_value}
+  @spec set_work_position(server, [{:x | :y | :z, number}]) ::
+          reply | {:error, :invalid_value | :outside_travel | :moving}
   def set_work_position(server \\ __MODULE__, values) when is_list(values) and values != [] do
     if Enum.all?(values, fn {axis, v} ->
          axis in [:x, :y, :z] and is_number(v) and abs(v) <= 100_000
