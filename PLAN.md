@@ -235,10 +235,10 @@ Hook rules:
 | M4 | `MachineLive` + `JogKeys` + `BedView` (vs Sim) | `mix phx.server`: arrows move the marker live; diagonals; tiers; trail draws; tab blur stops motion; Unlock/Home work |
 | M5 | `CNC.Transport.TCP` + grblHAL sim in Docker | `@tag :grblhal_sim` tests pass (connect, `$X`, `$H`, jog + `0x85`, status, soft-limit error); same UI drives grblHAL sim with visible acceleration and stops at travel limits |
 
-**Phase 1 ends at M5.**
+**Phase 1 ends at M5.** Status (2026-11-23): M0–M4 done. M5 done except `$H` and the soft-limit error, which the grblHAL simulator can't do (no limit-switch simulation, so no homing, so no soft limits); those move to Phase 2 on the real board. Travel limits against grblHAL are enforced by the host clamp. See §11.
 
 ### Next phases (not planned in detail)
-- **Phase 2 — real board:** `CNC.Transport.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view).
+- **Phase 2 — real board:** `CNC.Transport.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view). Carries over from M5: homing and soft-limit tests. See §11 for what to verify on FluidNC.
 - **Phase 3 — Pi:** `cnc_firmware` Nerves project, `http://cnc.local`, phone jog pad.
 - Later: job streaming, toolpath preview + progress, storage, conversational ops, kiosk + HDMI touch, config sync, probing.
 
@@ -250,11 +250,39 @@ Hook rules:
 - Any disconnect/reconnect/reset → `:disconnected` or `:alarm`; require explicit Unlock/Home.
 - The UI renders state from status reports only; it never assumes a command succeeded.
 - No e-stop in software. Hardware owns it.
+- Bound queued motion by distance, not just acks: at most 4 jog increments ahead of the last *reported* position (controllers ack on planning; grblHAL's planner is 100 blocks deep).
+- The host clamps jogs and steps to travel. The configured travel is the physical maximum: the controller may narrow it, never widen it.
+- Esc always stops (jog cancel + feed hold), even while typing in the console.
+- Typed console commands are allowed only when Ready/Locked/Busy and are labelled as bypassing the jog dead-man and the travel clamp.
+- Anything reachable over the network needs the PIN (`CNC_LAN=1` won't start without one).
 
 ---
 
 ## 10. Open questions
 
-- grblHAL sim: pick and pin a build that runs cleanly in Docker; confirm the `-p` TCP mode and settings persistence.
-- Does grblHAL sim model acceleration in reported positions realistically enough to judge jog feel? (If not, it still validates protocol behaviour.)
-- Status poll rate vs. smoothness: is 50 ms while jogging enough with client-side interpolation?
+Answered in Phase 1 (details in `docs/bench-log.md`):
+
+- ~~grblHAL sim build~~ Pinned at `9d1a390`, built on Debian trixie (needs glibc ≥ 2.38). `-p 2323` works; settings persist in `/data/EEPROM.DAT`, so they're baked into the image at build time (the newest TCP client takes over the stream, which rules out configuring at runtime).
+- ~~Acceleration realism~~ Yes: jog cancel visibly decelerates, and the planner and buffers behave like firmware. It can't home or enforce soft limits.
+- ~~50 ms polling~~ Smooth enough with client-side interpolation, by eye on the Sim and grblHAL.
+
+Open for Phase 2 (verify on the board, don't assume):
+
+- Does FluidNC's `$$` report `$130`–`$132`? If not, travel comes from `$Config/Dump` (`axes: x: max_travel_mm`).
+- Does opening the USB serial port reset the ESP32 (DTR/RTS)? It would show as a banner and re-lock, which is safe but should be known.
+- After an `ALARM:N`, are unacked lines dropped (no acks will come)? Machine assumes so and forgets them.
+- Are lines received but not yet acked discarded by `0x85`? grblHAL flushes everything already planned; the in-flight cap bounds the rest to 4 increments.
+- Does homing leave machine coordinates positive (0..travel), as the travel mapping assumes?
+
+---
+
+## 11. Phase 1 outcome: changes from this plan
+
+- **`CNC.Motion` → `CNC.Transport`.** It's the link to the controller; `CNC.Machine` holds the conversation.
+- **`CNC.Application` → `CNCApp`**, a top-level wiring boundary beside `CNC` and `CNCWeb` (as Boundary recommends).
+- **Jog safety:** added the distance-ahead bound and the host travel clamp (§9).
+- **Travel from the controller:** Machine reads `$130`–`$132` via `$$` after every connect; config travel is the physical maximum.
+- **Controller details and console:** raw traffic both ways (status polls opt-in), controller facts, a terminal (`Machine.send_raw/2`) and a command reference.
+- **LAN access with a PIN** (`CNC_LAN=1 CNC_PIN=…`).
+- **No CI:** all checks run locally via `mix precommit`.
+
