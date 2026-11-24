@@ -470,11 +470,15 @@ button {
 
 /* Joystick: spring-back X/Y stick and Z slider */
 .cnc-joy {
+  /* Explicit sizes: everything inside the pad is absolutely positioned, so
+     it has no intrinsic size, and iOS Safari collapsed a minmax(0, ...)
+     column (and the slider, which takes the pad's height) to nothing. */
+  --joy: 13rem;
   display: grid;
-  grid-template-columns: minmax(0, 13rem) 4rem;
+  grid-template-columns: var(--joy) 4rem;
+  grid-template-rows: var(--joy);
   justify-content: center;
   gap: 1rem;
-  align-items: stretch;
 }
 /* Enabled state is a data attribute: LiveView only updates data-* on
    phx-update="ignore" elements, so a class would stick from first render. */
@@ -493,7 +497,8 @@ button {
   cursor: grab;
 }
 .cnc-joy-pad {
-  aspect-ratio: 1;
+  width: var(--joy);
+  height: var(--joy);
   border-radius: 50%;
   /* rings at 1/3 and 2/3, crosshair */
   background:
@@ -504,6 +509,7 @@ button {
     var(--bg);
 }
 .cnc-joy-z {
+  height: var(--joy);
   border-radius: 3px;
   background: linear-gradient(var(--grid), var(--grid)) center / 100% 1px no-repeat, var(--bg);
 }
@@ -1069,7 +1075,9 @@ a.cnc-btn {
     overflow-y: visible;
   }
   .cnc-joy {
-    grid-template-columns: minmax(0, 15rem) 4.5rem;
+    /* Fits a 320 px-wide phone: 100vw - padding - slider - gap */
+    --joy: min(15rem, calc(100vw - 1rem - 4.5rem - 1rem));
+    grid-template-columns: var(--joy) 4.5rem;
   }
   /* Compact: get the jog controls onto the first screen */
   .cnc-bar {
