@@ -194,7 +194,7 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> has_element?(view, ".cnc-meta-firmware dd") end)
   end
 
-  test "touch layouts: the dock's Stop cancels a jog; More holds the secondary actions", %{
+  test "touch layouts: the dock's Hold cancels a jog; More holds the secondary actions", %{
     conn: conn,
     m: m
   } do
@@ -204,7 +204,7 @@ defmodule CNCWeb.MachineLiveTest do
 
     render_hook(view, "jog", %{"x" => 1, "y" => 0, "tier" => "normal"})
     assert Machine.status(m).state == :jogging
-    view |> element(".cnc-dock button", "Stop") |> render_click()
+    view |> element("#dock-hold") |> render_click()
     assert Machine.status(m).state == :idle
 
     view |> element(".cnc-more > button", "More") |> render_click()
@@ -282,8 +282,8 @@ defmodule CNCWeb.MachineLiveTest do
 
   test "Esc stops and holds; keyboard listed", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    assert has_element?(view, ".cnc-keys dd", "Stop and hold")
-    assert render_hook(view, "stop", %{})
+    assert has_element?(view, ".cnc-keys dd", "Hold, always")
+    assert render_hook(view, "hold", %{})
   end
 
   test "details and console", %{conn: conn, m: m} do

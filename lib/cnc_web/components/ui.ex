@@ -10,7 +10,7 @@ defmodule CNCWeb.UI do
     * `tabs/1` — a page's views, each with its own URL and an optional count
     * `pill/1` — a short status (ok, warn, danger, info, neutral)
     * `machine_state/1` — what the machine is doing, as a pill
-    * `stop_button/1` — Stop: cancel motion and hold, never refused
+    * `hold_button/1` — Hold: pause all motion now (feed hold), never refused
     * `dialog/1` — a modal: title, body, actions
     * `empty/1` — nothing here yet, and what to do about it
     * `viewport/1` — the 3D view of the machine (three.js, the `Viewport`
@@ -184,21 +184,26 @@ defmodule CNCWeb.UI do
   defp state_tone(s) when s in [:connecting, :uploading], do: "info"
   defp state_tone(_), do: "neutral"
 
-  attr :id, :string, default: "stop"
-  attr :disabled, :boolean, default: false
+  attr :id, :string, default: "hold"
   attr :size, :string, default: "md", values: ~w(md lg)
+  attr :class, :any, default: nil
 
-  @doc "Stop: cancels any jog and holds the machine. Handled by `CNCWeb.Shell`."
-  def stop_button(assigns) do
+  @doc """
+  Hold: pauses all motion now (a feed hold, which also cancels a jog). The
+  machine decelerates and stops on its path with the position kept; Resume
+  carries on. Not an e-stop: the spindle keeps turning, and the job isn't
+  cancelled (Reset does that). Never disabled. Handled by `CNCWeb.Shell`.
+  """
+  def hold_button(assigns) do
     ~H"""
     <button
       type="button"
       id={@id}
-      class={["ui-stop", "ui-stop--#{@size}"]}
-      phx-click="shell:stop"
-      disabled={@disabled}
+      class={["ui-hold", "ui-hold--#{@size}", @class]}
+      phx-click="shell:hold"
+      title="Pause all motion now (Esc). Resume carries on."
     >
-      Stop
+      Hold
     </button>
     """
   end

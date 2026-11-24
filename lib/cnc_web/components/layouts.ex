@@ -19,7 +19,7 @@ defmodule CNCWeb.Layouts do
 
   @doc """
   The workstation shell: a left rail (the app's places, and the machine's
-  state with Stop pinned at its foot, so both are always in reach), and the
+  state with Hold pinned at its foot, so both are always in reach), and the
   page beside it. The rail collapses to icons; on narrow screens it's a top
   bar with a drawer. `machine` comes from `CNCWeb.Shell` (`@shell_machine`).
   """
@@ -65,7 +65,7 @@ defmodule CNCWeb.Layouts do
           </.link>
           <div :if={@machine} class="ui-rail-machine">
             <CNCWeb.UI.machine_state machine={@machine} id="rail-state" />
-            <CNCWeb.UI.stop_button id="rail-stop" />
+            <CNCWeb.UI.hold_button id="rail-hold" />
           </div>
         </div>
       </aside>
@@ -82,7 +82,7 @@ defmodule CNCWeb.Layouts do
         <span class="ui-brand">CNC</span>
         <span class="ui-spacer"></span>
         <CNCWeb.UI.machine_state :if={@machine} machine={@machine} id="top-state" />
-        <CNCWeb.UI.stop_button :if={@machine} id="top-stop" />
+        <CNCWeb.UI.hold_button :if={@machine} id="top-hold" />
       </div>
 
       <main class="ui-main">

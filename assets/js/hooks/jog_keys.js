@@ -24,7 +24,7 @@ export default {
       // Esc always stops, even while typing in the console.
       if (e.key === "Escape") {
         this.releaseAll()
-        return this.pushEvent("stop", {})
+        return this.pushEvent("hold", {})
       }
       if (typingIn(e.target)) return
       // macOS drops keyup for other keys while ⌘ is down: never jog with it.

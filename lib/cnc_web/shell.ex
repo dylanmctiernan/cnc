@@ -1,8 +1,8 @@
 defmodule CNCWeb.Shell do
   @moduledoc """
   The workstation shell's live part, mounted on every page in it: keeps
-  `@shell_machine` (the machine's state, for the rail's status and Stop)
-  current and handles the rail's Stop (`"shell:stop"`). Pages in the shell
+  `@shell_machine` (the machine's state, for the rail's status and Hold)
+  current and handles Hold (`"shell:hold"`: cancel any jog, feed hold). Pages in the shell
   get `{:machine, state}` as before, from this subscription, and don't
   subscribe to the machine themselves.
   """
@@ -23,7 +23,7 @@ defmodule CNCWeb.Shell do
         _other, socket -> {:cont, socket}
       end)
       |> attach_hook(:shell_stop, :handle_event, fn
-        "shell:stop", _params, socket ->
+        "shell:hold", _params, socket ->
           Machine.jog_stop(cnc.machine)
           Machine.feed_hold(cnc.machine)
           {:halt, socket}

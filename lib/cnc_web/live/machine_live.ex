@@ -112,7 +112,8 @@ defmodule CNCWeb.MachineLive do
   def handle_event("jog_stop", _, socket), do: tap_noreply(socket, &Machine.jog_stop/1)
 
   # Esc: stop jogging and hold.
-  def handle_event("stop", _, socket) do
+  # Esc (the JogKeys hook): the same as the Hold button
+  def handle_event("hold", _, socket) do
     Machine.jog_stop(srv(socket))
     Machine.feed_hold(srv(socket))
     {:noreply, socket}
@@ -120,7 +121,6 @@ defmodule CNCWeb.MachineLive do
 
   def handle_event("unlock", _, socket), do: tap_noreply(socket, &Machine.unlock/1)
   def handle_event("home", _, socket), do: tap_noreply(socket, &Machine.home/1)
-  def handle_event("feed_hold", _, socket), do: tap_noreply(socket, &Machine.feed_hold/1)
   def handle_event("resume", _, socket), do: tap_noreply(socket, &Machine.resume/1)
   def handle_event("reset", _, socket), do: tap_noreply(socket, &Machine.reset/1)
 
@@ -359,8 +359,8 @@ defmodule CNCWeb.MachineLive do
 
       <%!-- One structure, two layouts (assets/css/app.css):
            touch and small screens get the controller (readout, map, controller,
-           Stop dock); a wide screen with a mouse gets the workstation (map,
-           readout and jog panel, details, docked console, Stop in the bar). --%>
+           Hold dock); a wide screen with a mouse gets the workstation (map,
+           readout and jog panel, details, docked console, Hold in the bar). --%>
       <div class={["cnc", @details? && "has-console"]} data-mode={@control_mode}>
         <header class="cnc-bar">
           <%!-- Coded by icon and words as well as colour (ISA-101): calm when
@@ -399,33 +399,10 @@ defmodule CNCWeb.MachineLive do
               <dd>{controller_label(@machine)}</dd>
             </div>
           </dl>
-          <%!-- Grouped as on a machine's operator panel: running the machine,
-               the job, the console; Stop last, always the same place. --%>
+          <%!-- Grouped as on a machine's operator panel: the job, then Reset
+               (abandons it; quiet, apart), then Resume and Hold side by side,
+               Hold last and always in the same place. --%>
           <div class="cnc-actions">
-            <div class="cnc-run-group" role="group" aria-label="Run">
-              <UI.button
-                phx-click="feed_hold"
-                disabled={!@machine.connected?}
-                title="Pause motion (feed hold)"
-              >
-                <.icon name="hero-pause" class="ui-btn-icon" /> Hold
-              </UI.button>
-              <UI.button
-                phx-click="resume"
-                disabled={!@machine.connected?}
-                title="Continue (cycle start)"
-              >
-                <.icon name="hero-play" class="ui-btn-icon" /> Resume
-              </UI.button>
-              <UI.button
-                variant="quiet"
-                phx-click="reset"
-                disabled={!@machine.connected?}
-                title="Soft reset: stops and clears the controller; it comes back locked"
-              >
-                Reset
-              </UI.button>
-            </div>
             <div class="cnc-run-group" role="group" aria-label="Job">
               <UI.button id="open-file" phx-click="open_file">
                 <.icon name="hero-document-arrow-up" class="ui-btn-icon" /> Open file
@@ -438,9 +415,25 @@ defmodule CNCWeb.MachineLive do
                 <.icon name="hero-command-line" class="ui-btn-icon" /> Console
               </UI.button>
             </div>
-            <span title="Stops any jog and holds (Esc). A software stop: the e-stop must be wired on the machine.">
-              <UI.stop_button id="bar-stop" />
-            </span>
+            <div class="cnc-run-group" role="group" aria-label="Run">
+              <UI.button
+                variant="quiet"
+                phx-click="reset"
+                disabled={!@machine.connected?}
+                title="Abandon the job: stops and clears the controller; it comes back locked"
+              >
+                Reset
+              </UI.button>
+              <UI.button
+                id="bar-resume"
+                phx-click="resume"
+                disabled={not held?(@machine)}
+                title="Carry on after a Hold"
+              >
+                <.icon name="hero-play" class="ui-btn-icon" /> Resume
+              </UI.button>
+              <UI.hold_button id="bar-hold" />
+            </div>
           </div>
         </header>
 
@@ -513,14 +506,6 @@ defmodule CNCWeb.MachineLive do
             </button>
             <div :if={@more?} id="more-menu" class="cnc-more-menu" phx-click-away="close_more">
               <p class="cnc-sub">{firmware_label(@machine.controller_info)}</p>
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click={JS.push("feed_hold") |> JS.push("close_more")}
-                disabled={!@machine.connected?}
-              >
-                Hold
-              </button>
               <button
                 type="button"
                 class="cnc-btn"
@@ -876,7 +861,7 @@ defmodule CNCWeb.MachineLive do
             <dt>Option</dt>
             <dd>Fine while held</dd>
             <dt>Esc</dt>
-            <dd>Stop and hold, always</dd>
+            <dd>Hold, always</dd>
           </dl>
           <button
             :if={@view_mode == :top}
@@ -1101,17 +1086,17 @@ defmodule CNCWeb.MachineLive do
               "Typed moves skip the jog safety stop and the travel limit. ↑ and ↓ recall earlier commands."}
           </p>
         </section>
-        <%!-- Controller: Stop always in reach, at the bottom (thumb zone) --%>
-        <nav class="cnc-dock" aria-label="Stop and resume">
+        <%!-- Controller: Hold always in reach, at the bottom (thumb zone);
+             Resume beside it, enabled only when there's a hold to release --%>
+        <nav class="cnc-dock" aria-label="Hold and resume">
+          <UI.hold_button id="dock-hold" class="cnc-dock-hold" />
           <button
             type="button"
-            class="cnc-btn cnc-stop"
-            phx-click="stop"
-            disabled={!@machine.connected?}
+            id="dock-resume"
+            class="cnc-btn"
+            phx-click="resume"
+            disabled={not held?(@machine)}
           >
-            Stop
-          </button>
-          <button type="button" class="cnc-btn" phx-click="resume" disabled={!@machine.connected?}>
             Resume
           </button>
         </nav>
@@ -1593,6 +1578,10 @@ defmodule CNCWeb.MachineLive do
   defp adapter_label("FluidNCSim"), do: "FluidNC sim"
   defp adapter_label(nil), do: ""
   defp adapter_label(name), do: name
+
+  # A hold Resume can release (an open door must be closed first)
+  defp held?(%State{state: :busy, controller: :hold}), do: true
+  defp held?(_), do: false
 
   # Attention states get colour; normal ones stay calm (see the CSS).
   defp state_class(%State{state: :busy, controller: c}) when c in [:hold, :door], do: "hold"

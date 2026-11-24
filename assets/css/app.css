@@ -1363,12 +1363,10 @@ body {
   min-height: 3.25rem;
   font-size: 1rem;
 }
-.cnc-dock .cnc-stop {
-  flex: 2;
-}
+
 
 /* Console: a sheet laid over the screen grid, between the status bar and
-   the dock (so Stop stays reachable). The log takes the spare height. */
+   the dock (so Hold stays reachable). The log takes the spare height. */
 .cnc-console {
   grid-column: 1 / -1;
   grid-row: 2 / -2;
@@ -2600,7 +2598,7 @@ body {
   height: 0.75rem;
   justify-self: center;
 }
-.ui-shell.is-collapsed .ui-stop {
+.ui-shell.is-collapsed .ui-hold {
   padding: 0;
   font-size: var(--text-xs);
 }
@@ -2755,7 +2753,7 @@ body {
 .ui-btn:focus-visible,
 .ui-nav-item:focus-visible,
 .ui-tab:focus-visible,
-.ui-stop:focus-visible {
+.ui-hold:focus-visible {
   outline: 2px solid var(--info);
   outline-offset: 2px;
 }
@@ -2796,8 +2794,9 @@ body {
   font-size: var(--text-md);
 }
 
-/* Stop: the same everywhere, never disabled by the page */
-.ui-stop {
+/* Hold: the same everywhere, never disabled by the page. Red: the
+   "stop motion now" control, the one to find without looking. */
+.ui-hold {
   min-height: 2.5rem;
   padding: 0 var(--space-4);
   border: 1px solid var(--danger);
@@ -2810,13 +2809,13 @@ body {
   cursor: pointer;
   transition: filter 120ms ease;
 }
-.ui-stop:hover {
+.ui-hold:hover {
   filter: brightness(1.1);
 }
-.ui-stop:active {
+.ui-hold:active {
   filter: brightness(0.9);
 }
-.ui-stop--lg {
+.ui-hold--lg {
   min-height: 4rem;
   font-size: var(--text-lg);
 }
@@ -2950,13 +2949,13 @@ body {
 .ui-pendant-top {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: "state pos" "cycle stop";
+  grid-template-areas: "state pos" "cycle hold";
   align-items: center;
   gap: var(--space-3);
 }
 .ui-pendant-top > .ui-pill { grid-area: state; }
 .ui-pendant-top > .ui-pendant-pos { grid-area: pos; }
-.ui-pendant-top > .ui-stop { grid-area: stop; }
+.ui-pendant-top > .ui-hold { grid-area: hold; }
 .ui-pendant-cycle {
   grid-area: cycle;
   display: inline-flex;
@@ -3134,7 +3133,7 @@ body {
   /* One row on a tablet: state, position, cycle start, Stop */
   .ui-pendant-top {
     grid-template-columns: auto minmax(0, 1fr) auto minmax(10rem, auto);
-    grid-template-areas: "state pos cycle stop";
+    grid-template-areas: "state pos cycle hold";
   }
   .ui-pendant-speed {
     grid-column: 1;
@@ -3505,3 +3504,11 @@ body {
     display: none;
   }
 }
+
+/* Touch layouts' dock: Hold fills its slot */
+.cnc-dock .cnc-dock-hold {
+  flex: 2;
+  min-height: 3.25rem;
+  font-size: var(--text-md);
+}
+

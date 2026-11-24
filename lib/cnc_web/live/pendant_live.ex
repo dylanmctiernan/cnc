@@ -1,13 +1,13 @@
 defmodule CNCWeb.PendantLive do
   @moduledoc """
   The pendant (`/pendant`): a phone or tablet as a jog pendant. One job,
-  the whole screen: the machine's state and Stop always at the top, where
+  the whole screen: the machine's state and Hold always at the top, where
   it is, the jog speed, and a big joystick (X/Y stick, Z slider) using the
   same `Joystick` hook and safety as the machine screen (heartbeat while
   held, stop on release, blur, hidden tab or lost connection). When the
   machine is locked, Unlock is offered, since a locked machine won't jog;
-  when it's held (Stop latches a hold), Resume releases it, so a stop made
-  here can be released here.
+  when it's held (Hold latches until released), Resume releases it, so a
+  hold made here can be released here.
   More pendant functions (zeroing, a handwheel) come as they're needed.
   """
   use CNCWeb, :live_view
@@ -24,7 +24,7 @@ defmodule CNCWeb.PendantLive do
      |> assign(tiers: CNCWeb.Jog.tiers())}
   end
 
-  # The state comes from CNCWeb.Shell (@shell_machine), which also handles Stop.
+  # The state comes from CNCWeb.Shell (@shell_machine), which also handles Hold.
   @impl true
   def handle_info({:machine, _}, socket), do: {:noreply, socket}
 
@@ -71,7 +71,7 @@ defmodule CNCWeb.PendantLive do
       <div class="ui-pendant" id="pendant">
         <%!-- Like a physical pendant: the state and where it is, then the
              cycle-start button (Resume, or Unlock when locked; always there,
-             enabled only when it does something) and Stop, side by side.
+             enabled only when it does something) and Hold, side by side.
              Nothing here ever appears or disappears, so nothing shifts. --%>
         <header class="ui-pendant-top">
           <UI.machine_state machine={@shell_machine} id="pendant-state" />
@@ -94,7 +94,7 @@ defmodule CNCWeb.PendantLive do
               <.icon name="hero-play" class="ui-btn-icon" /> Resume
             <% end %>
           </button>
-          <UI.stop_button id="pendant-stop" size="lg" />
+          <UI.hold_button id="pendant-hold" size="lg" />
         </header>
 
         <div class="ui-pendant-speed" role="group" aria-label="Jog speed">
@@ -177,7 +177,7 @@ defmodule CNCWeb.PendantLive do
     do: {"locked", "danger", "Locked: the position isn't confirmed. Press Unlock to jog."}
 
   defp cover(%{state: :busy, controller: :hold}),
-    do: {"held", "warn", "On hold: stopped, position kept. Press Resume to carry on."}
+    do: {"held", "warn", "On hold: motion paused, position kept. Press Resume to carry on."}
 
   defp cover(%{state: :busy, controller: :door}),
     do: {"door", "warn", "Door open: close it, then press Resume."}
