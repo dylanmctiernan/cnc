@@ -28,17 +28,22 @@ mix cnc.fluidnc.flash /dev/cu.usbserial-0001
 ```
 
 This builds FluidNC from the same pinned commit as the FluidNC sim (the
-`noradio` build: serial only, no Wi-Fi access point), writes it, then writes
+`noradio` build: serial only, no Wi-Fi or Bluetooth), writes it, then writes
 the ESP32 DevKit board's default config (`CNC.Boards`: this machine with the
-bench pins) to the board as `config.yaml`. The first run
-downloads the ESP32 toolchain (a few minutes).
+bench pins) to the board as `config.yaml`. The first run downloads the ESP32
+toolchain (a few minutes).
+
+The no-radio build is deliberate: the app has no login (it's LAN-only, one
+user), and a FluidNC Wi-Fi build would open telnet and a web interface that
+take commands with no password, around the app entirely. With no radio, USB
+is the only way in. Keep it that way (don't flash a Wi-Fi build).
 
 If it stops at `Connecting....`, hold the board's **BOOT** button until the
 upload starts. Nothing else should have the port open (stop the dev server
 if it's on `uart`).
 
 After this the board's own config is the one that counts: change it from the
-app's Settings (coming next) rather than by reflashing.
+app's Configuration page rather than by reflashing.
 
 ## 3. Wire the buttons
 
