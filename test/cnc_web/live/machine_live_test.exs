@@ -350,6 +350,11 @@ defmodule CNCWeb.MachineLiveTest do
     # The other screen has it too (one program for the whole app).
     assert eventually(fn -> has_element?(other, ".cnc-file-side", "sample.nc") end)
 
+    # Loading zooms the map to the file; the toggle goes back to the whole bed.
+    assert has_element?(view, "#zoom-toggle", "Whole bed")
+    view |> element("#zoom-toggle") |> render_click()
+    assert has_element?(view, "#zoom-toggle", "Zoom to file")
+
     view |> element("#file-dialog button", "Clear file") |> render_click()
     assert eventually(fn -> not has_element?(other, ".cnc-file-side") end)
   end

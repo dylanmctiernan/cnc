@@ -72,6 +72,14 @@ export default {
     this.handleEvent("program", ({path}) => {
       this.program = path ? decodePath(path) : null
       this.pathKey = null
+      this.fit()
+    })
+    // "bed": the whole bed. "file": the loaded file's area plus the tool,
+    // fixed when zoomed (so the cached toolpath isn't redrawn on every move).
+    this.zoomMode = this.el.dataset.zoom || "bed"
+    this.handleEvent("zoom", ({mode}) => {
+      this.zoomMode = mode
+      this.fit()
     })
 
     this.handleEvent("pos", (p) => this.sample(p))
@@ -108,7 +116,9 @@ export default {
     this.lastSample = now
     this.state = state
     this.jog = jog
+    const wcoChanged = JSON.stringify(wco) !== JSON.stringify(this.wco)
     this.wco = wco
+    if (wcoChanged && this.view && this.view.zoomed) this.fit()
     if (speed) this.speed = speed
     this.pushTrail(x, y)
   },
@@ -138,22 +148,51 @@ export default {
     const pad = this.mini ? 3 : this.compact ? 22 : PAD
     const meters = this.mini ? 0 : this.compact ? METERS_COMPACT : METERS
     const room = width - meters - (this.mini ? 0 : this.compact ? 48 : GAUGE)
-    const scale = Math.min((room - pad * 2) / (x1 - x0), (height - pad * 2) / (y1 - y0))
-    const bedH = (y1 - y0) * scale
+    const file = !this.mini && this.zoomMode === "file" && this.fileWindow()
+    const w = file || {x0, x1, y0, y1}
+    const scale = Math.min((room - pad * 2) / (w.x1 - w.x0), (height - pad * 2) / (w.y1 - w.y0))
+    const winW = (w.x1 - w.x0) * scale
+    const winH = (w.y1 - w.y0) * scale
     this.view = {
       width, height, scale, x0, x1, y0, y1, z0, z1,
-      left: meters + (room - (x1 - x0) * scale) / 2,
-      bottom: (height + bedH) / 2,
-      top: (height - bedH) / 2,
+      // The window drawn: the bed, or the file's area when zoomed
+      wx0: w.x0, wy0: w.y0, wx1: w.x1, wy1: w.y1,
+      zoomed: !!file,
+      left: meters + (room - winW) / 2,
+      bottom: (height + winH) / 2,
+      top: (height - winH) / 2,
       gaugeX: meters + room + 8,
       meters,
+      mapRight: meters + room,
     }
+    this.pathKey = null
   },
 
-  // Machine mm → canvas px, Y up, origin front-left.
+  // Machine mm → canvas px, Y up, origin front-left, within the view window.
   px(x, y) {
     const v = this.view
-    return [v.left + (x - v.x0) * v.scale, v.bottom - (y - v.y0) * v.scale]
+    return [v.left + (x - v.wx0) * v.scale, v.bottom - (y - v.wy0) * v.scale]
+  },
+
+  // The loaded file's X/Y area in machine coordinates (at the current work
+  // zero), with the tool, padded. Null if there's nothing to zoom to.
+  fileWindow() {
+    if (!this.program || !this.program.box) return null
+    const [ox, oy] = this.wco || [0, 0, 0]
+    const b = this.program.box
+    let x0 = b.x0 + ox, x1 = b.x1 + ox, y0 = b.y0 + oy, y1 = b.y1 + oy
+    const t = this.shown || this.to
+    if (t) {
+      x0 = Math.min(x0, t.x); x1 = Math.max(x1, t.x)
+      y0 = Math.min(y0, t.y); y1 = Math.max(y1, t.y)
+    }
+    const pad = Math.max(0.08 * Math.max(x1 - x0, y1 - y0), 5)
+    x0 -= pad; x1 += pad; y0 -= pad; y1 += pad
+    // At least 20 mm across, so a tiny file isn't blown up absurdly
+    const grow = (a, b) => { const m = Math.max(0, 20 - (b - a)) / 2; return [a - m, b + m] }
+    ;[x0, x1] = grow(x0, x1)
+    ;[y0, y1] = grow(y0, y1)
+    return {x0, x1, y0, y1}
   },
 
   // Z mm → canvas y on the gauge (top of travel at the top).
@@ -173,11 +212,18 @@ export default {
 
     const {ctx, view: v} = this
     ctx.clearRect(0, 0, v.width, v.height)
+    // Zoomed, the bed and everything on it is clipped to the map area so it
+    // doesn't run under the speed meters or the Z gauge.
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(v.meters, 0, v.mapRight - v.meters, v.height)
+    ctx.clip()
     this.drawBed()
     this.drawProgram()
     this.drawWorkOrigin()
     this.drawTrail()
     this.drawTool(this.shown)
+    ctx.restore()
     if (!this.mini) {
       this.drawGauge(this.shown.z)
       this.drawSpeed(now)
@@ -189,7 +235,7 @@ export default {
     const {view: v} = this
     const wco = this.wco || [0, 0, 0]
     const dpr = window.devicePixelRatio || 1
-    const key = [v.width, v.height, v.scale, v.left, v.bottom, dpr, ...wco].join(",")
+    const key = [v.width, v.height, v.scale, v.left, v.bottom, v.wx0, v.wy0, dpr, ...wco].join(",")
 
     if (key !== this.pathKey) {
       this.pathKey = key
@@ -259,17 +305,24 @@ export default {
     ctx.fillStyle = c.bed
     ctx.fillRect(l, t, r - l, b - t)
 
+    // Grid: 100 mm on the whole bed; zoomed, the finest step that keeps
+    // lines at least ~24 px apart, with every 5th line stronger.
+    const grid = v.zoomed
+      ? [1, 2, 5, 10, 20, 50, 100, 250].find((s) => s * v.scale >= 24) || 500
+      : GRID_MM
+    const major = v.zoomed ? grid * 5 : 500
     ctx.lineWidth = 1
-    for (let mm = Math.ceil(v.x0 / GRID_MM) * GRID_MM; mm <= v.x1; mm += GRID_MM) {
+    for (let mm = Math.ceil(Math.max(v.x0, v.wx0) / grid) * grid; mm <= Math.min(v.x1, v.wx1); mm += grid) {
       const [x] = this.px(mm, 0)
-      ctx.strokeStyle = mm % 500 === 0 ? c.gridMajor : c.grid
+      ctx.strokeStyle = mm % major === 0 ? c.gridMajor : c.grid
       line(ctx, x, t, x, b)
     }
-    for (let mm = Math.ceil(v.y0 / GRID_MM) * GRID_MM; mm <= v.y1; mm += GRID_MM) {
+    for (let mm = Math.ceil(Math.max(v.y0, v.wy0) / grid) * grid; mm <= Math.min(v.y1, v.wy1); mm += grid) {
       const [, y] = this.px(0, mm)
-      ctx.strokeStyle = mm % 500 === 0 ? c.gridMajor : c.grid
+      ctx.strokeStyle = mm % major === 0 ? c.gridMajor : c.grid
       line(ctx, l, y, r, y)
     }
+    this.gridStep = grid
 
     // Travel limits
     ctx.strokeStyle = c.edge
@@ -278,17 +331,28 @@ export default {
 
     if (this.mini) return
 
-    // Scale every 250 mm, outside the bed
+    // Scale: every 250 mm on the whole bed (ends only when compact); zoomed,
+    // at the major grid lines along the window's bottom and left edges.
     ctx.fillStyle = c.dim
     ctx.font = `11px ${FONT}`
     ctx.textAlign = "center"
     ctx.textBaseline = "top"
-    const step = this.compact ? v.x1 - v.x0 : 250
-    for (let mm = v.x0; mm <= v.x1; mm += step) ctx.fillText(mm, this.px(mm, 0)[0], b + 4)
-    ctx.textAlign = "right"
-    ctx.textBaseline = "middle"
-    const ystep = this.compact ? v.y1 - v.y0 : 250
-    for (let mm = v.y0; mm <= v.y1; mm += ystep) ctx.fillText(mm, l - 4, this.px(0, mm)[1])
+    if (v.zoomed) {
+      const [, wb] = this.px(0, v.wy0)
+      const [wl] = this.px(v.wx0, 0)
+      const lx = this.compact ? major * 2 : major
+      for (let mm = Math.ceil(v.wx0 / lx) * lx; mm <= v.wx1; mm += lx) ctx.fillText(mm, this.px(mm, 0)[0], wb + 4)
+      ctx.textAlign = "left"
+      ctx.textBaseline = "middle"
+      for (let mm = Math.ceil(v.wy0 / lx) * lx; mm <= v.wy1; mm += lx) ctx.fillText(mm, wl + 4, this.px(0, mm)[1])
+    } else {
+      const step = this.compact ? v.x1 - v.x0 : 250
+      for (let mm = v.x0; mm <= v.x1; mm += step) ctx.fillText(mm, this.px(mm, 0)[0], b + 4)
+      ctx.textAlign = "right"
+      ctx.textBaseline = "middle"
+      const ystep = this.compact ? v.y1 - v.y0 : 250
+      for (let mm = v.y0; mm <= v.y1; mm += ystep) ctx.fillText(mm, l - 4, this.px(0, mm)[1])
+    }
 
     // Origin axes, front-left, in axis colours
     const [ox, oy] = this.px(0, 0)
@@ -570,7 +634,19 @@ function decodePath(b64) {
     }
   }
   if (zMin === Infinity) zMin = zMax = 0
-  return {data, zMin, zMax}
+  // X/Y extent of all moves (work coordinates), for zooming to the file
+  let box = null
+  for (let i = 0; i < data.length; i += 4) {
+    const x = data[i + 1], y = data[i + 2]
+    if (!box) box = {x0: x, x1: x, y0: y, y1: y}
+    else {
+      if (x < box.x0) box.x0 = x
+      if (x > box.x1) box.x1 = x
+      if (y < box.y0) box.y0 = y
+      if (y > box.y1) box.y1 = y
+    }
+  }
+  return {data, zMin, zMax, box}
 }
 
 function line(ctx, x1, y1, x2, y2) {

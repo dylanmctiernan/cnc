@@ -35,6 +35,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: Program.current(), file_error: nil)
      |> assign(work_edit: nil)
+     |> assign(zoom: if(Program.current(), do: :file, else: :bed))
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
        max_entries: 1,
@@ -73,8 +74,16 @@ defmodule CNCWeb.MachineLive do
       else: {:noreply, socket}
   end
 
-  def handle_info({:program, program}, socket),
-    do: {:noreply, socket |> assign(program: program, file_error: nil) |> push_program()}
+  # A new file is shown zoomed to; clearing it goes back to the whole bed.
+  def handle_info({:program, program}, socket) do
+    zoom = if program, do: :file, else: :bed
+
+    {:noreply,
+     socket
+     |> assign(program: program, file_error: nil, zoom: zoom)
+     |> push_program()
+     |> push_event("zoom", %{mode: zoom})}
+  end
 
   def handle_info({:machine_console, entry}, socket),
     do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
@@ -208,6 +217,11 @@ defmodule CNCWeb.MachineLive do
         {:noreply,
          update(socket, :work_edit, &%{&1 | error: "Only when the machine is Ready and stopped."})}
     end
+  end
+
+  def handle_event("toggle_zoom", _, socket) do
+    zoom = if socket.assigns.zoom == :file, do: :bed, else: :file
+    {:noreply, socket |> assign(zoom: zoom) |> push_event("zoom", %{mode: zoom})}
   end
 
   def handle_event("open_file", _, socket), do: {:noreply, assign(socket, file?: true)}
@@ -504,6 +518,16 @@ defmodule CNCWeb.MachineLive do
         </div>
 
         <section class="cnc-view" aria-label="Bed and Z">
+          <button
+            :if={@program}
+            id="zoom-toggle"
+            type="button"
+            class="cnc-btn cnc-zoom"
+            phx-click="toggle_zoom"
+            aria-pressed={to_string(@zoom == :file)}
+          >
+            {if @zoom == :file, do: "Whole bed", else: "Zoom to file"}
+          </button>
           <div
             id="bed"
             class="cnc-bed"
@@ -514,6 +538,7 @@ defmodule CNCWeb.MachineLive do
             data-y={pos(@machine, 1)}
             data-z={pos(@machine, 2)}
             data-state={@machine.state}
+            data-zoom={@zoom}
           >
             <canvas
               role="img"

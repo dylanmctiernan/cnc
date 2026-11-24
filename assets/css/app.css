@@ -1777,3 +1777,19 @@ body {
     display: flex;
   }
 }
+
+/* Map: zoom to the loaded file / back to the whole bed */
+.cnc-view {
+  position: relative;
+}
+.cnc-zoom {
+  position: absolute;
+  z-index: 4;
+  bottom: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+}
