@@ -1553,8 +1553,8 @@ defmodule CNCWeb.MachineLive do
   defp link_label(nil, %State{adapter: "TCP"}), do: "Wi-Fi"
   defp link_label(nil, %State{adapter: other}), do: other
 
-  defp short_link(%{type: :fluidnc_sim}), do: "This computer (sim)"
-  defp short_link(%{type: :fake_sim}), do: "Built in (sim)"
+  defp short_link(%{type: :fluidnc_sim}), do: "FluidNC sim"
+  defp short_link(%{type: :fake_sim}), do: "Fake sim"
   defp short_link(%{type: :serial, port: port}), do: "USB " <> Path.basename(port)
   defp short_link(%{type: :tcp, host: host}), do: "Wi-Fi " <> host
 

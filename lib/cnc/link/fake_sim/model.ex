@@ -39,7 +39,7 @@ defmodule CNC.Link.FakeSim.Model do
   @locked "[MSG:'$H'|'$X' to unlock]"
   @planner_blocks 15
   @config """
-  board: Fake sim (built in)
+  board: Fake sim
   name: Fake sim
   stepping:
     engine: Timed

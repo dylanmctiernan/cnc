@@ -58,7 +58,7 @@ defmodule CNC.Boards do
 
   @boards %{
     fake_sim: %{
-      label: "Fake sim (built in)",
+      label: "Fake sim",
       firmware: :fluidnc,
       links: [:fake_sim],
       engine: "timed",
@@ -73,7 +73,7 @@ defmodule CNC.Boards do
       }
     },
     fluidnc_sim: %{
-      label: "This computer (FluidNC sim)",
+      label: "FluidNC sim",
       firmware: :fluidnc,
       links: [:fluidnc_sim],
       engine: "timed",

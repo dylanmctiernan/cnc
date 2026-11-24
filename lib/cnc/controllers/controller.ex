@@ -77,8 +77,8 @@ defmodule CNC.Controllers.Controller do
   end
 
   @doc "A short description of the link, for people."
-  def describe_link(%{type: :fluidnc_sim}), do: "FluidNC sim on this computer"
-  def describe_link(%{type: :fake_sim}), do: "Fake sim (built in)"
+  def describe_link(%{type: :fluidnc_sim}), do: "FluidNC sim"
+  def describe_link(%{type: :fake_sim}), do: "Fake sim"
   def describe_link(%{type: :serial, port: port}), do: "USB #{port}"
   def describe_link(%{type: :tcp, host: host, port: port}), do: "Wi-Fi #{host}:#{port}"
 end

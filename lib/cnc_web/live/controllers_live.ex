@@ -12,8 +12,8 @@ defmodule CNCWeb.ControllersLive do
   alias CNC.Controllers.{Controller, Profiles}
 
   @link_labels %{
-    fluidnc_sim: "On this computer",
-    fake_sim: "Built in",
+    fluidnc_sim: "FluidNC sim",
+    fake_sim: "Fake sim",
     serial: "USB",
     tcp: "Wi-Fi"
   }

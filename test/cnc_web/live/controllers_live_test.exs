@@ -15,7 +15,7 @@ defmodule CNCWeb.ControllersLiveTest do
     {:ok, view, _} = live(conn, ~p"/controllers")
     assert has_element?(view, "#controllers li.is-active", "Fake sim")
     assert has_element?(view, "#controllers li.is-active", "In use, connected")
-    assert has_element?(view, "#controllers li.is-active", "Fake sim (built in)")
+    assert has_element?(view, "#controllers li.is-active dd", "Fake sim")
   end
 
   test "add: the board decides which links are offered; USB needs a port", %{conn: conn} do

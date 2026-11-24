@@ -190,7 +190,7 @@ defmodule CNCWeb.MachineLiveTest do
 
   test "shows the link (a sim says so) and which firmware", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    assert has_element?(view, "#header-link dd", "Built in (sim)")
+    assert has_element?(view, "#header-link dd", "Fake sim")
     assert eventually(fn -> has_element?(view, ".cnc-meta-firmware dd") end)
   end
 
