@@ -121,6 +121,17 @@ defmodule CNC.ControllersTest do
       assert Controllers.active(start_controllers(ctx)) == nil
     end
 
+    test "removing a FluidNC sim deletes its folder (its flash)", ctx do
+      c = start_controllers(ctx)
+      {:ok, sim} = Controllers.add(c, %{name: "Sim", board: :fluidnc_sim})
+      folder = Path.join([ctx.dir, "controllers", sim.id, "fluidnc"])
+      File.mkdir_p!(folder)
+      File.write!(Path.join(folder, "config.yaml"), "name: tuned\n")
+
+      :ok = Controllers.remove(c, sim.id)
+      refute File.exists?(folder)
+    end
+
     test "a controllers.json from before is imported once", ctx do
       File.write!(
         Path.join(ctx.dir, "controllers.json"),
@@ -134,32 +145,6 @@ defmodule CNC.ControllersTest do
       assert [%{id: "ab2c", name: "Old"}] = Controllers.list(c)
       assert Controllers.active(c).id == "ab2c"
       assert File.exists?(Path.join(ctx.dir, "controllers.json.migrated"))
-    end
-
-    test "fork a FluidNC sim: an independent copy of its folder; boards can't", ctx do
-      c = start_controllers(ctx)
-      {:ok, sim} = Controllers.add(c, %{name: "Sim", board: :fluidnc_sim})
-      folder = Path.join([ctx.dir, "controllers", sim.id, "fluidnc"])
-      File.mkdir_p!(folder)
-      File.write!(Path.join(folder, "config.yaml"), "name: tuned\n")
-
-      {:ok, copy} = Controllers.fork(c, sim.id)
-      assert copy.name == "Sim (copy)" and copy.id != sim.id and copy.board == :fluidnc_sim
-      copied = Path.join([ctx.dir, "controllers", copy.id, "fluidnc", "config.yaml"])
-      assert File.read!(copied) == "name: tuned\n"
-
-      # Removing a sim takes its folder with it
-      :ok = Controllers.remove(c, copy.id)
-      refute File.exists?(copied)
-
-      {:ok, board} =
-        Controllers.add(c, %{
-          name: "Bench",
-          board: :esp32_devkit,
-          link: %{type: :serial, port: "/dev/x"}
-        })
-
-      assert Controllers.fork(c, board.id) == {:error, :not_forkable}
     end
 
     test "adding profiles: board defaults for the link, serial needs a port", ctx do

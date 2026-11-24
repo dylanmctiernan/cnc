@@ -7,8 +7,8 @@ defmodule CNC.Controllers do
   Profiles and the active choice are kept in the app's CubDB (`CNC.DB`,
   `<data_dir>/db`): crash-safe, synced on every write. A `controllers.json`
   from before is imported once and renamed `controllers.json.migrated`.
-  The list starts empty: you add (import) your controllers, and can fork a
-  sim to experiment. With none active the machine stays disconnected.
+  The list starts empty: you add (import) your controllers. Experiments are
+  configs on a controller (several can live on it), not extra controllers. With none active the machine stays disconnected.
   Selecting a profile tells `CNC.Machine` to connect to it (the controller
   starts locked, as on any connect).
 
@@ -66,15 +66,6 @@ defmodule CNC.Controllers do
   """
   @spec deactivate(GenServer.server()) :: :ok | {:error, :overridden | :moving}
   def deactivate(server \\ __MODULE__), do: GenServer.call(server, :deactivate, 10_000)
-
-  @doc """
-  Fork a FluidNC sim (or the fake sim): a new, independent copy to
-  experiment with. A FluidNC sim's folder (config and settings) is copied.
-  Boards can't be forked: a board holds one config, so two profiles would
-  share it (use config versions for experiments).
-  """
-  @spec fork(GenServer.server(), String.t()) :: {:ok, Profile.t()} | {:error, term}
-  def fork(server \\ __MODULE__, id), do: GenServer.call(server, {:fork, id})
 
   @doc "Remove a profile (not the active one)."
   @spec remove(GenServer.server(), String.t()) :: :ok | {:error, :active | :not_found}
@@ -194,27 +185,6 @@ defmodule CNC.Controllers do
       s = save(%{s | active: nil})
       Machine.connect(s.machine, nil)
       {:reply, :ok, s}
-    end
-  end
-
-  def handle_call({:fork, id}, _from, s) do
-    case find(s, id) do
-      nil ->
-        {:reply, {:error, :not_found}, s}
-
-      %Profile{link: %{type: type}} = profile when type in [:fluidnc_sim, :fake_sim] ->
-        copy = %{profile | id: Profile.new_id(), name: profile.name <> " (copy)"}
-
-        if type == :fluidnc_sim do
-          from = Path.join([s.data_dir, "controllers", id])
-          to = Path.join([s.data_dir, "controllers", copy.id])
-          if File.dir?(from), do: File.cp_r!(from, to)
-        end
-
-        {:reply, {:ok, copy}, save(%{s | profiles: s.profiles ++ [copy]})}
-
-      _board ->
-        {:reply, {:error, :not_forkable}, s}
     end
   end
 

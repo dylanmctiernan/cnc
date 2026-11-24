@@ -75,13 +75,6 @@ defmodule CNCWeb.ControllersLive do
     end
   end
 
-  def handle_event("fork", %{"id" => id}, socket) do
-    case Controllers.fork(socket.assigns.cnc.controllers, id) do
-      {:ok, _} -> {:noreply, socket |> assign(error: nil) |> load()}
-      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
-    end
-  end
-
   def handle_event("remove", %{"id" => id}, socket) do
     case Controllers.remove(socket.assigns.cnc.controllers, id) do
       :ok -> {:noreply, socket |> assign(error: nil) |> load()}
@@ -138,7 +131,7 @@ defmodule CNCWeb.ControllersLive do
             A controller is a board plus how the app reaches it. Its configuration lives on
             the controller, so changing the link (USB to Wi-Fi, say) keeps it. Connect one
             to drive the machine with it (it starts locked until you unlock or home);
-            Disconnect to use none. Fork a sim to get an independent copy to experiment with.
+            Disconnect to use none.
           </p>
 
           <p :if={@overridden?} class="cnc-note cnc-note--warn">
@@ -215,16 +208,6 @@ defmodule CNCWeb.ControllersLive do
                     phx-value-id={p.id}
                   >
                     Change link
-                  </button>
-                  <button
-                    :if={p.link.type in [:fluidnc_sim, :fake_sim]}
-                    type="button"
-                    class="cnc-btn"
-                    phx-click="fork"
-                    phx-value-id={p.id}
-                    title="An independent copy to experiment with"
-                  >
-                    Fork
                   </button>
                   <button
                     :if={p.id != @active_id}
@@ -395,9 +378,6 @@ defmodule CNCWeb.ControllersLive do
 
   defp remove_confirm(%Profile{name: name}),
     do: "Remove #{name} from this list? Its config stays on the board."
-
-  defp error_text(:not_forkable),
-    do: "Boards can't be forked: a board holds one config. Save config versions instead."
 
   defp error_text(:moving), do: "Wait for the machine to stop before switching controllers."
   defp error_text(:overridden), do: "CNC_LINK is set, so controllers can't be switched."
