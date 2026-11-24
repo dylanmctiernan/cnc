@@ -2,6 +2,12 @@
 
 Manual checks that aren't covered by automated tests. Newest first.
 
+## 2026-11-23 — M3: jog safety test sensitivity
+
+- Removed the in-flight cap, the run-ahead bound, and the dead-man (one at a time):
+  each made exactly its own test fail. Reverted; 88 pass.
+- Machine tests 5× and full suite 3× in a row without flakes.
+
 ## 2026-11-23 — M2: Sim test sensitivity
 
 - Disabled soft-limit check → 2 tests fail. Dropped leftover-time carry between queued jogs → 1 fails.

@@ -22,6 +22,9 @@ config :cnc, CNCWeb.Endpoint,
   pubsub_server: CNC.PubSub,
   live_view: [signing_salt: "resrjewd"]
 
+# Controller link. Dev/test default is the in-process simulator.
+config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",

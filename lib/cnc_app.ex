@@ -14,6 +14,7 @@ defmodule CNCApp do
       CNCWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:cnc, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: CNC.PubSub},
+      CNC.Machine,
       CNCWeb.Endpoint
     ]
 

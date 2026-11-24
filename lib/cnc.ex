@@ -11,5 +11,5 @@ defmodule CNC do
   Only `CNC.Machine` is exported, so callers outside the domain (the web UI)
   cannot reach the protocol or the transport.
   """
-  use Boundary, deps: [], exports: [Machine]
+  use Boundary, deps: [], exports: [Machine, Machine.State]
 end
