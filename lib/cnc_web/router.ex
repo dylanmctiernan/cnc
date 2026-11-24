@@ -17,7 +17,7 @@ defmodule CNCWeb.Router do
   scope "/", CNCWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", MachineLive
   end
 
   # Other scopes may use custom stacks.

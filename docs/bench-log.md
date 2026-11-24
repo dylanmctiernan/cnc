@@ -2,6 +2,19 @@
 
 Manual checks that aren't covered by automated tests. Newest first.
 
+## 2026-11-23 — M4: manual UI checklist (pending)
+
+Run `mix phx.server`, open http://localhost:4000, then check:
+
+- [ ] Locked banner on load; Unlock → Ready; Home → Homing → Ready at 0,0
+- [ ] Arrows move the marker live; two arrows = diagonal at the same speed
+- [ ] Shift = fast, Option = fine; speed buttons change the default
+- [ ] Trail draws and fades; Clear trail empties it
+- [ ] Holding into an edge slides to it and stops, no error
+- [ ] Switching tab / window while holding a key stops motion
+- [ ] ⌘ while holding an arrow stops motion
+- [ ] Esc stops and holds; step pad moves by the chosen step
+
 ## 2026-11-23 — M3: jog safety test sensitivity
 
 - Removed the in-flight cap, the run-ahead bound, and the dead-man (one at a time):
