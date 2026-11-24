@@ -253,6 +253,7 @@ Hook rules:
 - Bound queued motion by distance, not just acks: at most 4 jog increments ahead of the last *reported* position (controllers ack on planning; grblHAL's planner is 100 blocks deep).
 - The host clamps jogs and steps to travel. The configured travel is the physical maximum: the controller may narrow it, never widen it.
 - Esc always stops (jog cancel + feed hold), even while typing in the console.
+- A link that looks open but has gone silent is dead: no status for 1.5 s (6 s while connecting, none while homing) → jog cancel, close, reconnect, re-lock.
 - Typed console commands are allowed only when Ready/Locked/Busy and are labelled as bypassing the jog dead-man and the travel clamp.
 - Anything reachable over the network needs the PIN (`CNC_LAN=1` won't start without one).
 

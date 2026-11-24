@@ -2,6 +2,19 @@
 
 Manual checks that aren't covered by automated tests. Newest first.
 
+## 2026-11-23 — Status watchdog, grblHAL EEPROM
+
+- Took over the grblHAL sim's TCP stream from a probe while the dev server
+  was connected: Machine logged "no status from the controller", dropped the
+  link and reconnected on its own (before: it stayed "connected", silent).
+- Watchdog test found that killing the transport right after queueing the
+  jog cancel lost the byte; transports now `close/1` after flushing.
+- grblHAL sim writes settings to EEPROM lazily: the last baked setting
+  ($132) was lost when the build stopped the sim immediately. The sim also
+  ignores SIGTERM once idle without a client. configure.sh now waits while
+  connected, stops with a SIGKILL fallback, and verifies every setting
+  after a restart.
+
 ## 2026-11-23 — M5: grblHAL simulator findings (commit 9d1a390)
 
 Probed over raw TCP before writing the adapter:
