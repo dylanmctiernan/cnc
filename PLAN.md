@@ -14,7 +14,7 @@ Learning project: an Elixir host (Phoenix LiveView, later on Nerves / Raspberry 
 
 ## 1. Principles
 
-- **Minimal abstractions, explicit seams.** One port, `CNC.Motion`, because it has real alternative implementations (Sim, TCP, later UART). No other behaviours until a second implementation exists.
+- **Minimal abstractions, explicit seams.** One port, `CNC.Transport`, because it has real alternative implementations (Sim, TCP, later UART). No other behaviours until a second implementation exists.
 - **Hexagonal shape, enforced by [Boundary](https://hexdocs.pm/boundary).** Pure protocol core, machine core owning state, adapters at the edge, UI on top. Boundary violations fail the build.
 - **The UI only knows what the machine reports.** The visualization draws positions from status reports, never from what we commanded. Same code path for simulators and, later, the real machine.
 - **Fail toward stopped.** Jogging uses short increments with a dead-man heartbeat. Hardware e-stop/limits (later) never depend on this code.
@@ -29,11 +29,11 @@ Browser: arrow keys + bed view
         │ LiveView (events in, state out)
         ▼
 CNC host (Phoenix + OTP)
-        │ CNC.Motion port, Grbl 1.1 text protocol
-        ├──► CNC.Motion.Sim  (in-process fake, unit tests + default dev)
-        └──► CNC.Motion.TCP  ──► grblHAL_sim (real Grbl firmware logic, Docker on Linux)
+        │ CNC.Transport port, Grbl 1.1 text protocol
+        ├──► CNC.Transport.Sim  (in-process fake, unit tests + default dev)
+        └──► CNC.Transport.TCP  ──► grblHAL_sim (real Grbl firmware logic, Docker on Linux)
 
-Later: CNC.Motion.UART ──► 6x board (FluidNC) ──► DM542T ──► NEMA 23
+Later: CNC.Transport.UART ──► 6x board (FluidNC) ──► DM542T ──► NEMA 23
 ```
 
 ### Machine model (simulated, matches the planned build)
@@ -54,10 +54,11 @@ Single Phoenix app with boundaries. Nerves wrapper comes in a later phase.
 ```
 cnc/                      # mix phx.new cnc --no-ecto --no-mailer --no-gettext
 ├── lib/cnc/
-│   ├── grbl/             # boundary CNC.Grbl     — pure protocol
-│   ├── motion/           # boundary CNC.Motion   — port + adapters (Sim, TCP)
-│   ├── machine/          # boundary CNC.Machine  — state + jogging
-│   └── application.ex    # boundary CNC          — wiring only
+│   ├── grbl/             # boundary CNC.Grbl      — pure protocol
+│   ├── transport/        # boundary CNC.Transport — link to the controller (Sim, TCP)
+│   └── machine/          # boundary CNC.Machine   — state + jogging
+├── lib/cnc.ex            # boundary CNC           — domain root; exports Machine
+├── lib/cnc_app.ex        # boundary CNCApp        — supervision + config wiring only
 ├── lib/cnc_web/          # boundary CNCWeb       — LiveView UI + JS hooks
 ├── assets/js/hooks/      # JogKeys, BedView
 ├── docker/grblhal-sim/   # Dockerfile running grblHAL_sim -p 2323
@@ -69,10 +70,11 @@ cnc/                      # mix phx.new cnc --no-ecto --no-mailer --no-gettext
 | Boundary | deps | exports | Notes |
 |---|---|---|---|
 | `CNC.Grbl` | — | `Command`, `Response`, `Status`, `Realtime` | Pure functions. No processes, no IO |
-| `CNC.Motion` | `CNC.Grbl` | `CNC.Motion` (behaviour), `Sim`, `TCP` | Port + adapters. Line-level transport |
-| `CNC.Machine` | `CNC.Grbl`, `CNC.Motion` | `CNC.Machine` (API), `CNC.Machine.State` | Owns the connection. Only process that talks to Motion |
-| `CNCWeb` | `CNC.Machine` | — | Must not reference `CNC.Motion` or `CNC.Grbl` |
-| `CNC` (top) | all | — | `CNC.Application` supervision + config wiring only |
+| `CNC.Transport` | `CNC.Grbl` | `CNC.Transport` (behaviour), `Sim`, `TCP` | Port + adapters. Line-level transport |
+| `CNC.Machine` | `CNC.Grbl`, `CNC.Transport` | `CNC.Machine` (API), `CNC.Machine.State` | Owns the connection. Only process that talks to Transport |
+| `CNCWeb` | `CNC.Machine` | — | Must not reference `CNC.Transport` or `CNC.Grbl` |
+| `CNC` (top) | — | `Machine` | Domain root. Grbl/Transport/Machine are its sub-boundaries |
+| `CNCApp` (top) | `CNC`, `CNCWeb` | — | Supervision + config wiring only |
 
 ```elixir
 # mix.exs
@@ -104,8 +106,8 @@ Two layers, different jobs.
 
 | Layer | What | Used for |
 |---|---|---|
-| `CNC.Motion.Sim` (Elixir) | Small in-process fake. Not a faithful firmware | Unit tests of `CNC.Machine`; fault injection; default `mix phx.server` with zero setup |
-| grblHAL simulator via `CNC.Motion.TCP` | Real grblHAL core compiled for Linux/Windows; `grblHAL_sim -p 2323` exposes a raw TCP (telnet) port | Integration tests and dev UI against real Grbl behaviour: planner, acceleration, jog cancel, status reports, alarms, soft limits |
+| `CNC.Transport.Sim` (Elixir) | Small in-process fake. Not a faithful firmware | Unit tests of `CNC.Machine`; fault injection; default `mix phx.server` with zero setup |
+| grblHAL simulator via `CNC.Transport.TCP` | Real grblHAL core compiled for Linux/Windows; `grblHAL_sim -p 2323` exposes a raw TCP (telnet) port | Integration tests and dev UI against real Grbl behaviour: planner, acceleration, jog cancel, status reports, alarms, soft limits |
 
 **Notes on grblHAL sim:**
 - Build from the grblHAL Web Builder (Driver: Simulator, Board: Linux) or from `github.com/grblHAL/Simulator`.
@@ -114,7 +116,7 @@ Two layers, different jobs.
 - No FluidNC host simulator exists; grblHAL speaks the same Grbl 1.1 protocol, which covers everything Phase 1 uses. FluidNC-specific commands (`$Config/...`) are a later-phase concern on the real board.
 - Configure via `$` settings at container start: steps/mm, max rate, accel, travel (`$130/$131` = 1250), soft limits on (`$20=1`), homing on (`$22=1`).
 
-**`CNC.Motion.Sim` behaviour:**
+**`CNC.Transport.Sim` behaviour:**
 - Boots into `Alarm`; `$X` → `Idle`; `$H` → `Home` then `Idle` at origin.
 - `$J=` queues a relative move; position integrates at the given feed (10 ms tick, constant velocity is fine — no accel model needed).
 - `0x85` clears queued jogs and stops; `!`/`~` hold/resume.
@@ -129,27 +131,27 @@ Two layers, different jobs.
 ### CNC.Grbl (pure)
 - `Response.parse(line) :: :ok | {:error, code} | {:alarm, code} | {:status, Status.t()} | {:msg, binary} | {:banner, binary} | {:unknown, binary}`
 - `Status` struct: `state`, `substate`, `mpos {x,y,z}`, `wco`, `feed`, `spindle`, `buffer`. Derive `wpos` when `wco` known.
-- `Status.encode/1` — used by `Motion.Sim`.
+- `Status.encode/1` — used by `Transport.Sim`.
 - `Command.jog({dx, dy, dz}, feed_mm_min) :: iodata` — omits zero axes, fixed decimals.
 - `Command.unlock/0`, `Command.home/0`.
 - `Realtime.status/0, feed_hold/0, resume/0, reset/0, jog_cancel/0`.
 - Tests: table tests from real grblHAL/FluidNC output samples; StreamData round-trip for jog encoding and status encode/parse.
 
-### CNC.Motion (port + adapters)
+### CNC.Transport (port + adapters)
 ```elixir
-defmodule CNC.Motion do
+defmodule CNC.Transport do
   @callback start_link(owner :: pid, opts :: keyword) :: GenServer.on_start()
   @callback write_line(pid, iodata) :: :ok
   @callback write_realtime(pid, byte) :: :ok
-  # Adapter sends owner: {:motion, :connected} | {:motion, :line, binary} | {:motion, :disconnected}
+  # Adapter sends owner: {:transport, :connected} | {:transport, :line, binary} | {:transport, :disconnected}
 end
 ```
-- `CNC.Motion.Sim` — see §5.
-- `CNC.Motion.TCP` — `:gen_tcp`, `packet: :line`, `active: :once`. Exits on socket close; supervisor restarts with backoff. Also usable later for FluidNC's Wi-Fi telnet channel.
-- Config: `config :cnc, :motion, adapter: CNC.Motion.Sim, opts: []` (dev default); `adapter: CNC.Motion.TCP, opts: [host: ~c"localhost", port: 2323]` via env `CNC_MOTION=grblhal_sim`.
+- `CNC.Transport.Sim` — see §5.
+- `CNC.Transport.TCP` — `:gen_tcp`, `packet: :line`, `active: :once`. Exits on socket close; supervisor restarts with backoff. Also usable later for FluidNC's Wi-Fi telnet channel.
+- Config: `config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []` (dev default); `adapter: CNC.Transport.TCP, opts: [host: ~c"localhost", port: 2323]` via env `CNC_TRANSPORT=grblhal_sim`.
 
 ### CNC.Machine (state + jogging)
-`gen_statem`, single owner of the Motion process.
+`gen_statem`, single owner of the Transport process.
 
 States: `:disconnected → :connecting → :alarm | :idle`; `:idle ↔ :jogging`; `:idle → :homing → :idle`; any → `:alarm` on `ALARM:`; any → `:disconnected` on transport loss.
 
@@ -228,15 +230,15 @@ Hook rules:
 |---|---|---|
 | M0 | Scaffold `cnc` (no Ecto/mailer/gettext), Boundary compiler, mise | `mix precommit` green; a deliberate cross-boundary call fails compile |
 | M1 | `CNC.Grbl` parse + encode | Table tests pass on real status/ok/error/alarm/banner/msg samples; round-trip properties pass |
-| M2 | `CNC.Motion.Sim` | Responds to `?`, `$X`, `$H`, `$J=`, `0x85`, `!`, `~`; position integrates; soft-limit `error:15` |
+| M2 | `CNC.Transport.Sim` | Responds to `?`, `$X`, `$H`, `$J=`, `0x85`, `!`, `~`; position integrates; soft-limit `error:15` |
 | M3 | `CNC.Machine` + jogging (vs Sim) | Tests: state transitions; ≤4 outstanding jogs; heartbeat loss → `0x85` within 300 ms; `jog_stop` → immediate `0x85`; jog rejected in `:alarm` |
 | M4 | `MachineLive` + `JogKeys` + `BedView` (vs Sim) | `mix phx.server`: arrows move the marker live; diagonals; tiers; trail draws; tab blur stops motion; Unlock/Home work |
-| M5 | `CNC.Motion.TCP` + grblHAL sim in Docker | `@tag :grblhal_sim` tests pass (connect, `$X`, `$H`, jog + `0x85`, status, soft-limit error); same UI drives grblHAL sim with visible acceleration and stops at travel limits |
+| M5 | `CNC.Transport.TCP` + grblHAL sim in Docker | `@tag :grblhal_sim` tests pass (connect, `$X`, `$H`, jog + `0x85`, status, soft-limit error); same UI drives grblHAL sim with visible acceleration and stops at travel limits |
 
 **Phase 1 ends at M5.**
 
 ### Next phases (not planned in detail)
-- **Phase 2 — real board:** `CNC.Motion.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view).
+- **Phase 2 — real board:** `CNC.Transport.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view).
 - **Phase 3 — Pi:** `cnc_firmware` Nerves project, `http://cnc.local`, phone jog pad.
 - Later: job streaming, toolpath preview + progress, storage, conversational ops, kiosk + HDMI touch, config sync, probing.
 

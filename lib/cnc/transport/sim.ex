@@ -1,31 +1,31 @@
-defmodule CNC.Motion.Sim do
+defmodule CNC.Transport.Sim do
   @moduledoc """
-  In-process fake controller implementing the `CNC.Motion` port.
+  In-process fake controller implementing the `CNC.Transport` port.
 
-  A thin GenServer around `CNC.Motion.Sim.Model` (the pure core). The process
+  A thin GenServer around `CNC.Transport.Sim.Model` (the pure core). The process
   owns only the side effects: a 10 ms tick while the model is busy, delivery
   of reply lines to the owner, and fault-injection hooks for tests.
 
-  Options (plus the model's, see `CNC.Motion.Sim.Model.new/1`):
+  Options (plus the model's, see `CNC.Transport.Sim.Model.new/1`):
     * `:latency` — ms delay before each reply line reaches the owner (default 0)
     * `:drop_acks` — swallow `ok` replies (default false)
     * `:name` — process registration
   """
-  @behaviour CNC.Motion
+  @behaviour CNC.Transport
   use GenServer
 
-  alias CNC.Motion.Sim.Model
+  alias CNC.Transport.Sim.Model
 
   @tick_ms 10
 
-  @impl CNC.Motion
+  @impl CNC.Transport
   def start_link(owner, opts \\ []),
     do: GenServer.start_link(__MODULE__, {owner, opts}, Keyword.take(opts, [:name]))
 
-  @impl CNC.Motion
+  @impl CNC.Transport
   def write_line(pid, line), do: GenServer.cast(pid, {:line, IO.iodata_to_binary(line)})
 
-  @impl CNC.Motion
+  @impl CNC.Transport
   def write_realtime(pid, byte), do: GenServer.cast(pid, {:realtime, byte})
 
   ## Test hooks
@@ -36,7 +36,7 @@ defmodule CNC.Motion.Sim do
   @doc "Raise `ALARM:code` as the controller would (e.g. a limit switch)."
   def inject_alarm(pid, code), do: GenServer.call(pid, {:alarm, code})
 
-  @doc "Simulate transport loss: owner gets `{:motion, :disconnected}`, process exits."
+  @doc "Simulate transport loss: owner gets `{:transport, :disconnected}`, process exits."
   def disconnect(pid), do: GenServer.call(pid, :disconnect)
 
   @doc "The current model, for assertions."
@@ -55,7 +55,7 @@ defmodule CNC.Motion.Sim do
       drop_acks: Keyword.get(opts, :drop_acks, false)
     }
 
-    send(owner, {:motion, :connected})
+    send(owner, {:transport, :connected})
     {model, lines} = Model.boot(s.model)
     {:ok, emit(%{s | model: model}, lines)}
   end
@@ -72,7 +72,7 @@ defmodule CNC.Motion.Sim do
   def handle_call(:model, _from, s), do: {:reply, s.model, s}
 
   def handle_call(:disconnect, _from, s) do
-    send(s.owner, {:motion, :disconnected})
+    send(s.owner, {:transport, :disconnected})
     {:stop, {:shutdown, :disconnected}, :ok, s}
   end
 
@@ -118,7 +118,7 @@ defmodule CNC.Motion.Sim do
 
     case :queue.peek(s.outbox) do
       {:value, {due, line}} when due <= now ->
-        send(s.owner, {:motion, :line, line})
+        send(s.owner, {:transport, :line, line})
         flush(%{s | outbox: :queue.drop(s.outbox)})
 
       {:value, {due, _}} ->

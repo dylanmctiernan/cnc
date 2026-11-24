@@ -1,13 +1,13 @@
-defmodule CNC.Motion do
+defmodule CNC.Transport do
   @moduledoc """
   Transport port: line-level link to a Grbl-speaking controller.
 
-  Adapters (`CNC.Motion.Sim`, `CNC.Motion.TCP`, later `CNC.Motion.UART`)
+  Adapters (`CNC.Transport.Sim`, `CNC.Transport.TCP`, later `CNC.Transport.UART`)
   send their owner:
 
-    * `{:motion, :connected}`
-    * `{:motion, :line, binary}`
-    * `{:motion, :disconnected}`
+    * `{:transport, :connected}`
+    * `{:transport, :line, binary}`
+    * `{:transport, :disconnected}`
   """
   use Boundary, deps: [CNC.Grbl], exports: [Sim]
 

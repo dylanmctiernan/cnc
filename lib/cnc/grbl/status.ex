@@ -73,7 +73,7 @@ defmodule CNC.Grbl.Status do
   @doc """
   Encode as a full report line (with `<>`, no newline). Positions get 3
   decimals; feed and spindle get none. Reports `MPos`, plus `WCO` and `Bf`
-  when present. Used by `CNC.Motion.Sim`.
+  when present. Used by `CNC.Transport.Sim`.
   """
   @spec encode(t) :: binary
   def encode(%__MODULE__{} = s) do

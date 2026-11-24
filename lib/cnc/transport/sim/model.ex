@@ -1,7 +1,7 @@
-defmodule CNC.Motion.Sim.Model do
+defmodule CNC.Transport.Sim.Model do
   @moduledoc """
   Pure model of a small Grbl-ish controller: the functional core of
-  `CNC.Motion.Sim`. Every function returns `{model, lines}`, where `lines`
+  `CNC.Transport.Sim`. Every function returns `{model, lines}`, where `lines`
   are the controller's replies (no newlines). Time only moves via
   `advance/2`, so tests are deterministic.
 

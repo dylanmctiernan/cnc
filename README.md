@@ -9,12 +9,12 @@ Enforced at compile time by [Boundary](https://hexdocs.pm/boundary); a violation
 `mix compile --warnings-as-errors`.
 
 ```
-CNCApp  (supervision + wiring)          deps: CNC, CNCWeb
-├── CNCWeb  (LiveView UI)               deps: CNC          exports: Endpoint, Telemetry
-└── CNC  (domain)                       deps: —            exports: Machine
-    ├── CNC.Machine  state + jogging    deps: Grbl, Motion
-    ├── CNC.Motion   transport port     deps: Grbl
-    └── CNC.Grbl     pure protocol      deps: —
+CNCApp  (supervision + wiring)            deps: CNC, CNCWeb
+├── CNCWeb  (LiveView UI)                 deps: CNC          exports: Endpoint, Telemetry
+└── CNC  (domain)                         deps: —            exports: Machine
+    ├── CNC.Machine    state + jogging    deps: Grbl, Transport
+    ├── CNC.Transport  link to controller deps: Grbl         exports: Sim
+    └── CNC.Grbl       pure protocol      deps: —
 ```
 
 The web layer can only reach `CNC.Machine`; protocol and transport stay private to the domain.

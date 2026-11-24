@@ -4,7 +4,7 @@ defmodule CNC.Grbl do
   byte encoding. Shared by grblHAL and FluidNC.
 
   Lines are handled without their trailing newline; the transport
-  (`CNC.Motion`) owns framing.
+  (`CNC.Transport`) owns framing.
   """
   use Boundary, deps: [], exports: [Command, Response, Status, Realtime]
 end
