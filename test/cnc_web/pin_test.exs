@@ -42,9 +42,28 @@ defmodule CNCWeb.PinTest do
     assert redirected_to(get(recycle(conn), ~p"/")) == ~p"/pin"
   end
 
+  test "Lock screen: back to the PIN, and the browser's open pages are disconnected", %{
+    conn: conn
+  } do
+    conn = post(conn, ~p"/pin", pin: "4321")
+    conn = get(recycle(conn), ~p"/")
+    {:ok, view, _} = live(conn)
+    assert has_element?(view, "#nav-lock[data-method=delete]")
+
+    socket_id = get_session(conn, :live_socket_id)
+    CNCWeb.Endpoint.subscribe(socket_id)
+    conn = delete(recycle(conn), ~p"/pin")
+    assert redirected_to(conn) == ~p"/pin"
+    assert_receive %Phoenix.Socket.Broadcast{event: "disconnect", topic: ^socket_id}
+
+    assert redirected_to(get(recycle(conn), ~p"/")) == ~p"/pin"
+  end
+
   test "no PIN configured: open access", %{conn: conn} do
     Application.delete_env(:cnc, :access_pin)
-    assert html_response(get(conn, ~p"/"), 200) =~ "cnc-bed"
+    html = html_response(get(conn, ~p"/"), 200)
+    assert html =~ "cnc-bed"
+    refute html =~ ~s(id="nav-lock")
     assert redirected_to(get(conn, ~p"/pin")) == ~p"/"
   end
 end

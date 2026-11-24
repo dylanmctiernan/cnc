@@ -5,6 +5,10 @@ defmodule CNCWeb.Pin do
   When a PIN is configured, every browser enters it once. The session keeps
   a hash of the PIN, so changing the PIN logs every device out. Checked by
   the plug for normal requests and by `on_mount` for LiveView connections.
+
+  Lock screen (`revoke/1`) forgets it for this browser and disconnects the
+  browser's other open pages (each grant gets its own `live_socket_id`), so
+  every tab goes back to the PIN.
   """
   import Plug.Conn
   import Phoenix.Controller, only: [redirect: 2]
@@ -19,8 +23,20 @@ defmodule CNCWeb.Pin do
 
   def valid?(_), do: false
 
-  def grant(conn),
-    do: conn |> configure_session(renew: true) |> put_session(@session_key, token())
+  def grant(conn) do
+    conn
+    |> configure_session(renew: true)
+    |> put_session(@session_key, token())
+    |> put_session(:live_socket_id, "pin:" <> Base.url_encode64(:crypto.strong_rand_bytes(12)))
+  end
+
+  @doc "Lock screen: this browser needs the PIN again, in every open page."
+  def revoke(conn) do
+    if id = get_session(conn, :live_socket_id),
+      do: CNCWeb.Endpoint.broadcast(id, "disconnect", %{})
+
+    configure_session(conn, drop: true)
+  end
 
   def granted?(session) do
     case configured() do

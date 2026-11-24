@@ -20,6 +20,7 @@ defmodule CNCWeb.Router do
 
     get "/pin", PinController, :new
     post "/pin", PinController, :create
+    delete "/pin", PinController, :delete
 
     # The workstation: pages in the console shell
     live_session :machine, on_mount: [CNCWeb.Pin, CNCWeb.Shell] do

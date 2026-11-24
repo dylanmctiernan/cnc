@@ -2926,7 +2926,9 @@ body {
   min-height: 12rem;
 }
 .ui-pendant-foot {
-  text-align: center;
+  display: flex;
+  justify-content: center;
+  gap: var(--space-6);
 }
 .ui-pendant-back {
   color: var(--text-muted);
