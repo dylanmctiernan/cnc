@@ -6,16 +6,15 @@ defmodule CNCWeb.MachineLiveTest do
 
   alias CNC.Machine
 
-  # Start each test locked, as after a fresh connect. Wait for the reset to
-  # be seen (:connecting) before waiting for :alarm, or a test that ended in
-  # :alarm would race the controller's reboot banner.
+  # Start each test locked, as after a fresh connect. Poll for :connecting
+  # (it lasts until the next status poll) before waiting for :alarm, or a
+  # test that ended in :alarm would race the controller's reboot banner.
+  # Broadcasts are throttled and may skip it, so poll the state directly.
   setup do
-    Machine.subscribe()
     Machine.jog_stop()
     Machine.reset()
-    assert_receive {:machine, %{state: :connecting}}, 1000
-    assert_receive {:machine, %{state: :alarm}}, 1000
-    Phoenix.PubSub.unsubscribe(CNC.PubSub, "machine")
+    assert eventually(fn -> Machine.status().state == :connecting end, 1000, 5)
+    assert eventually(fn -> Machine.status().state == :alarm end)
     :ok
   end
 
@@ -77,6 +76,51 @@ defmodule CNCWeb.MachineLiveTest do
     assert Machine.status().jog == {0, 0, 0.3}
     render_hook(view, "jog_stop", %{})
     assert Machine.status().state == :idle
+  end
+
+  test "work coordinates: zero X/Y, move, go back", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> render(view) =~ "Ready" end)
+    assert eventually(fn -> render(view) =~ "Work position" end)
+    {x0, y0, _} = Machine.status().mpos
+
+    view |> element("button", "Zero X/Y") |> render_click()
+
+    assert eventually(fn ->
+             {wx, wy, _} = Machine.status().wpos
+             abs(wx) < 1.0e-6 and abs(wy) < 1.0e-6
+           end)
+
+    view |> element("button[phx-value-mm='10']") |> render_click()
+    view |> element("button", "X+") |> render_click()
+    # Work = machine - offset, in floats: compare with a tolerance.
+    assert eventually(
+             fn ->
+               {wx, wy, _} = Machine.status().wpos
+               abs(wx - 10) < 1.0e-6 and abs(wy) < 1.0e-6
+             end,
+             3000
+           )
+
+    assert eventually(fn -> render(view) =~ "10.000" end)
+
+    # Enabled once the step has finished and the view has caught up.
+    assert eventually(fn -> not Machine.status().moving? end, 3000)
+    assert eventually(fn -> not has_element?(view, "button[disabled]", "Go to X0 Y0") end, 3000)
+    view |> element("button", "Go to X0 Y0") |> render_click()
+    # Z lifts first at 10 mm/s, and earlier tests may have left Z far down.
+    # Within the clamp's micron inset when the work zero is on a travel edge.
+    assert eventually(
+             fn ->
+               {x, y, z} = Machine.status().mpos
+               abs(x - x0) <= 0.01 and abs(y - y0) <= 0.01 and z >= -1.01
+             end,
+             15_000
+           )
+
+    view |> element("button[phx-value-frame=machine]") |> render_click()
+    assert render(view) =~ "Machine position"
   end
 
   test "rejects malformed jog input", %{conn: conn} do
@@ -162,11 +206,11 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> Machine.status().travel_issues == [] end)
   end
 
-  defp eventually(fun, timeout \\ 2000) do
+  defp eventually(fun, timeout \\ 2000, every \\ 20) do
     cond do
       fun.() -> true
       timeout <= 0 -> false
-      true -> Process.sleep(20) && eventually(fun, timeout - 20)
+      true -> Process.sleep(every) && eventually(fun, timeout - every, every)
     end
   end
 end

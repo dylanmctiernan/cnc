@@ -123,6 +123,27 @@ defmodule CNC.GrblhalSimTest do
     assert_in_delta half / full, 0.5, 0.15
   end
 
+  test "work zero: set, move away, go back (Z lifted first)", %{m: m} do
+    unlock(m)
+    {x0, y0, _} = Machine.status(m).mpos
+    dir = if x0 < 600, do: 1, else: -1
+
+    :ok = Machine.set_work_zero(m, [:x, :y])
+    assert eventually(fn -> match?({+0.0, +0.0, _}, Machine.status(m).wpos) end, 3000)
+
+    :ok = Machine.jog_step(m, {dir, dir, -1}, 10)
+    # Refused until the step has finished; then it goes.
+    assert eventually(fn -> Machine.go_to_work_zero(m) == :ok end, 8000)
+
+    assert eventually(
+             fn ->
+               {x, y, z} = Machine.status(m).mpos
+               abs(x - x0) < 0.002 and abs(y - y0) < 0.002 and z > -1.01
+             end,
+             5000
+           )
+  end
+
   test "soft reset reboots the controller and the host relocks", %{m: m} do
     unlock(m)
     :ok = Machine.reset(m)

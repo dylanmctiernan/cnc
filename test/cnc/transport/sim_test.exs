@@ -14,7 +14,9 @@ defmodule CNC.Transport.SimTest do
 
   test "status on request", %{sim: sim} do
     Sim.write_realtime(sim, Realtime.status())
-    assert_receive {:transport, :line, "<Alarm|MPos:0.000,0.000,0.000|FS:0,0|Bf:15,128>"}
+
+    assert_receive {:transport, :line,
+                    "<Alarm|MPos:0.000,0.000,0.000|FS:0,0|WCO:0.000,0.000,0.000|Bf:15,128>"}
   end
 
   test "jogs move in real time and finish idle", %{sim: sim} do

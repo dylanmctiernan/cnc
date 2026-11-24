@@ -335,9 +335,21 @@ button {
   display: grid;
   gap: 0.25rem;
 }
+.cnc-dro-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.cnc-seg--small .cnc-btn {
+  min-height: 2rem;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.75rem;
+}
 .cnc-dro-row {
   display: grid;
-  grid-template-columns: 2rem 1fr;
+  grid-template-columns: 2rem 1fr auto;
+  gap: 0.5rem;
   align-items: baseline;
   padding: 0.25rem 0.625rem;
   border: 1px solid var(--line);
@@ -348,6 +360,12 @@ button {
   color: var(--text-dim);
   font-weight: 700;
   font-size: 1rem;
+}
+.cnc-btn--zero {
+  min-height: 2.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+  align-self: center;
 }
 .cnc-num {
   font-weight: 500;

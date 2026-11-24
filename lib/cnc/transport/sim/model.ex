@@ -15,6 +15,9 @@ defmodule CNC.Transport.Sim.Model do
     * `$H` acks `ok` only when the cycle completes
     * soft reset while moving → `ALARM:3` (jog) / `ALARM:6` (homing)
     * `$$` lists max travel `$130`–`$132`; `$13x=<mm>` sets it (Idle/Alarm only)
+    * `G10 L20 P1 X.. Y.. Z..` sets the G54 work offset so the current position
+      reads as the given values; `WCO` is reported every 10th status and in
+      the first status after a change
 
   Travel convention: X/Y run `0..length`, Z runs `-length..0` (origin
   front-left, Z zero at the top after homing).
@@ -35,7 +38,9 @@ defmodule CNC.Transport.Sim.Model do
           travel: {{float, float}, {float, float}, {float, float}},
           max_feed: float,
           homing_ms: non_neg_integer,
-          homing_left: number
+          homing_left: number,
+          wco: xyz,
+          wco_in: non_neg_integer
         }
 
   defstruct state: :alarm,
@@ -45,7 +50,9 @@ defmodule CNC.Transport.Sim.Model do
             travel: {{0.0, 1250.0}, {0.0, 1250.0}, {-100.0, 0.0}},
             max_feed: 3000.0,
             homing_ms: 1000,
-            homing_left: 0
+            homing_left: 0,
+            wco: {0.0, 0.0, 0.0},
+            wco_in: 0
 
   @doc "Options: `:travel`, `:max_feed` (mm/min), `:homing_ms`, `:pos`."
   def new(opts \\ []),
@@ -95,13 +102,34 @@ defmodule CNC.Transport.Sim.Model do
   end
 
   def line(m, "$J=" <> _), do: {m, ["error:8"]}
+
+  # G54 work offset: the current position becomes the given work position.
+  def line(%{state: s} = m, "G10 L20 P1" <> words) when s in [:idle, :alarm] do
+    case parse_axes(words) do
+      {:ok, []} ->
+        {m, ["error:26"]}
+
+      {:ok, axes} ->
+        wco =
+          Enum.reduce(axes, m.wco, fn {i, value}, wco ->
+            put_elem(wco, i, elem(m.pos, i) - value)
+          end)
+
+        {%{m | wco: wco, wco_in: 0}, ["ok"]}
+
+      :error ->
+        {m, ["error:2"]}
+    end
+  end
+
+  def line(m, "G10" <> _), do: {m, ["error:8"]}
   def line(m, _), do: {m, ["error:20"]}
 
   ## Real-time bytes
 
   def realtime(m, byte) do
     cond do
-      byte == Realtime.status() -> {m, [status_line(m)]}
+      byte == Realtime.status() -> status_report(m)
       byte in [Realtime.jog_cancel(), Realtime.feed_hold()] -> {cancel_jog(m), []}
       byte == Realtime.resume() -> {m, []}
       byte == Realtime.reset() -> reset(m)
@@ -155,16 +183,36 @@ defmodule CNC.Transport.Sim.Model do
   defp put_travel(travel, 2, mm), do: put_elem(travel, 2, {-mm, 0.0})
   defp put_travel(travel, axis, mm), do: put_elem(travel, axis, {0.0, mm})
 
-  defp status_line(m) do
+  # Like Grbl, WCO is included only every 10th report (and right after a change).
+  defp status_report(m) do
     planner_free = max(@planner_blocks - :queue.len(m.queue), 0)
 
-    Status.encode(%Status{
-      state: m.state,
-      mpos: m.pos,
-      feed: m.feed,
-      spindle: 0.0,
-      buffer: {planner_free, 128}
-    })
+    line =
+      Status.encode(%Status{
+        state: m.state,
+        mpos: m.pos,
+        feed: m.feed,
+        spindle: 0.0,
+        buffer: {planner_free, 128},
+        wco: if(m.wco_in == 0, do: m.wco)
+      })
+
+    {%{m | wco_in: rem(m.wco_in + 9, 10)}, [line]}
+  end
+
+  defp parse_axes(words) do
+    words
+    |> String.split(" ", trim: true)
+    |> Enum.reduce_while({:ok, []}, fn
+      <<letter, value::binary>>, {:ok, acc} when letter in ~c"XYZ" ->
+        case Float.parse(value) do
+          {n, ""} -> {:cont, {:ok, [{letter - ?X, n} | acc]}}
+          _ -> {:halt, :error}
+        end
+
+      _, _ ->
+        {:halt, :error}
+    end)
   end
 
   defp cancel_jog(%{state: :jog} = m), do: stop(m, :idle)

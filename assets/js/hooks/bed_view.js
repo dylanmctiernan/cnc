@@ -29,6 +29,7 @@ export default {
     this.lastSample = performance.now()
     this.state = this.el.dataset.state
     this.jog = [0, 0, 0]
+    this.wco = null
 
     this.trail = new Float32Array(TRAIL_MAX * 2)
     this.trailHead = 0
@@ -69,7 +70,7 @@ export default {
     this.resize.disconnect()
   },
 
-  sample({x, y, z, state, jog}) {
+  sample({x, y, z, state, jog, wco}) {
     const now = performance.now()
     // Glide from where the marker is drawn now to the new report, over
     // roughly the interval between reports.
@@ -80,6 +81,7 @@ export default {
     this.lastSample = now
     this.state = state
     this.jog = jog
+    this.wco = wco
     this.pushTrail(x, y)
   },
 
@@ -139,6 +141,7 @@ export default {
     const {ctx, view: v} = this
     ctx.clearRect(0, 0, v.width, v.height)
     this.drawBed()
+    this.drawWorkOrigin()
     this.drawTrail()
     this.drawTool(this.shown)
     this.drawGauge(this.shown.z)
@@ -196,6 +199,27 @@ export default {
     ctx.textBaseline = "bottom"
     ctx.fillText("X", ox + 27, oy - 1)
     ctx.fillText("Y", ox + 4, oy - 26)
+  },
+
+  // Work origin (G54): small axes and a label, in neutral text colour.
+  drawWorkOrigin() {
+    if (!this.wco) return
+    const [wx, wy] = this.wco
+    const {ctx, colors: c, view: v} = this
+    if (wx === v.x0 && wy === v.y0) return // same as the machine origin
+    const [ox, oy] = this.px(wx, wy)
+    ctx.strokeStyle = c.text
+    ctx.lineWidth = 1.5
+    line(ctx, ox, oy, ox + 18, oy)
+    line(ctx, ox, oy, ox, oy - 18)
+    ctx.beginPath()
+    ctx.arc(ox, oy, 3, 0, Math.PI * 2)
+    ctx.fillStyle = c.text
+    ctx.fill()
+    ctx.font = `500 11px ${FONT}`
+    ctx.textAlign = "left"
+    ctx.textBaseline = "top"
+    ctx.fillText("work 0", ox + 5, oy + 4)
   },
 
   drawTrail() {
@@ -287,6 +311,22 @@ export default {
     ctx.textBaseline = "bottom"
     ctx.font = `500 11px ${FONT}`
     ctx.fillText("Z", x + w / 2, top - 6)
+
+    // Work Z0
+    if (this.wco) {
+      const wz = this.wco[2]
+      if (wz >= v.z0 && wz <= v.z1 && wz !== v.z1) {
+        const wy = this.zy(wz)
+        ctx.strokeStyle = c.text
+        ctx.lineWidth = 1.5
+        line(ctx, x - 6, wy, x + w + 2, wy)
+        ctx.fillStyle = c.text
+        ctx.font = `11px ${FONT}`
+        ctx.textAlign = "right"
+        ctx.textBaseline = "middle"
+        ctx.fillText("W0", x - 8, wy)
+      }
+    }
 
     // Tool height: a bar across the gauge with a pointer
     const dim = ["disconnected", "connecting"].includes(this.state)

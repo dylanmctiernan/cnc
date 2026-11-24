@@ -44,6 +44,27 @@ defmodule CNC.MachineTest do
              } = Machine.status(m)
     end
 
+    test "connecting mid-motion: cancel, then read settings once it's idle", %{m: m} do
+      report(m, "Jog", {0, 0})
+      assert_receive {:rt, 0x85}
+      refute_receive {:line, "$$"}, 100
+      report(m, "Idle", {1, 0})
+      assert_receive {:line, "$$"}
+    end
+
+    test "settings answered with error:8 (busy) are asked for again", %{m: m} do
+      report(m, "Alarm", {0, 0})
+      assert_receive {:line, "$$"}
+      send(m, {:transport, :line, "error:8"})
+      report(m, "Alarm", {0, 0})
+      assert_receive {:line, "$$"}
+
+      for l <- ["$130=900.000", "$131=900.000", "$132=90.000", "ok"],
+          do: send(m, {:transport, :line, l})
+
+      assert Machine.status(m).travel_source == :controller
+    end
+
     test "keeps configured travel if the controller's is incomplete", %{m: m} do
       connect(m, "Alarm", {0, 0}, ["$130=500.000", "$131=0"])
       assert %State{travel_source: :config, travel: {{+0.0, 1250.0}, _, _}} = Machine.status(m)
@@ -252,6 +273,83 @@ defmodule CNC.MachineTest do
       msgs = drain()
       assert length(msgs) <= 6
       assert %State{mpos: {100.0, +0.0, +0.0}} = List.last(msgs)
+    end
+  end
+
+  describe "work coordinates" do
+    setup do
+      m = start_machine({CNC.FakeTransport, test: self()}, "work-#{System.unique_integer()}")
+      assert_receive {:fake_transport, _fake, ^m}
+      %{m: m}
+    end
+
+    defp at(m, {x, y, z}, wco) do
+      send(m, {:transport, :line, "<Idle|MPos:#{x},#{y},#{z}|FS:0,0|WCO:#{wco}>"})
+      Machine.status(m)
+    end
+
+    test "set_work_zero sends G10 L20 P1 for the chosen axes", %{m: m} do
+      idle(m)
+      :ok = Machine.set_work_zero(m, [:x, :y])
+      assert_receive {:line, "G10 L20 P1 X0.000 Y0.000"}
+      :ok = Machine.set_work_zero(m, [:z])
+      assert_receive {:line, "G10 L20 P1 Z0.000"}
+    end
+
+    test "set_work_zero is refused unless idle", %{m: m} do
+      connect(m, "Alarm", {0, 0})
+      assert Machine.set_work_zero(m, [:x]) == {:error, {:invalid_state, :alarm}}
+    end
+
+    test "go to work zero: lift Z near the top first, then X/Y", %{m: m} do
+      idle(m)
+      at(m, {100, 100, -50}, "10,20,-30")
+      :ok = Machine.go_to_work_zero(m)
+      assert_receive {:line, "$J=G91 G21 Z49.000 F600"}
+      assert_receive {:line, "$J=G91 G21 X-90.000 Y-80.000 F3000"}
+    end
+
+    test "go to work zero never lowers Z", %{m: m} do
+      idle(m)
+      at(m, {100, 100, -0.5}, "10,20,-30")
+      :ok = Machine.go_to_work_zero(m)
+      assert_receive {:line, "$J=G91 G21 X-90.000 Y-80.000 F3000"}
+      refute_receive {:line, "$J=G91 G21 Z" <> _}, 100
+    end
+
+    test "a work zero at the machine origin is reachable", %{m: m} do
+      idle(m)
+      at(m, {100, 100, 0}, "0,0,0")
+      :ok = Machine.go_to_work_zero(m)
+      assert_receive {:line, "$J=G91 G21 X-99.999 Y-99.999 F3000"}
+    end
+
+    test "refuses while a move may still be running", %{m: m} do
+      idle(m)
+      at(m, {100, 100, 0}, "10,20,0")
+      :ok = Machine.jog_step(m, {1, 0, 0}, 10)
+      assert_receive {:line, "$J=" <> _}
+      # Not acked yet; then acked but no report since: both unsettled.
+      assert Machine.go_to_work_zero(m) == {:error, :moving}
+      ok(m)
+      assert Machine.go_to_work_zero(m) == {:error, :moving}
+      # The controller reports it's jogging: still no.
+      send(m, {:transport, :line, "<Jog|MPos:105,100,0|FS:1200,0>"})
+      assert Machine.go_to_work_zero(m) == {:error, :moving}
+      assert Machine.status(m).moving?
+      # Stopped: fine.
+      send(m, {:transport, :line, "<Idle|MPos:110,100,0|FS:0,0>"})
+      refute Machine.status(m).moving?
+      assert :ok = Machine.go_to_work_zero(m)
+      assert_receive {:line, "$J=G91 G21 X-100.000 Y-80.000 F3000"}
+    end
+
+    test "refuses when the work zero is outside travel or unknown", %{m: m} do
+      idle(m)
+      assert Machine.go_to_work_zero(m) == {:error, :no_work_offset}
+      at(m, {100, 100, 0}, "-50,0,0")
+      assert Machine.go_to_work_zero(m) == {:error, :outside_travel}
+      refute_receive {:line, "$J=" <> _}, 100
     end
   end
 
@@ -469,6 +567,23 @@ defmodule CNC.MachineTest do
     test "changing travel from the terminal updates the Machine", %{m: m} do
       :ok = Machine.send_raw(m, "$131=400")
       assert eventually(fn -> match?({_, {+0.0, 400.0}, _}, Machine.status(m).travel) end)
+    end
+
+    test "set work zero, move away, go back", %{m: m} do
+      :ok = Machine.unlock(m)
+      assert eventually(fn -> Machine.status(m).state == :idle end)
+      :ok = Machine.jog_step(m, {1, 1, 0}, 10)
+      assert eventually(fn -> Machine.status(m).mpos == {10.0, 10.0, 0.0} end, 3000)
+
+      :ok = Machine.set_work_zero(m, [:x, :y])
+      assert eventually(fn -> Machine.status(m).wpos == {0.0, 0.0, 0.0} end)
+
+      :ok = Machine.jog_step(m, {1, 0, -1}, 5)
+      assert eventually(fn -> Machine.status(m).wpos == {5.0, 0.0, -5.0} end, 3000)
+
+      :ok = Machine.go_to_work_zero(m)
+      # Z back near the top, X/Y at the work origin.
+      assert eventually(fn -> Machine.status(m).mpos == {10.0, 10.0, -1.0} end, 3000)
     end
 
     test "disconnect and reconnect lands in :alarm", %{m: m} do

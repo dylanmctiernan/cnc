@@ -15,6 +15,22 @@ defmodule CNC.Grbl.Command do
   def settings, do: "$$"
 
   @doc """
+  Set the G54 work offset so the current position reads as the given work
+  coordinates (usually zero): `G10 L20 P1 X.. Y.. Z..`.
+
+      iex> CNC.Grbl.Command.set_work(x: 0, y: 0)
+      "G10 L20 P1 X0.000 Y0.000"
+  """
+  def set_work(axes) when axes != [] do
+    words =
+      for axis <- [:x, :y, :z],
+          Keyword.has_key?(axes, axis),
+          do: String.upcase(to_string(axis)) <> fmt(Keyword.fetch!(axes, axis), 3)
+
+    "G10 L20 P1 " <> Enum.join(words, " ")
+  end
+
+  @doc """
   Relative, metric jog: `$J=G91 G21 X.. Y.. Z.. F..`.
 
   Axes that round to zero at 3 decimals are omitted. At least one axis must

@@ -100,6 +100,27 @@ defmodule CNC.Machine do
       do: call(server, {:jog_step, vector, mm})
 
   @doc """
+  Make the current position the work zero (G54) on the given axes, e.g.
+  `[:x, :y]` or `[:z]`. Only when `:idle`.
+  """
+  @spec set_work_zero(server, [:x | :y | :z]) :: reply
+  def set_work_zero(server \\ __MODULE__, axes) when is_list(axes) and axes != [] do
+    if Enum.all?(axes, &(&1 in [:x, :y, :z])),
+      do: call(server, {:work_zero, Enum.uniq(axes)}),
+      else: raise(ArgumentError, "axes must be :x, :y and/or :z, got #{inspect(axes)}")
+  end
+
+  @doc """
+  Move to the work origin in X/Y: first lift Z to near the top of travel
+  (never lowers it), then a rapid X/Y move. Both are jogs, so Esc/`jog_stop/1`
+  cancels them. Only when `:idle`, the work offset is known, and the machine
+  has stopped (`{:error, :moving}` while a previous move may still be
+  running: the moves are computed from the reported position).
+  """
+  @spec go_to_work_zero(server) :: reply | {:error, :no_work_offset | :outside_travel | :moving}
+  def go_to_work_zero(server \\ __MODULE__), do: call(server, :go_to_work_zero)
+
+  @doc """
   Send one line typed by a person straight to the controller (a terminal).
 
   Allowed when `:idle`, `:alarm` or `:busy`. `$X`, `$H` and `$$` behave like

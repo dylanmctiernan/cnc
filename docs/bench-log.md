@@ -2,6 +2,21 @@
 
 Manual checks that aren't covered by automated tests. Newest first.
 
+## 2026-11-23 — Work coordinates; three bugs found on the way
+
+- Go to work zero computed its moves from a position the machine had already
+  left (the previous step was still running; host :idle includes controller
+  Jog). It now needs a settled position: controller not moving, nothing
+  awaiting an ack, and a status report since the last motion ack
+  (State.moving?); the button is disabled meanwhile.
+- grblHAL sim exits (code 246) when a write to a just-disconnected client
+  fails. Patched in the image to drop the client instead
+  (docker/grblhal-sim/patches/), SIGPIPE ignored, compose restarts it.
+  300 abrupt connect/disconnects: no exit.
+- Connecting while the controller was still moving: `$$` got error:8 and
+  was never retried, so travel stayed on config. Now `$$` waits for
+  Idle/Alarm and is re-asked after error:8.
+
 ## 2026-11-23 — Status watchdog, grblHAL EEPROM
 
 - Took over the grblHAL sim's TCP stream from a probe while the dev server

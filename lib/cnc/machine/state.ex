@@ -13,6 +13,9 @@ defmodule CNC.Machine.State do
     * `feed` — reported feed rate (mm/min)
     * `buffer` — `{planner_blocks_free, serial_bytes_free}` (`Bf`), if reported
     * `awaiting_ack` — lines sent that the controller hasn't acked yet
+    * `moving?` — the machine may still be moving: the controller reports
+      Run, Jog or Home, or motion was sent since the last report that
+      followed all acks. Position-based actions (go to work zero) wait for false.
     * `alarm` — why we're locked in `:alarm`: `:connect` (fresh connection,
       position not trusted), `:reset` (controller rebooted), `{:alarm, code}`
       (controller `ALARM:N`), or `:reported` (status said Alarm)
@@ -41,6 +44,7 @@ defmodule CNC.Machine.State do
             feed: nil,
             buffer: nil,
             awaiting_ack: 0,
+            moving?: false,
             alarm: nil,
             last_error: nil,
             tier: :normal,

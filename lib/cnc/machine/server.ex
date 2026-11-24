@@ -55,6 +55,12 @@ defmodule CNC.Machine.Server do
     :watchdog_ms,
     :connect_watchdog_ms,
     connected?: false,
+    # A motion line was sent since the last status that followed all acks:
+    # the reported position may not reflect it yet.
+    motion_unsettled?: false,
+    # $$ is only accepted when the controller is Idle or in Alarm: ask once
+    # it is (and again if it said error:8, busy).
+    settings_wanted?: false,
     tier: :normal,
     vector: {0, 0, 0},
     in_flight: 0,
@@ -131,6 +137,7 @@ defmodule CNC.Machine.Server do
         pending: :queue.new(),
         in_flight: 0,
         settings: %{},
+        settings_wanted?: false,
         travel: d.config_travel,
         travel_source: :config,
         travel_issues: [],
@@ -275,6 +282,28 @@ defmodule CNC.Machine.Server do
     end
   end
 
+  defp event({:call, from}, {:work_zero, axes}, :idle, d) do
+    line = Command.set_work(for axis <- axes, do: {axis, 0})
+    {:idle, send_line(d, line, :raw), [{:reply, from, :ok}]}
+  end
+
+  # Lift Z to near the top of travel (never lower it), then move X/Y to the
+  # work origin. Both are bounded jogs: Esc / jog cancel stops them.
+  defp event({:call, from}, :go_to_work_zero, :idle, d) do
+    case work_zero_moves(d) do
+      {:ok, moves} ->
+        d =
+          Enum.reduce(moves, d, fn {delta, feed}, d ->
+            send_line(d, Command.jog(delta, feed), :step)
+          end)
+
+        {:idle, d, [{:reply, from, :ok}]}
+
+      {:error, _} = err ->
+        {:idle, d, [{:reply, from, err}]}
+    end
+  end
+
   defp event({:call, from}, cmd, s, %{connected?: true} = d)
        when cmd in [:feed_hold, :resume, :reset] do
     byte =
@@ -300,7 +329,11 @@ defmodule CNC.Machine.Server do
   # reconnect or controller reset.
   defp response({:status, status}, s, d) do
     status = Status.with_wco(status, d.status && d.status.wco)
-    on_status(s, status.state, %{d | status: status})
+    # Output is ordered: a report after every ack reflects all sent motion.
+    settled = if :queue.is_empty(d.pending), do: false, else: d.motion_unsettled?
+    d = %{d | status: status, motion_unsettled?: settled}
+    d = if s == :connecting, do: d, else: maybe_read_settings(d, status.state)
+    on_status(s, status.state, d)
   end
 
   defp response(:ok, s, d), do: ack(:ok, s, d)
@@ -332,7 +365,7 @@ defmodule CNC.Machine.Server do
   # lock until Unlock/Home. A jog left running by a previous session is stopped.
   defp on_status(:connecting, reported, d) do
     d = if reported == :jog, do: realtime(d, Realtime.jog_cancel()), else: d
-    d = send_line(%{d | settings: %{}}, Command.settings(), :settings)
+    d = maybe_read_settings(%{d | settings_wanted?: true}, reported)
     {:alarm, %{d | alarm: d.alarm || :connect, backoff: 0}, []}
   end
 
@@ -367,6 +400,9 @@ defmodule CNC.Machine.Server do
   defp on_ack(:raw_setting, :ok, s, d),
     do: {s, send_line(%{d | settings: %{}}, Command.settings(), :settings), []}
 
+  # Busy (still moving): ask again once it reports Idle/Alarm.
+  defp on_ack(:settings, {:error, 8}, s, d), do: {s, %{d | settings_wanted?: true}, []}
+
   defp on_ack(:settings, {:error, _} = err, s, d) do
     Logger.warning("controller rejected $$ (#{inspect(err)}); using configured travel")
     {s, d, []}
@@ -383,6 +419,13 @@ defmodule CNC.Machine.Server do
   defp on_ack(_tag, :ok, s, d), do: {s, d, []}
 
   ## Settings
+
+  defp maybe_read_settings(%{settings_wanted?: true} = d, reported)
+       when reported in [:idle, :alarm] do
+    send_line(%{d | settings_wanted?: false, settings: %{}}, Command.settings(), :settings)
+  end
+
+  defp maybe_read_settings(d, _reported), do: d
 
   # "$130=500" writes a setting; "$130" or "$G" just read.
   defp raw_tag(upper), do: if(String.contains?(upper, "="), do: :raw_setting, else: :raw)
@@ -439,6 +482,36 @@ defmodule CNC.Machine.Server do
 
   defp length_mm(_), do: nil
 
+  ## Work coordinates
+
+  defp work_zero_moves(%{status: %{wco: nil}}), do: {:error, :no_work_offset}
+
+  # Moves are computed from the reported position, so it must be final.
+  defp work_zero_moves(d) when d.motion_unsettled? or d.status.state in [:run, :jog, :home],
+    do: {:error, :moving}
+
+  defp work_zero_moves(%{status: %{mpos: {x, y, z}, wco: {wx, wy, _}}, travel: travel}) do
+    {_, _, {_, z_top}} = travel
+    safe_z = z_top - 1.0
+
+    lift =
+      if z < safe_z,
+        do: [{{0.0, 0.0, Float.round(safe_z - z, 3)}, Jog.z_speed(:fast) * 60}],
+        else: []
+
+    from = {x, y, max(z, safe_z)}
+    move = Jog.clamp(from, {wx - x, wy - y, 0.0}, travel)
+    # The clamp stops a micron inside travel; a work zero on the edge (e.g.
+    # at the machine origin) is fine. Further out than that, refuse.
+    short = Jog.magnitude({wx - x - elem(move, 0), wy - y - elem(move, 1), 0.0})
+
+    cond do
+      short > 0.01 -> {:error, :outside_travel}
+      Jog.zero?(move) -> {:ok, lift}
+      true -> {:ok, lift ++ [{move, Jog.speed(:fast) * 60}]}
+    end
+  end
+
   ## Jogging
 
   # Holding a key into a limit clamps the increment, so the tool slides up to
@@ -463,7 +536,15 @@ defmodule CNC.Machine.Server do
   defp send_line(d, line, tag) do
     :ok = d.adapter.write_line(d.transport, line)
     in_flight = if tag == :jog, do: d.in_flight + 1, else: d.in_flight
-    d = %{d | pending: :queue.in(tag, d.pending), in_flight: in_flight}
+    moves? = tag in [:jog, :step, :raw]
+
+    d = %{
+      d
+      | pending: :queue.in(tag, d.pending),
+        in_flight: in_flight,
+        motion_unsettled?: d.motion_unsettled? or moves?
+    }
+
     log(d, :out, :line, IO.iodata_to_binary(line))
   end
 
@@ -515,6 +596,7 @@ defmodule CNC.Machine.Server do
       feed: d.status && d.status.feed,
       buffer: d.status && d.status.buffer,
       awaiting_ack: :queue.len(d.pending),
+      moving?: d.motion_unsettled? or (d.status != nil and d.status.state in [:run, :jog, :home]),
       alarm: d.alarm,
       last_error: d.last_error,
       tier: d.tier,

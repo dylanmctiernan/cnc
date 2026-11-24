@@ -174,6 +174,40 @@ defmodule CNC.Transport.Sim.ModelTest do
     end
   end
 
+  describe "work offset (G54)" do
+    test "G10 L20 P1 makes the current position the given work position" do
+      m = idle(pos: {100.0, 50.0, -10.0})
+      {m, ["ok"]} = line(m, "G10 L20 P1 X0 Y0")
+      assert m.wco == {100.0, 50.0, +0.0}
+      {m, ["ok"]} = line(m, "G10 L20 P1 Z5")
+      assert m.wco == {100.0, 50.0, -15.0}
+    end
+
+    test "WCO is reported right after a change, then every 10th report" do
+      m = idle(pos: {1.0, 2.0, 3.0})
+      {m, ["ok"]} = line(m, "G10 L20 P1 X0")
+      {m, [first]} = rt(m, Realtime.status())
+      assert first =~ "WCO:1.000,0.000,0.000"
+
+      {_m, lines} =
+        Enum.reduce(1..10, {m, []}, fn _, {m, acc} ->
+          {m, [l]} = rt(m, Realtime.status())
+          {m, acc ++ [l]}
+        end)
+
+      assert Enum.count(lines, &(&1 =~ "WCO:")) == 1
+      assert List.last(lines) =~ "WCO:"
+      assert {:status, %{wpos: {+0.0, 2.0, 3.0}}} = Response.parse(first)
+    end
+
+    test "rejected while moving, and for bad words" do
+      {m, ["ok"]} = idle() |> jog({10, 0, 0})
+      assert {_, ["error:8"]} = line(m, "G10 L20 P1 X0")
+      assert {_, ["error:2"]} = line(idle(), "G10 L20 P1 Xq")
+      assert {_, ["error:26"]} = line(idle(), "G10 L20 P1")
+    end
+  end
+
   test "$ lists the commands it understands" do
     assert {_, ["[HLP:" <> _, "ok"]} = Model.new() |> line("$")
   end

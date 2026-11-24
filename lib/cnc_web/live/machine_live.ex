@@ -26,6 +26,7 @@ defmodule CNCWeb.MachineLive do
     {:ok,
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
+     |> assign(frame: :work, action_error: nil)
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
@@ -94,6 +95,37 @@ defmodule CNCWeb.MachineLive do
   end
 
   def handle_event("toggle_help", _, socket), do: {:noreply, update(socket, :help?, &(!&1))}
+
+  def handle_event("frame", %{"frame" => frame}, socket) when frame in ~w(work machine),
+    do: {:noreply, assign(socket, frame: String.to_existing_atom(frame))}
+
+  def handle_event("zero", %{"axes" => axes}, socket) do
+    axes = for c <- String.graphemes(axes), c in ~w(x y z), do: String.to_existing_atom(c)
+    if axes != [], do: Machine.set_work_zero(axes)
+    {:noreply, assign(socket, action_error: nil)}
+  end
+
+  def handle_event("go_to_zero", _, socket) do
+    error =
+      case Machine.go_to_work_zero() do
+        :ok ->
+          nil
+
+        {:error, :outside_travel} ->
+          "The work zero is outside the travel area, so the machine won't go there."
+
+        {:error, :no_work_offset} ->
+          "The controller hasn't reported a work offset yet. Try again in a moment."
+
+        {:error, :moving} ->
+          "Wait for the machine to stop, then try again."
+
+        {:error, {:invalid_state, _}} ->
+          nil
+      end
+
+    {:noreply, assign(socket, action_error: error)}
+  end
 
   # Console traffic is only subscribed to while the panel is open. Subscribe
   # before loading history; overlapping entries share a DOM id, so no dupes.
@@ -210,6 +242,7 @@ defmodule CNCWeb.MachineLive do
             </div>
           </div>
           <p :if={note = error_text(@machine.last_error)} class="cnc-note">{note}</p>
+          <p :if={@action_error} class="cnc-note">{@action_error}</p>
           <p :for={{axis, got, max} <- @machine.travel_issues} class="cnc-note cnc-note--warn">
             The controller reports {axis_name(axis)} travel of {round(got)} mm, more than this
             machine's {round(max)} mm. Using {round(max)} mm. Check ${travel_setting(axis)} with $$.
@@ -247,15 +280,65 @@ defmodule CNCWeb.MachineLive do
         </section>
 
         <aside class="cnc-rail">
-          <section class="cnc-dro" aria-label="Machine position">
-            <h2 class="cnc-h">Machine position <span class="cnc-unit">mm</span></h2>
+          <section class="cnc-dro" aria-label="Position">
+            <div class="cnc-dro-head">
+              <h2 class="cnc-h">
+                {if frame(@machine, @frame) == :work, do: "Work", else: "Machine"} position
+                <span class="cnc-unit">mm</span>
+              </h2>
+              <div class="cnc-seg cnc-seg--small" role="group" aria-label="Coordinates">
+                <button
+                  :for={f <- [:work, :machine]}
+                  type="button"
+                  class="cnc-btn"
+                  aria-pressed={to_string(frame(@machine, @frame) == f)}
+                  phx-click="frame"
+                  phx-value-frame={f}
+                  disabled={f == :work and is_nil(@machine.wpos)}
+                >
+                  {f}
+                </button>
+              </div>
+            </div>
             <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
               <span class="cnc-axis">{axis}</span>
-              <span class="cnc-num">{fmt(pos(@machine, i))}</span>
+              <span class="cnc-num">{fmt(axis_value(shown(@machine, @frame), i))}</span>
+              <button
+                :if={frame(@machine, @frame) == :work}
+                type="button"
+                class="cnc-btn cnc-btn--zero"
+                phx-click="zero"
+                phx-value-axes={String.downcase(axis)}
+                disabled={@machine.state != :idle}
+                aria-label={"Set work #{axis} to zero here"}
+              >
+                Zero
+              </button>
             </div>
-            <p :if={@machine.wpos && @machine.wpos != @machine.mpos} class="cnc-sub">
-              work {xyz_label(@machine.wpos)}
+            <p :if={@machine.wpos} class="cnc-sub">
+              {if frame(@machine, @frame) == :work, do: "machine", else: "work"} {xyz_label(
+                if(frame(@machine, @frame) == :work, do: @machine.mpos, else: @machine.wpos)
+              )}
             </p>
+            <div class="cnc-row">
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click="zero"
+                phx-value-axes="xy"
+                disabled={@machine.state != :idle}
+              >
+                Zero X/Y
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click="go_to_zero"
+                disabled={@machine.state != :idle or @machine.moving? or is_nil(@machine.wco)}
+              >
+                Go to X0 Y0
+              </button>
+            </div>
           </section>
 
           <section class="cnc-group">
@@ -505,7 +588,8 @@ defmodule CNCWeb.MachineLive do
 
   defp push_pos(socket, %State{mpos: {x, y, z}} = m) do
     {jx, jy, jz} = m.jog
-    push_event(socket, "pos", %{x: x, y: y, z: z, state: m.state, jog: [jx, jy, jz]})
+    wco = if m.wco, do: Tuple.to_list(m.wco)
+    push_event(socket, "pos", %{x: x, y: y, z: z, state: m.state, jog: [jx, jy, jz], wco: wco})
   end
 
   defp push_pos(socket, _), do: socket
@@ -546,6 +630,17 @@ defmodule CNCWeb.MachineLive do
 
   defp pos(%State{mpos: nil}, _axis), do: nil
   defp pos(%State{mpos: mpos}, axis), do: elem(mpos, axis)
+
+  # The position in the chosen frame; work falls back to machine until the
+  # controller has reported an offset.
+  defp shown(%State{wpos: {_, _, _} = wpos}, :work), do: wpos
+  defp shown(%State{mpos: mpos}, _frame), do: mpos
+
+  defp frame(%State{wpos: nil}, _), do: :machine
+  defp frame(_, frame), do: frame
+
+  defp axis_value(nil, _i), do: nil
+  defp axis_value(xyz, i), do: elem(xyz, i)
 
   defp fmt(nil), do: "—"
   defp fmt(mm), do: :erlang.float_to_binary(mm / 1, decimals: 3)

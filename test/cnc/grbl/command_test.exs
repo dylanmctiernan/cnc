@@ -12,6 +12,11 @@ defmodule CNC.Grbl.CommandTest do
     assert Command.settings() == "$$"
   end
 
+  test "set_work/1 writes only the given axes, in X/Y/Z order" do
+    assert Command.set_work(z: 0) == "G10 L20 P1 Z0.000"
+    assert Command.set_work(y: 1.5, x: -2) == "G10 L20 P1 X-2.000 Y1.500"
+  end
+
   test "real-time bytes" do
     assert {Realtime.status(), Realtime.feed_hold(), Realtime.resume()} == {??, ?!, ?~}
     assert {Realtime.reset(), Realtime.jog_cancel()} == {0x18, 0x85}

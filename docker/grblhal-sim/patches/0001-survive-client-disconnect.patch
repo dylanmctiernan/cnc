@@ -1,0 +1,26 @@
+Survive a TCP client disconnecting mid-reply.
+
+Upstream exits the whole simulator (exit -10) when a write to the client
+fails, which happens whenever a client disconnects while a reply is on its
+way (e.g. a host watchdog closing the link). Drop that client and wait for
+the next one instead.
+
+diff --git a/src/simulator.c b/src/simulator.c
+index a73f110..212b7ed 100644
+--- a/src/simulator.c
++++ b/src/simulator.c
+@@ -261,8 +261,12 @@ void sim_socket_out (uint8_t data)
+         }
+ #else
+         if(sim.socket_fd) {
+-            if(write(sim.socket_fd, buf, len) < 0)
+-                exit(-10);
++            if(write(sim.socket_fd, buf, len) < 0) {
++                // Client went away mid-reply: drop it and wait for the next
++                // one instead of exiting (sim_socket_in accepts when fd is 0).
++                close(sim.socket_fd);
++                sim.socket_fd = 0;
++            }
+         }
+ #endif
+         // don't print comment on next line if we are just printing to avoid buffer overflow

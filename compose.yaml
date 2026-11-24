@@ -2,5 +2,7 @@ services:
   grblhal-sim:
     build: docker/grblhal-sim
     image: cnc-grblhal-sim
+    # Upstream is proof-of-concept: come back if it ever exits anyway.
+    restart: unless-stopped
     ports:
       - "2323:2323"

@@ -11,6 +11,9 @@ WORKDIR /src
 RUN git clone https://github.com/grblHAL/Simulator.git . \
  && git checkout "$GRBLHAL_SIM_COMMIT" \
  && git submodule update --init --recursive
+# Local fixes on top of the pinned commit (see each patch's header).
+COPY patches /patches
+RUN git apply -v /patches/*.patch
 # Only the simulator: the validator target doesn't link at this commit.
 RUN cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build -j --target grblHAL_sim \
@@ -28,4 +31,6 @@ COPY --from=build /usr/local/bin/grblHAL_sim /usr/local/bin/grblHAL_sim
 COPY --from=build /data /data
 WORKDIR /data
 EXPOSE 2323
-CMD ["grblHAL_sim", "-p", "2323"]
+# Ignore SIGPIPE so a write to a vanished client fails (and is handled by
+# the patch) instead of killing the process. Ignored signals survive exec.
+CMD ["sh", "-c", "trap '' PIPE; exec grblHAL_sim -p 2323"]
