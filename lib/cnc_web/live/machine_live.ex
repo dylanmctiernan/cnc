@@ -134,8 +134,19 @@ defmodule CNCWeb.MachineLive do
   def handle_event("edit_work", %{"axis" => axis}, socket) when axis in ~w(x y z) do
     axis = String.to_existing_atom(axis)
     i = Enum.find_index([:x, :y, :z], &(&1 == axis))
-    value = socket.assigns.machine.wpos |> elem(i) |> Float.round(3) |> to_string()
-    {:noreply, assign(socket, work_edit: %{axis: axis, value: value, error: nil})}
+    current = socket.assigns.machine.wpos |> elem(i) |> fmt()
+    {:noreply, assign(socket, work_edit: %{axis: axis, value: "", current: current, error: nil})}
+  end
+
+  def handle_event("work_negate", _, socket) do
+    negate = fn
+      "-" <> rest -> rest
+      "" -> "-"
+      v -> "-" <> v
+    end
+
+    {:noreply,
+     update(socket, :work_edit, &%{&1 | value: negate.(String.trim(&1.value)), error: nil})}
   end
 
   def handle_event("work_preview", %{"value" => value}, socket),
@@ -771,20 +782,30 @@ defmodule CNCWeb.MachineLive do
             phx-click-away="cancel_work"
           >
             <h2 id="work-title" class="cnc-page-title">
-              Set work {String.upcase(to_string(@work_edit.axis))}
+              Set {String.upcase(to_string(@work_edit.axis))} position
             </h2>
-            <label class="cnc-work-field">
-              <span>This position reads</span>
+            <div class="cnc-work-field">
+              <label for="work-value">Tool is at {String.upcase(to_string(@work_edit.axis))} =</label>
               <input
                 id="work-value"
                 name="value"
                 value={@work_edit.value}
+                placeholder={@work_edit.current}
                 inputmode="decimal"
                 autocomplete="off"
                 phx-mounted={JS.focus()}
               />
               <span class="cnc-unit">mm</span>
-            </label>
+              <%!-- iPhone decimal keypads have no minus key --%>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click="work_negate"
+                aria-label="Change sign"
+              >
+                ±
+              </button>
+            </div>
             <p class={[
               "cnc-sub",
               match?({:outside, _, _}, work_check(@work_edit, @machine)) && "cnc-set-error"
@@ -1128,21 +1149,32 @@ defmodule CNCWeb.MachineLive do
 
   defp work_check(_, _), do: :error
 
-  defp work_preview(%{axis: axis} = edit, machine) do
+  # Where the zero lands, said relative to the tool (machine origin is
+  # front-left, Z up): a positive X means the zero is to the tool's left.
+  defp work_preview(%{axis: axis, value: value} = edit, machine) do
     name = String.upcase(to_string(axis))
 
-    case work_check(edit, machine) do
-      {:ok, zero} ->
-        "Nothing moves. Work #{name}0 will be at machine #{name} #{fmt(zero)}."
+    case {work_check(edit, machine), parse_mm(value)} do
+      {{:ok, _}, {:ok, v}} when abs(v) < 0.0005 ->
+        "#{name}0 will be right here, at the tool. Nothing moves."
 
-      {:outside, zero, {lo, hi}} ->
-        "That puts work #{name}0 at machine #{name} #{fmt(zero)}, off the machine " <>
-          "(#{name} runs #{mm(lo)} to #{mm(hi)})."
+      {{:ok, _}, {:ok, v}} ->
+        "#{name}0 will be #{mm(abs(v))} mm #{zero_side(axis, v)} the tool. Nothing moves."
 
-      :error ->
-        "Nothing moves."
+      {{:outside, _, {lo, hi}}, _} ->
+        "That puts #{name}0 off the machine (#{name} runs #{mm(lo)} to #{mm(hi)})."
+
+      _ ->
+        "Type where the tool is, measured from the zero you want. Nothing moves."
     end
   end
+
+  defp zero_side(:x, v) when v > 0, do: "to the left of"
+  defp zero_side(:x, _), do: "to the right of"
+  defp zero_side(:y, v) when v > 0, do: "in front of"
+  defp zero_side(:y, _), do: "behind"
+  defp zero_side(:z, v) when v > 0, do: "below"
+  defp zero_side(:z, _), do: "above"
 
   defp size_label(nil), do: "no cutting moves"
 

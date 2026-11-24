@@ -1703,7 +1703,7 @@ body {
 }
 .cnc-work-field {
   display: grid;
-  grid-template-columns: 1fr minmax(0, 8rem) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 0.5rem;
 }
