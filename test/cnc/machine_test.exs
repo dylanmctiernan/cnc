@@ -169,18 +169,13 @@ defmodule CNC.MachineTest do
       refute_received {:line, "$J=" <> _}
     end
 
-    test "at most 4 increments ahead of the reported position", %{m: m} do
+    test "a stalled controller gets at most 4 increments + 100 ms of credit", %{m: m} do
       idle(m)
       :ok = Machine.jog(m, {1, 0}, :normal)
 
-      # Controller acks everything but the position never moves.
-      for _ <- 1..4 do
-        assert_receive {:line, "$J=" <> _}
-        ok(m)
-      end
-
-      keep_alive(m, 300)
-      refute_received {:line, "$J=" <> _}
+      # Controller acks everything but the position never moves: the queue is
+      # bounded at 4 increments plus 100 ms (2 ticks) of report-age credit.
+      assert count_jog_lines(m, 600) == 6
     end
 
     test "heartbeat loss cancels the jog within 300 ms", %{m: m} do
@@ -641,6 +636,19 @@ defmodule CNC.MachineTest do
   defp idle_at(m, {x, y}, z) do
     send(m, {:transport, :line, "<Idle|MPos:#{x}.000,#{y}.000,#{z}.000|FS:0,0>"})
     Machine.status(m)
+  end
+
+  # Ack every jog line for `ms` (with heartbeats), return how many were sent.
+  defp count_jog_lines(m, ms, n \\ 0) do
+    receive do
+      {:line, "$J=" <> _} ->
+        ok(m)
+        count_jog_lines(m, ms, n + 1)
+    after
+      50 ->
+        Machine.jog_heartbeat(m)
+        if ms <= 0, do: n, else: count_jog_lines(m, ms - 50, n)
+    end
   end
 
   defp keep_alive(m, ms) when ms <= 0, do: Machine.status(m)

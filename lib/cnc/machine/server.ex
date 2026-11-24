@@ -58,6 +58,7 @@ defmodule CNC.Machine.Server do
     # A motion line was sent since the last status that followed all acks:
     # the reported position may not reflect it yet.
     motion_unsettled?: false,
+    status_at: nil,
     # $$ is only accepted when the controller is Idle or in Alarm: ask once
     # it is (and again if it said error:8, busy).
     settings_wanted?: false,
@@ -331,7 +332,7 @@ defmodule CNC.Machine.Server do
     status = Status.with_wco(status, d.status && d.status.wco)
     # Output is ordered: a report after every ack reflects all sent motion.
     settled = if :queue.is_empty(d.pending), do: false, else: d.motion_unsettled?
-    d = %{d | status: status, motion_unsettled?: settled}
+    d = %{d | status: status, motion_unsettled?: settled, status_at: now()}
     d = if s == :connecting, do: d, else: maybe_read_settings(d, status.state)
     on_status(s, status.state, d)
   end
@@ -532,8 +533,10 @@ defmodule CNC.Machine.Server do
     delta = Jog.clamp(d.target, raw, d.travel)
 
     # feed >= 1 mm/min: a barely-deflected stick shouldn't send F0.
+    age = if d.status_at, do: now() - d.status_at, else: 0
+
     if not Jog.zero?(delta) and feed >= 1 and d.in_flight < Jog.max_in_flight() and
-         Jog.room_ahead?(d.target, d.status.mpos, Jog.magnitude(raw)) do
+         Jog.room_ahead?(d.target, d.status.mpos, Jog.magnitude(raw), age) do
       %{send_line(d, Command.jog(delta, feed), :jog) | target: Jog.add(d.target, delta)}
     else
       d
@@ -622,6 +625,8 @@ defmodule CNC.Machine.Server do
   ## Helpers
 
   defp poll(ms), do: {{:timeout, :poll}, ms, :poll}
+  defp now, do: System.monotonic_time(:millisecond)
+
   defp deadman, do: {{:timeout, :deadman}, @deadman_ms, :expired}
 
   defp watchdog(d, :connecting), do: {{:timeout, :watchdog}, d.connect_watchdog_ms, :expired}

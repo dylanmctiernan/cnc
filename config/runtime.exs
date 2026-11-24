@@ -39,7 +39,9 @@ if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
   config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
 end
 
-# Controller link. Default (config.exs) is the in-process simulator.
+# Controller link. Dev default (dev.exs) is the grblHAL simulator; tests use
+# the in-process Sim (config.exs).
+#   CNC_TRANSPORT=sim mix phx.server             # built-in simulator
 #   CNC_TRANSPORT=grblhal_sim mix phx.server     # docker compose up grblhal-sim
 #   CNC_GRBLHAL=host:port                        # default localhost:2323
 #   CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
@@ -49,7 +51,7 @@ case System.get_env("CNC_TRANSPORT") do
     :ok
 
   "sim" ->
-    :ok
+    config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []
 
   "grblhal_sim" ->
     [host, port] = String.split(System.get_env("CNC_GRBLHAL", "localhost:2323"), ":")

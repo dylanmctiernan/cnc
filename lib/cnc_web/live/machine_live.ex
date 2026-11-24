@@ -297,7 +297,7 @@ defmodule CNCWeb.MachineLive do
           </div>
         </section>
 
-        <aside class="cnc-rail">
+        <aside class="cnc-rail cnc-rail--main" aria-label="Position and jog">
           <section class="cnc-dro" aria-label="Position">
             <div class="cnc-dro-head">
               <h2 class="cnc-h">
@@ -359,8 +359,8 @@ defmodule CNCWeb.MachineLive do
             </div>
           </section>
 
-          <section class="cnc-group">
-            <h2 class="cnc-h">Jog speed</h2>
+          <section class="cnc-group cnc-jog" aria-label="Jog">
+            <h2 class="cnc-h">Jog <span class="cnc-unit">X/Y and Z, mm/s at full push</span></h2>
             <div class="cnc-seg" role="group" aria-label="Jog speed">
               <button
                 :for={{tier, {xy, z}} <- @tiers}
@@ -373,11 +373,6 @@ defmodule CNCWeb.MachineLive do
                 {tier}<span class="cnc-unit">{xy}/{z}</span>
               </button>
             </div>
-            <p class="cnc-sub">X/Y and Z in mm/s</p>
-          </section>
-
-          <section class="cnc-group">
-            <h2 class="cnc-h">Joystick</h2>
             <div
               id="joystick"
               class="cnc-joy"
@@ -407,9 +402,10 @@ defmodule CNCWeb.MachineLive do
                 <span class="cnc-joy-knob"></span>
               </div>
             </div>
-            <p class="cnc-sub">Push further to go faster, up to the jog speed. Release to stop.</p>
           </section>
+        </aside>
 
+        <aside class="cnc-rail cnc-rail--more" aria-label="Steps and details">
           <section class="cnc-group">
             <h2 class="cnc-h">Step <span class="cnc-unit">mm</span></h2>
             <div class="cnc-seg" role="group" aria-label="Step size">

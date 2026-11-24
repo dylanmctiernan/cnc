@@ -20,6 +20,7 @@ defmodule CNC.Machine.Jog do
   @dt_ms 50
   @max_ahead 4
   @inset 0.001
+  @max_credit_ms 100
 
   @type tier :: :fine | :normal | :fast
   @type vector :: {number, number, number}
@@ -54,11 +55,19 @@ defmodule CNC.Machine.Jog do
 
   @doc """
   True if another increment of length `len` may be sent: the commanded end
-  point must stay within `max_in_flight` increments of the last reported
-  position.
+  point must stay within `max_in_flight` increments of where the tool is.
+
+  "Where the tool is" is the last reported position, moved on by the
+  distance covered at jog speed since that report (`report_age_ms`, capped
+  at #{100} ms). Without that, a 50–100 ms old report makes the queue look
+  fuller than it is, the controller runs nearly dry and brakes between
+  increments. The cap bounds what a stalled controller can be credited:
+  at most #{100} ms of motion on top of the #{4} increments.
   """
-  def room_ahead?(target, mpos, len),
-    do: distance(target, mpos) + len <= @max_ahead * len + 1.0e-6
+  def room_ahead?(target, mpos, len, report_age_ms \\ 0) do
+    credit = len * min(report_age_ms, @max_credit_ms) / @dt_ms
+    max(distance(target, mpos) - credit, 0.0) + len <= @max_ahead * len + 1.0e-6
+  end
 
   @doc """
   Clamp a move from `from` so it stays inside `travel`

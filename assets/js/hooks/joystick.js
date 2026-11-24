@@ -8,7 +8,13 @@ const STEP = 0.02 // resolution sent to the server
 const SEND_MS = 40 // at most one jog update per this
 const HEARTBEAT_MS = 50
 
-const shape = (m) => (m <= DEAD ? 0 : ((m - DEAD) / (1 - DEAD)) ** 2)
+// Half linear, half squared beyond the dead zone: fine control near the
+// centre without making most of the travel feel dead (70% push ≈ 55% speed).
+const shape = (m) => {
+  if (m <= DEAD) return 0
+  const t = (m - DEAD) / (1 - DEAD)
+  return 0.5 * t + 0.5 * t * t
+}
 const quantize = (v) => Math.round(v / STEP) * STEP
 
 export default {

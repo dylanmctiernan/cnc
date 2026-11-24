@@ -38,6 +38,21 @@ defmodule CNC.Machine.JogTest do
     end
   end
 
+  describe "room_ahead?/4" do
+    test "4 increments ahead of a fresh report, no more" do
+      assert Jog.room_ahead?({3.0, 0, 0}, {0.0, 0, 0}, 1.0, 0)
+      refute Jog.room_ahead?({4.0, 0, 0}, {0.0, 0, 0}, 1.0, 0)
+    end
+
+    test "an older report is credited with the distance covered since, capped at 100 ms" do
+      # 50 ms old: one more increment's worth of credit
+      assert Jog.room_ahead?({4.0, 0, 0}, {0.0, 0, 0}, 1.0, 50)
+      # 10 s old (stalled): still only 100 ms = 2 increments
+      assert Jog.room_ahead?({5.0, 0, 0}, {0.0, 0, 0}, 1.0, 10_000)
+      refute Jog.room_ahead?({6.0, 0, 0}, {0.0, 0, 0}, 1.0, 10_000)
+    end
+  end
+
   test "increment normalises diagonals to tier speed" do
     {{dx, dy, +0.0}, feed} = Jog.increment({1, -1, 0}, :fast)
     assert_in_delta :math.sqrt(dx * dx + dy * dy), 2.5, 1.0e-9
