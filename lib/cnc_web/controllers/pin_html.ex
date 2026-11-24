@@ -34,7 +34,13 @@ defmodule CNCWeb.PinHTML do
             required
             aria-describedby={@error && "pin-error"}
           />
-          <span :for={_ <- 1..4} class="cnc-pin-cell" aria-hidden="true"></span>
+          <%!-- The first cell starts marked, before any script runs --%>
+          <span
+            :for={i <- 1..4}
+            class={["cnc-pin-cell", i == 1 && "is-active"]}
+            aria-hidden="true"
+          >
+          </span>
         </div>
 
         <p :if={@error} id="pin-error" class="cnc-pin-error" role="alert">{@error}</p>

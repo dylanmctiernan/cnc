@@ -156,6 +156,9 @@ export default {
     const scale = Math.min((room - pad * 2) / (w.x1 - w.x0), (height - pad * 2) / (w.y1 - w.y0))
     const winW = (w.x1 - w.x0) * scale
     const winH = (w.y1 - w.y0) * scale
+    // The instruments (speed meters, Z gauge) keep the whole bed's height
+    // whatever the zoom, so zooming never moves them
+    const bedH = (y1 - y0) * Math.min((room - pad * 2) / (x1 - x0), (height - pad * 2) / (y1 - y0))
     this.view = {
       width, height, scale, x0, x1, y0, y1, z0, z1,
       // The window drawn: the bed, or the file's area when zoomed
@@ -164,6 +167,8 @@ export default {
       left: meters + (room - winW) / 2,
       bottom: (height + winH) / 2,
       top: (height - winH) / 2,
+      itop: (height - bedH) / 2,
+      ibottom: (height + bedH) / 2,
       gaugeX: meters + room + 8,
       meters,
       mapRight: meters + room,
@@ -196,7 +201,7 @@ export default {
   // Z mm → canvas y on the gauge (top of travel at the top).
   zy(z) {
     const v = this.view
-    return v.bottom - ((z - v.z0) / (v.z1 - v.z0)) * (v.bottom - v.top)
+    return v.ibottom - ((z - v.z0) / (v.z1 - v.z0)) * (v.ibottom - v.itop)
   },
 
   draw(now) {
@@ -488,7 +493,7 @@ export default {
       {label: "XY", color: c.dim, value: this.speedShown.xy, target: sp.xy, max: sp.max[0], key: "xy"},
       {label: "Z", color: c.z, value: this.speedShown.z, target: sp.z, max: sp.max[1], key: "z"},
     ]
-    const top = v.top, bottom = v.bottom, h = bottom - top
+    const top = v.itop, bottom = v.ibottom, h = bottom - top
     const vy = (mm, max) => bottom - (Math.min(Math.max(mm, 0), max) / max) * h
 
     meters.forEach((m, i) => {
@@ -550,7 +555,7 @@ export default {
   drawGauge(z) {
     const {ctx, view: v, colors: c} = this
     const x = v.gaugeX + 22, w = 14
-    const top = v.top, bottom = v.bottom
+    const top = v.itop, bottom = v.ibottom
 
     ctx.fillStyle = c.bed
     ctx.fillRect(x, top, w, bottom - top)

@@ -3816,17 +3816,21 @@ body {
 .cnc-messages:has(> :nth-child(3)):not(:has(> :nth-child(4)))::after { content: "+2 more"; }
 .cnc-messages:has(> :nth-child(4))::after { content: "+3 or more"; }
 
-/* PIN: the next cell shows a blinking cursor while the field has focus,
-   the usual "type here" (steady when motion is reduced) */
-.cnc-pin-form:focus-within .cnc-pin-cell.is-active {
+/* PIN: the next cell is always marked, with a cursor, from page load: the
+   page is only this field and digits typed anywhere go in. The cursor
+   blinks once the field really has focus (Safari can keep focus in its
+   address bar until the page is clicked); steady with reduced motion. */
+.cnc-pin-cell.is-active {
   border-color: var(--info);
   border-bottom-color: var(--info);
 }
-.cnc-pin-form:focus-within .cnc-pin-cell.is-active::after {
+.cnc-pin-cell.is-active::after {
   content: "";
   width: 2px;
   height: 1.75rem;
   background: var(--info);
+}
+.cnc-pin-form:focus-within .cnc-pin-cell.is-active::after {
   animation: cnc-caret 1s steps(1) infinite;
 }
 @keyframes cnc-caret {
