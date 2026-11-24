@@ -1,5 +1,3 @@
-import {haptic} from "../haptics"
-
 // On-screen joystick: a spring-back X/Y stick and a Z slider. Deflection is
 // analog (speed proportional, with a dead zone and a curve for fine control
 // near the centre); full deflection is the selected jog speed. Same safety
@@ -120,7 +118,6 @@ export default {
       pointer = e.pointerId
       el.setPointerCapture(pointer)
       el.classList.add("is-active")
-      haptic("light")
       move(e, el.getBoundingClientRect())
       this.update()
     })
@@ -132,7 +129,6 @@ export default {
     for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
       el.addEventListener(type, (e) => {
         if (e.pointerId !== pointer) return
-        if (type === "pointerup") haptic("light")
         release()
         this.update()
       })

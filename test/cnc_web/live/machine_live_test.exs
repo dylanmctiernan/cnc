@@ -162,12 +162,6 @@ defmodule CNCWeb.MachineLiveTest do
     assert has_element?(view, ".cnc-more button", "Clear trail")
   end
 
-  test "haptics: Stop ticks strong, steps and modes light", %{conn: conn} do
-    {:ok, view, _} = live(conn, ~p"/")
-    assert has_element?(view, ".cnc-dock .cnc-stop[data-haptic=strong]")
-    assert has_element?(view, "button[phx-click=control_mode][data-haptic=light]")
-  end
-
   test "Add to Home Screen: manifest and Apple tags", %{conn: conn} do
     html = conn |> get(~p"/") |> html_response(200)
     assert html =~ ~s(rel="manifest")

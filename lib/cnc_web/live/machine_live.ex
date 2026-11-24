@@ -232,7 +232,6 @@ defmodule CNCWeb.MachineLive do
             <button
               type="button"
               class="cnc-btn cnc-stop"
-              data-haptic="strong"
               phx-click="stop"
               disabled={!@machine.connected?}
               title="Cancel any jog and hold (Esc)"
@@ -442,7 +441,6 @@ defmodule CNCWeb.MachineLive do
                 :if={frame(@machine, @frame) == :work}
                 type="button"
                 class="cnc-btn cnc-btn--zero"
-                data-haptic="light"
                 phx-click="zero"
                 phx-value-axes={String.downcase(axis)}
                 disabled={@machine.state != :idle}
@@ -485,7 +483,6 @@ defmodule CNCWeb.MachineLive do
                 type="button"
                 class="cnc-btn"
                 aria-pressed={to_string(@control_mode == mode)}
-                data-haptic="light"
                 phx-click="control_mode"
                 phx-value-mode={mode}
               >
@@ -506,7 +503,6 @@ defmodule CNCWeb.MachineLive do
                 type="button"
                 class="cnc-btn"
                 aria-pressed={to_string(@tier == tier)}
-                data-haptic="light"
                 phx-click="tier"
                 phx-value-tier={tier}
               >
@@ -736,7 +732,6 @@ defmodule CNCWeb.MachineLive do
           <button
             type="button"
             class="cnc-btn cnc-stop"
-            data-haptic="strong"
             phx-click="stop"
             disabled={!@machine.connected?}
           >
@@ -764,7 +759,6 @@ defmodule CNCWeb.MachineLive do
       type="button"
       class={["cnc-btn", "is-#{String.first(@area)}"]}
       style={"grid-area: #{@area}"}
-      data-haptic="light"
       phx-click="step"
       phx-value-x={@x}
       phx-value-y={@y}
