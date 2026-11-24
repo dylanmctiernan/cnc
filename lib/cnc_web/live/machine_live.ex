@@ -34,6 +34,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, step_axis: :x)
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: Program.current(), file_error: nil)
+     |> assign(work_edit: nil)
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
        max_entries: 1,
@@ -129,6 +130,38 @@ defmodule CNCWeb.MachineLive do
   def handle_event("toggle_more", _, socket), do: {:noreply, update(socket, :more?, &(!&1))}
 
   # G-code file: a dialog to upload (auto, on drop/choose) and summarise it.
+  # Set a work coordinate by typing it: nothing moves (G10 L20).
+  def handle_event("edit_work", %{"axis" => axis}, socket) when axis in ~w(x y z) do
+    axis = String.to_existing_atom(axis)
+    i = Enum.find_index([:x, :y, :z], &(&1 == axis))
+    value = socket.assigns.machine.wpos |> elem(i) |> Float.round(3) |> to_string()
+    {:noreply, assign(socket, work_edit: %{axis: axis, value: value, error: nil})}
+  end
+
+  def handle_event("work_preview", %{"value" => value}, socket),
+    do: {:noreply, update(socket, :work_edit, &%{&1 | value: value, error: nil})}
+
+  def handle_event("cancel_work", _, socket), do: {:noreply, assign(socket, work_edit: nil)}
+
+  def handle_event("set_work", %{"value" => value}, socket) do
+    %{axis: axis} = socket.assigns.work_edit
+
+    with {:ok, v} <- parse_mm(value),
+         :ok <- Machine.set_work_position([{axis, v}]) do
+      {:noreply, assign(socket, work_edit: nil)}
+    else
+      :error ->
+        {:noreply, update(socket, :work_edit, &%{&1 | error: "Type a number of mm, like 12.5."})}
+
+      {:error, :invalid_value} ->
+        {:noreply, update(socket, :work_edit, &%{&1 | error: "That's outside ±100 000 mm."})}
+
+      {:error, _} ->
+        {:noreply,
+         update(socket, :work_edit, &%{&1 | error: "Only when the machine is Ready and stopped."})}
+    end
+  end
+
   def handle_event("open_file", _, socket), do: {:noreply, assign(socket, file?: true)}
   def handle_event("close_file", _, socket), do: {:noreply, assign(socket, file?: false)}
   def handle_event("validate_upload", _, socket), do: {:noreply, assign(socket, file_error: nil)}
@@ -457,7 +490,20 @@ defmodule CNCWeb.MachineLive do
           </span>
           <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
             <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
-            <span class="cnc-num">{fmt(axis_value(shown(@machine, @frame), i))}</span>
+            <button
+              :if={@machine.wpos}
+              type="button"
+              class="cnc-num cnc-num--edit"
+              phx-click="edit_work"
+              phx-value-axis={String.downcase(axis)}
+              aria-label={"Set work #{axis} without moving"}
+              title="Set this axis's work position without moving"
+            >
+              {fmt(axis_value(shown(@machine, @frame), i))}
+            </button>
+            <span :if={!@machine.wpos} class="cnc-num">
+              {fmt(axis_value(shown(@machine, @frame), i))}
+            </span>
             <button
               :if={frame(@machine, @frame) == :work}
               type="button"
@@ -643,8 +689,8 @@ defmodule CNCWeb.MachineLive do
                 </button>
               </div>
               <p class="cnc-sub">
-                Zero sets the work position to 0 where the tool is now. Go to work zero
-                lifts Z, then moves to X0 Y0.
+                Zero sets the work position to 0 where the tool is now; tap a position
+                above to type any value. Go to work zero lifts Z, then moves to X0 Y0.
               </p>
             </div>
           </div>
@@ -704,6 +750,53 @@ defmodule CNCWeb.MachineLive do
             Clear trail
           </button>
         </aside>
+
+        <div
+          :if={@work_edit}
+          id="work-dialog"
+          class="cnc-file-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="work-title"
+          phx-window-keydown="cancel_work"
+          phx-key="Escape"
+        >
+          <form
+            id="work-form"
+            class="cnc-review-box cnc-work-box"
+            phx-change="work_preview"
+            phx-submit="set_work"
+            phx-click-away="cancel_work"
+          >
+            <h2 id="work-title" class="cnc-page-title">
+              Set work {String.upcase(to_string(@work_edit.axis))}
+            </h2>
+            <label class="cnc-work-field">
+              <span>This position reads</span>
+              <input
+                id="work-value"
+                name="value"
+                value={@work_edit.value}
+                inputmode="decimal"
+                autocomplete="off"
+                phx-mounted={JS.focus()}
+              />
+              <span class="cnc-unit">mm</span>
+            </label>
+            <p class="cnc-sub">{work_preview(@work_edit, @machine)}</p>
+            <p :if={@work_edit.error} class="cnc-set-error">{@work_edit.error}</p>
+            <div class="cnc-row">
+              <button type="button" class="cnc-btn" phx-click="cancel_work">Cancel</button>
+              <button
+                type="submit"
+                class="cnc-btn cnc-btn--primary"
+                disabled={@machine.state != :idle}
+              >
+                Set {String.upcase(to_string(@work_edit.axis))}
+              </button>
+            </div>
+          </form>
+        </div>
 
         <div
           :if={@file?}
@@ -987,6 +1080,34 @@ defmodule CNCWeb.MachineLive do
     </div>
     """
   end
+
+  # "12.5", "12,5" (comma keypads), "5.", "-.5", "+3"
+  defp parse_mm(value) do
+    v = value |> String.trim() |> String.replace(",", ".") |> String.replace_prefix("+", "")
+    v = if String.ends_with?(v, "."), do: v <> "0", else: v
+    v = String.replace(v, ~r/^(-?)\./, "\\g{1}0.")
+
+    case Float.parse(v) do
+      {f, ""} -> {:ok, f}
+      _ -> :error
+    end
+  end
+
+  # What a typed work position means for the work zero, in machine terms.
+  defp work_preview(%{axis: axis, value: value}, %State{mpos: mpos}) when mpos != nil do
+    i = Enum.find_index([:x, :y, :z], &(&1 == axis))
+    name = String.upcase(to_string(axis))
+
+    case parse_mm(value) do
+      {:ok, v} ->
+        "Nothing moves. Work #{name}0 will be at machine #{name} #{fmt(elem(mpos, i) - v)}."
+
+      :error ->
+        "Nothing moves."
+    end
+  end
+
+  defp work_preview(_, _), do: "Nothing moves."
 
   defp size_label(nil), do: "no cutting moves"
 

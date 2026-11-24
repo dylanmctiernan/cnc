@@ -336,9 +336,10 @@ defmodule CNC.Machine.Server do
     end
   end
 
-  defp event({:call, from}, {:work_zero, axes}, :idle, d) do
-    line = Command.set_work(for axis <- axes, do: {axis, 0})
-    {:idle, send_line(d, line, :raw), [{:reply, from, :ok}]}
+  # G10 L20: the controller applies it in order after queued motion, so it
+  # names the position the machine is at once that's done. Nothing moves.
+  defp event({:call, from}, {:work_position, values}, :idle, d) do
+    {:idle, send_line(d, Command.set_work(values), :raw), [{:reply, from, :ok}]}
   end
 
   # Lift Z to near the top of travel (never lower it), then move X/Y to the

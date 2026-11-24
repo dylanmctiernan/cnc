@@ -130,8 +130,22 @@ defmodule CNC.Machine do
   @spec set_work_zero(server, [:x | :y | :z]) :: reply
   def set_work_zero(server \\ __MODULE__, axes) when is_list(axes) and axes != [] do
     if Enum.all?(axes, &(&1 in [:x, :y, :z])),
-      do: call(server, {:work_zero, Enum.uniq(axes)}),
+      do: set_work_position(server, for(axis <- Enum.uniq(axes), do: {axis, 0.0})),
       else: raise(ArgumentError, "axes must be :x, :y and/or :z, got #{inspect(axes)}")
+  end
+
+  @doc """
+  Set what the current position reads in work coordinates (G54), without
+  moving: `[x: 10.0]` makes here X = 10, so the work zero is 10 mm in −X.
+  Only when `:idle`. Values must be numbers within ±100 000 mm.
+  """
+  @spec set_work_position(server, [{:x | :y | :z, number}]) :: reply | {:error, :invalid_value}
+  def set_work_position(server \\ __MODULE__, values) when is_list(values) and values != [] do
+    if Enum.all?(values, fn {axis, v} ->
+         axis in [:x, :y, :z] and is_number(v) and abs(v) <= 100_000
+       end),
+       do: call(server, {:work_position, values}),
+       else: {:error, :invalid_value}
   end
 
   @doc """

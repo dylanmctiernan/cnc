@@ -395,6 +395,17 @@ defmodule CNC.MachineTest do
       assert_receive {:line, "G10 L20 P1 Z0.000"}
     end
 
+    test "set_work_position names the current position without moving", %{m: m} do
+      idle(m)
+      :ok = Machine.set_work_position(m, x: 12.5, z: -3)
+      assert_receive {:line, "G10 L20 P1 X12.500 Z-3.000"}
+      refute_received {:line, "$J=" <> _}
+
+      assert Machine.set_work_position(m, x: 200_000) == {:error, :invalid_value}
+      assert Machine.set_work_position(m, a: 1) == {:error, :invalid_value}
+      assert Machine.set_work_position(m, x: "1") == {:error, :invalid_value}
+    end
+
     test "set_work_zero is refused unless idle", %{m: m} do
       connect(m, "Alarm", {0, 0})
       assert Machine.set_work_zero(m, [:x]) == {:error, {:invalid_state, :alarm}}

@@ -80,6 +80,36 @@ defmodule CNCWeb.MachineLiveTest do
     assert Machine.status().state == :idle
   end
 
+  test "type a work position without moving", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> Machine.status().state == :idle and Machine.status().wpos end)
+    mpos = Machine.status().mpos
+
+    view |> element(~s|.cnc-num--edit[phx-value-axis="x"]|) |> render_click()
+    assert has_element?(view, "#work-dialog", "Set work X")
+
+    # The preview says where the work zero lands, in machine terms.
+    html = view |> form("#work-form", %{value: "12,5"}) |> render_change()
+    assert html =~ "Nothing moves. Work X0 will be at machine X #{fmt(elem(mpos, 0) - 12.5)}"
+
+    view |> form("#work-form", %{value: "12,5"}) |> render_submit()
+    refute has_element?(view, "#work-dialog")
+
+    assert eventually(fn ->
+             match?({wx, _, _} when abs(wx - 12.5) < 0.001, Machine.status().wpos)
+           end)
+
+    assert Machine.status().mpos == mpos
+
+    # Not a number: says so, stays open.
+    view |> element(~s|.cnc-num--edit[phx-value-axis="y"]|) |> render_click()
+    view |> form("#work-form", %{value: "abc"}) |> render_submit()
+    assert has_element?(view, "#work-dialog .cnc-set-error", "Type a number")
+  end
+
+  defp fmt(v), do: :erlang.float_to_binary(v / 1, decimals: 3)
+
   test "work coordinates: zero X/Y, move, go back", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
