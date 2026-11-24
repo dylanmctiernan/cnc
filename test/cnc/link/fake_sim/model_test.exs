@@ -112,6 +112,20 @@ defmodule CNC.Link.FakeSim.ModelTest do
     end
   end
 
+  test "feed hold from Idle suspends into Hold:0; cycle start or a reset releases it" do
+    {m, []} = rt(idle(), Realtime.feed_hold())
+    assert m.state == :hold
+    {_, [report]} = rt(m, Realtime.status())
+    assert report =~ ~r/^<Hold:0\|/
+    assert {_, ["error:8"]} = jog(m, {10, 0, 0})
+
+    {m2, []} = rt(m, Realtime.resume())
+    assert m2.state == :idle
+
+    {m3, _} = rt(m, Realtime.reset())
+    assert m3.state == :idle
+  end
+
   test "homing acks only when complete, at the origin" do
     m = idle(pos: {100.0, 100.0, 0.0}, homing_ms: 300)
     {m, []} = line(m, "$H")

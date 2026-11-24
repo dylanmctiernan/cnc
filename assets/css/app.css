@@ -2945,12 +2945,91 @@ body {
   padding: max(var(--space-3), env(safe-area-inset-top)) var(--space-4)
     max(var(--space-3), env(safe-area-inset-bottom));
 }
+/* Two fixed rows: state and position; then cycle start and Stop, side by
+   side as on a physical pendant (Stop the larger) */
 .ui-pendant-top {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "state pos" "cycle stop";
   align-items: center;
   gap: var(--space-3);
 }
+.ui-pendant-top > .ui-pill { grid-area: state; }
+.ui-pendant-top > .ui-pendant-pos { grid-area: pos; }
+.ui-pendant-top > .ui-stop { grid-area: stop; }
+.ui-pendant-cycle {
+  grid-area: cycle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 8.5rem;
+  min-height: 4rem;
+  padding: 0 var(--space-4);
+  border: 2px solid var(--ok);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ok) 14%, var(--surface-2));
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.ui-pendant-cycle .ui-btn-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--ok);
+}
+.ui-pendant-cycle:active:not(:disabled) {
+  background: color-mix(in srgb, var(--ok) 28%, var(--surface-2));
+}
+/* Nothing to resume: still there (it never moves), plainly off */
+.ui-pendant-cycle:disabled {
+  border-color: var(--border-faint);
+  background: var(--surface-1);
+  color: var(--text-faint);
+  cursor: default;
+}
+.ui-pendant-cycle:disabled .ui-btn-icon {
+  color: var(--text-faint);
+}
+
+/* The stick's stage: the cover sits over it, the layout never changes */
+.ui-pendant-stage {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.ui-pendant-stage > .ui-pendant-joy {
+  width: 100%;
+}
+.ui-pendant-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-0) 72%, transparent);
+  backdrop-filter: blur(2px);
+}
+.ui-pendant-cover-msg {
+  max-width: 22rem;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+.ui-pendant-cover-msg.is-danger { border-left-color: var(--danger); }
+.ui-pendant-cover-msg.is-warn { border-left-color: var(--warn); }
 .ui-pendant-top .ui-pill {
   min-height: 2.5rem;
   padding: 0 var(--space-4);
@@ -2971,20 +3050,6 @@ body {
 }
 .ui-axis-z {
   color: var(--z);
-}
-.ui-pendant-locked {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--danger);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-}
-.ui-pendant-locked p {
-  margin: 0;
 }
 .ui-pendant-speed {
   display: grid;
@@ -3063,16 +3128,20 @@ body {
     column-gap: var(--space-8);
   }
   .ui-pendant-top,
-  .ui-pendant-locked,
   .ui-pendant-foot {
     grid-column: 1 / -1;
+  }
+  /* One row on a tablet: state, position, cycle start, Stop */
+  .ui-pendant-top {
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(10rem, auto);
+    grid-template-areas: "state pos cycle stop";
   }
   .ui-pendant-speed {
     grid-column: 1;
     grid-template-columns: 1fr;
     align-self: start;
   }
-  .ui-pendant-joy {
+  .ui-pendant-stage {
     grid-column: 2;
     grid-row: 2 / 4;
   }

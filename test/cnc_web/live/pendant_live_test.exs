@@ -17,7 +17,8 @@ defmodule CNCWeb.PendantLiveTest do
     assert has_element?(view, "#pendant-stop")
     assert has_element?(view, "#pendant-joystick[data-enabled=false]")
 
-    view |> element("#pendant-unlock") |> render_click()
+    assert has_element?(view, "#pendant-locked")
+    view |> element("#pendant-action[data-action=unlock]") |> render_click()
     assert eventually(fn -> Machine.status(m).state == :idle end)
     assert eventually(fn -> has_element?(view, "#pendant-state", "Ready") end)
     refute has_element?(view, "#pendant-locked")
@@ -39,6 +40,22 @@ defmodule CNCWeb.PendantLiveTest do
 
     view |> element("#pendant-stop") |> render_click()
     assert eventually(fn -> Machine.status(m).state != :jogging end)
+  end
+
+  test "Stop latches a hold; Resume, here on the pendant, releases it", %{conn: conn, m: m} do
+    {:ok, view, _} = live(conn, ~p"/pendant")
+    :ok = Machine.unlock(m)
+    assert eventually(fn -> Machine.status(m).state == :idle end)
+    assert eventually(fn -> has_element?(view, "#pendant-action[disabled]") end)
+
+    view |> element("#pendant-stop") |> render_click()
+    assert eventually(fn -> has_element?(view, "#pendant-state", "On hold") end)
+    assert has_element?(view, "#pendant-held")
+
+    view |> element("#pendant-action[data-action=resume]") |> render_click()
+    assert eventually(fn -> Machine.status(m).state == :idle end)
+    assert eventually(fn -> has_element?(view, "#pendant-state", "Ready") end)
+    refute has_element?(view, "#pendant-held")
   end
 
   test "linked from the workstation's rail, and back", %{conn: conn} do

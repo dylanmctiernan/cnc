@@ -11,7 +11,10 @@ defmodule CNC.Link.FakeSim.Model do
   Fidelity notes (Grbl 1.1 behaviour it does mirror):
     * boots into `Alarm`; `$X`/`$H` allowed from `Alarm` or `Idle`, else `error:8`
     * `$J=` only from `Idle`/`Jog` (`error:8`); target outside travel → `error:15`
-    * feed hold (`!`) during a jog cancels it, like jog cancel (`0x85`)
+    * feed hold (`!`) during a jog cancels it, like jog cancel (`0x85`);
+      from `Idle` it suspends into `Hold:0` (as FluidNC does), and cycle
+      start (`~`) resumes to `Idle`. Commands that need `Idle` get `error:8`
+      while held
     * `$H` acks `ok` only when the cycle completes
     * soft reset while moving → `ALARM:3` (jog) / `ALARM:6` (homing)
     * `$$` lists max travel `$130`–`$132`; `$13x=<mm>` sets it (Idle/Alarm only)
@@ -64,7 +67,7 @@ defmodule CNC.Link.FakeSim.Model do
 
   @type xyz :: {float, float, float}
   @type t :: %__MODULE__{
-          state: :alarm | :idle | :jog | :home,
+          state: :alarm | :idle | :jog | :home | :hold,
           pos: xyz,
           queue: :queue.queue({xyz, float}),
           feed: float,
@@ -285,7 +288,9 @@ defmodule CNC.Link.FakeSim.Model do
   def realtime(m, byte) do
     cond do
       byte == Realtime.status() -> status_report(m)
+      byte == Realtime.feed_hold() and m.state == :idle -> {%{m | state: :hold}, []}
       byte in [Realtime.jog_cancel(), Realtime.feed_hold()] -> {cancel_jog(m), []}
+      byte == Realtime.resume() and m.state == :hold -> {%{m | state: :idle}, []}
       byte == Realtime.resume() -> {m, []}
       byte == Realtime.reset() -> reset(m)
       true -> {m, []}
@@ -345,6 +350,7 @@ defmodule CNC.Link.FakeSim.Model do
     line =
       Status.encode(%Status{
         state: m.state,
+        substate: if(m.state == :hold, do: 0),
         mpos: m.pos,
         feed: m.feed,
         spindle: 0.0,
@@ -378,6 +384,7 @@ defmodule CNC.Link.FakeSim.Model do
       case m.state do
         :jog -> {stop(m, :alarm), ["ALARM:3"]}
         :home -> {stop(m, :alarm), ["ALARM:6"]}
+        :hold -> {%{m | state: :idle}, []}
         _ -> {m, []}
       end
 

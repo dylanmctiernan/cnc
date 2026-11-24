@@ -5,7 +5,9 @@ defmodule CNCWeb.PendantLive do
   it is, the jog speed, and a big joystick (X/Y stick, Z slider) using the
   same `Joystick` hook and safety as the machine screen (heartbeat while
   held, stop on release, blur, hidden tab or lost connection). When the
-  machine is locked, Unlock is offered, since a locked machine won't jog.
+  machine is locked, Unlock is offered, since a locked machine won't jog;
+  when it's held (Stop latches a hold), Resume releases it, so a stop made
+  here can be released here.
   More pendant functions (zeroing, a handwheel) come as they're needed.
   """
   use CNCWeb, :live_view
@@ -52,6 +54,11 @@ defmodule CNCWeb.PendantLive do
     end
   end
 
+  def handle_event("resume", _, socket) do
+    Machine.resume(machine(socket))
+    {:noreply, socket}
+  end
+
   def handle_event("unlock", _, socket) do
     Machine.unlock(machine(socket))
     {:noreply, socket}
@@ -62,6 +69,10 @@ defmodule CNCWeb.PendantLive do
     ~H"""
     <Layouts.pendant flash={@flash}>
       <div class="ui-pendant" id="pendant">
+        <%!-- Like a physical pendant: the state and where it is, then the
+             cycle-start button (Resume, or Unlock when locked; always there,
+             enabled only when it does something) and Stop, side by side.
+             Nothing here ever appears or disappears, so nothing shifts. --%>
         <header class="ui-pendant-top">
           <UI.machine_state machine={@shell_machine} id="pendant-state" />
           <span class="ui-pendant-pos num" id="pendant-pos">
@@ -69,22 +80,22 @@ defmodule CNCWeb.PendantLive do
               <span class={"ui-axis-#{axis}"}>{String.upcase(to_string(axis))}</span> {v}
             </span>
           </span>
+          <button
+            type="button"
+            id="pendant-action"
+            class="ui-pendant-cycle"
+            data-action={action(@shell_machine)}
+            phx-click={action(@shell_machine)}
+            disabled={action(@shell_machine) == nil}
+          >
+            <%= if @shell_machine.state == :alarm do %>
+              <.icon name="hero-lock-open" class="ui-btn-icon" /> Unlock
+            <% else %>
+              <.icon name="hero-play" class="ui-btn-icon" /> Resume
+            <% end %>
+          </button>
           <UI.stop_button id="pendant-stop" size="lg" />
         </header>
-
-        <div :if={@shell_machine.state == :alarm} class="ui-pendant-locked" id="pendant-locked">
-          <p>Locked: the position isn't confirmed. Unlock to jog from here.</p>
-          <UI.button variant="primary" size="lg" id="pendant-unlock" phx-click="unlock">
-            Unlock
-          </UI.button>
-        </div>
-        <div
-          :if={@shell_machine.state in [:disconnected, :connecting]}
-          class="ui-pendant-locked"
-          id="pendant-offline"
-        >
-          <p>{UI.state_word(@shell_machine.state)}: no controller to jog.</p>
-        </div>
 
         <div class="ui-pendant-speed" role="group" aria-label="Jog speed">
           <button
@@ -101,33 +112,46 @@ defmodule CNCWeb.PendantLive do
           </button>
         </div>
 
-        <div
-          id="pendant-joystick"
-          class="cnc-joy ui-pendant-joy"
-          phx-hook="Joystick"
-          phx-update="ignore"
-          data-tier={@tier}
-          data-enabled={to_string(@shell_machine.state in [:idle, :jogging])}
-        >
+        <%!-- The stick, and over it (only when it can't jog) why not and
+             what to press --%>
+        <div class="ui-pendant-stage">
           <div
-            class="cnc-joy-pad"
-            role="application"
-            aria-label="X/Y joystick: drag to jog, release to stop"
+            :if={cover(@shell_machine)}
+            class="ui-pendant-cover"
+            id={"pendant-" <> elem(cover(@shell_machine), 0)}
           >
-            <span class="cnc-joy-label is-y" style="top: 0.5rem; left: 50%">Y+</span>
-            <span class="cnc-joy-label is-y" style="bottom: 0.5rem; left: 50%">Y−</span>
-            <span class="cnc-joy-label is-x" style="left: 0.75rem; top: 50%">X−</span>
-            <span class="cnc-joy-label is-x" style="right: 0.75rem; top: 50%">X+</span>
-            <span class="cnc-joy-knob"></span>
+            <p class={"ui-pendant-cover-msg is-#{elem(cover(@shell_machine), 1)}"}>
+              {elem(cover(@shell_machine), 2)}
+            </p>
           </div>
           <div
-            class="cnc-joy-z"
-            role="application"
-            aria-label="Z slider: drag up or down to jog, release to stop"
+            id="pendant-joystick"
+            class="cnc-joy ui-pendant-joy"
+            phx-hook="Joystick"
+            phx-update="ignore"
+            data-tier={@tier}
+            data-enabled={to_string(@shell_machine.state in [:idle, :jogging])}
           >
-            <span class="cnc-joy-label is-z" style="top: 0.5rem; left: 50%">Z+</span>
-            <span class="cnc-joy-label is-z" style="bottom: 0.5rem; left: 50%">Z−</span>
-            <span class="cnc-joy-knob"></span>
+            <div
+              class="cnc-joy-pad"
+              role="application"
+              aria-label="X/Y joystick: drag to jog, release to stop"
+            >
+              <span class="cnc-joy-label is-y" style="top: 0.5rem; left: 50%">Y+</span>
+              <span class="cnc-joy-label is-y" style="bottom: 0.5rem; left: 50%">Y−</span>
+              <span class="cnc-joy-label is-x" style="left: 0.75rem; top: 50%">X−</span>
+              <span class="cnc-joy-label is-x" style="right: 0.75rem; top: 50%">X+</span>
+              <span class="cnc-joy-knob"></span>
+            </div>
+            <div
+              class="cnc-joy-z"
+              role="application"
+              aria-label="Z slider: drag up or down to jog, release to stop"
+            >
+              <span class="cnc-joy-label is-z" style="top: 0.5rem; left: 50%">Z+</span>
+              <span class="cnc-joy-label is-z" style="bottom: 0.5rem; left: 50%">Z−</span>
+              <span class="cnc-joy-knob"></span>
+            </div>
           </div>
         </div>
 
@@ -142,6 +166,26 @@ defmodule CNCWeb.PendantLive do
   end
 
   defp machine(socket), do: socket.assigns.cnc.machine
+
+  # What the cycle-start button does now (nil: nothing, so it's disabled)
+  defp action(%{state: :alarm}), do: "unlock"
+  defp action(%{state: :busy, controller: :hold}), do: "resume"
+  defp action(_), do: nil
+
+  # Over the stick when it can't jog: {id, tone, message}
+  defp cover(%{state: :alarm}),
+    do: {"locked", "danger", "Locked: the position isn't confirmed. Press Unlock to jog."}
+
+  defp cover(%{state: :busy, controller: :hold}),
+    do: {"held", "warn", "On hold: stopped, position kept. Press Resume to carry on."}
+
+  defp cover(%{state: :busy, controller: :door}),
+    do: {"door", "warn", "Door open: close it, then press Resume."}
+
+  defp cover(%{state: s}) when s in [:disconnected, :connecting],
+    do: {"offline", "neutral", "#{UI.state_word(s)}: no controller to jog."}
+
+  defp cover(_), do: nil
 
   # Work position, two decimals (as the machine screen shows it).
   defp position(%{wpos: {x, y, z}}), do: [x: fmt(x), y: fmt(y), z: fmt(z)]
