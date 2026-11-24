@@ -260,6 +260,48 @@ defmodule CNCWeb.MachineLiveTest do
     refute has_element?(view, "#console")
   end
 
+  test "uploading a G-code file shows its summary, shared with other screens", %{conn: conn} do
+    CNC.Program.clear()
+    {:ok, view, _} = live(conn, ~p"/")
+    {:ok, other, _} = live(conn, ~p"/")
+
+    view |> element("#open-file") |> render_click()
+    assert has_element?(view, "#file-dialog")
+
+    text = File.read!("test/fixtures/sample.nc")
+
+    file =
+      file_input(view, "#upload-form", :gcode, [
+        %{name: "sample.nc", content: text, type: "text/plain"}
+      ])
+
+    render_upload(file, "sample.nc")
+
+    assert eventually(fn -> render(view) =~ "227 × 87 mm" end)
+    html = render(view)
+    assert html =~ "sample.nc"
+    assert html =~ "down to Z -6 mm"
+    assert html =~ "about 6 min"
+    assert html =~ "bit changes aren&#39;t handled yet"
+
+    # The other screen has it too (one program for the whole app).
+    assert eventually(fn -> has_element?(other, ".cnc-file-side", "sample.nc") end)
+
+    view |> element("#file-dialog button", "Clear file") |> render_click()
+    assert eventually(fn -> not has_element?(other, ".cnc-file-side") end)
+  end
+
+  test "a file that would leave the travel says by how much", %{conn: conn} do
+    {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X2000 F1000\nG1 Y-5")
+    {:ok, view, _} = live(conn, ~p"/")
+
+    assert eventually(fn -> Machine.status().wco != nil end)
+    assert eventually(fn -> render(view) =~ "leaves the travel" end)
+    assert render(view) =~ "X by"
+    assert render(view) =~ "Y by"
+    CNC.Program.clear()
+  end
+
   test "warns when the controller claims more travel than the machine has", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     :ok = Machine.send_raw("$130=12500")

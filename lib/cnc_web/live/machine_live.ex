@@ -11,7 +11,7 @@ defmodule CNCWeb.MachineLive do
   # protected however it's mounted.
   on_mount CNCWeb.Pin
 
-  alias CNC.Machine
+  alias CNC.{Machine, Program}
   alias CNC.Machine.State
 
   @tiers [fine: {5, 1}, normal: {20, 5}, fast: {50, 10}]
@@ -21,7 +21,11 @@ defmodule CNCWeb.MachineLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Machine.subscribe()
+    if connected?(socket) do
+      Machine.subscribe()
+      Program.subscribe()
+    end
+
     machine = Machine.status()
 
     {:ok,
@@ -29,12 +33,21 @@ defmodule CNCWeb.MachineLive do
      |> assign(machine: machine, tier: :normal, step: 10)
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, step_axis: :x)
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
+     |> assign(file?: false, program: Program.current(), file_error: nil)
+     |> allow_upload(:gcode,
+       accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
+       max_entries: 1,
+       max_file_size: 20_000_000,
+       auto_upload: true,
+       progress: &handle_progress/3
+     )
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
      |> stream_configure(:console, dom_id: &"log-#{&1.id}")
      |> stream(:console, [])
-     |> push_pos(machine)}
+     |> push_pos(machine)
+     |> push_program()}
   end
 
   @impl true
@@ -58,6 +71,9 @@ defmodule CNCWeb.MachineLive do
       do: {:noreply, dismiss(socket, key)},
       else: {:noreply, socket}
   end
+
+  def handle_info({:program, program}, socket),
+    do: {:noreply, socket |> assign(program: program, file_error: nil) |> push_program()}
 
   def handle_info({:machine_console, entry}, socket),
     do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
@@ -111,6 +127,18 @@ defmodule CNCWeb.MachineLive do
   # Controller layouts: the menu. Its open state lives here, not in the DOM, so
   # status updates don't close it.
   def handle_event("toggle_more", _, socket), do: {:noreply, update(socket, :more?, &(!&1))}
+
+  # G-code file: a dialog to upload (auto, on drop/choose) and summarise it.
+  def handle_event("open_file", _, socket), do: {:noreply, assign(socket, file?: true)}
+  def handle_event("close_file", _, socket), do: {:noreply, assign(socket, file?: false)}
+  def handle_event("validate_upload", _, socket), do: {:noreply, assign(socket, file_error: nil)}
+  def handle_event("upload", _, socket), do: {:noreply, socket}
+
+  def handle_event("clear_program", _, socket) do
+    Program.clear()
+    {:noreply, socket}
+  end
+
   def handle_event("close_more", _, socket), do: {:noreply, assign(socket, more?: false)}
 
   def handle_event("dismiss", %{"note" => "error"}, socket),
@@ -276,6 +304,9 @@ defmodule CNCWeb.MachineLive do
             <button type="button" class="cnc-btn" phx-click="reset" disabled={!@machine.connected?}>
               Reset
             </button>
+            <button type="button" id="open-file" class="cnc-btn" phx-click="open_file">
+              Open file
+            </button>
             <.link navigate={~p"/settings"} class="cnc-btn">Settings</.link>
             <button
               type="button"
@@ -317,6 +348,13 @@ defmodule CNCWeb.MachineLive do
                 }
               >
                 Clear trail
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("open_file") |> JS.push("close_more")}
+              >
+                {if @program, do: "File: #{@program.name}", else: "Open file"}
               </button>
               <button
                 type="button"
@@ -614,6 +652,17 @@ defmodule CNCWeb.MachineLive do
 
         <%!-- Workstation only: details and keyboard --%>
         <aside class="cnc-side" aria-label="Details and keyboard">
+          <section :if={@program} class="cnc-file-side" aria-label="Loaded file">
+            <.program_summary program={@program} fit={fit(@program, @machine)} />
+            <div class="cnc-row">
+              <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="open_file">
+                Open another
+              </button>
+              <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_program">
+                Clear
+              </button>
+            </div>
+          </section>
           <dl class="cnc-facts" aria-label="Controller details">
             <dt>planner</dt>
             <dd>{buffer_label(@machine.buffer, 0, "blocks")}</dd>
@@ -655,6 +704,53 @@ defmodule CNCWeb.MachineLive do
             Clear trail
           </button>
         </aside>
+
+        <div
+          :if={@file?}
+          id="file-dialog"
+          class="cnc-file-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="file-title"
+          phx-window-keydown="close_file"
+          phx-key="Escape"
+        >
+          <div class="cnc-review-box cnc-file-box" phx-click-away="close_file">
+            <h2 id="file-title" class="cnc-page-title">G-code file</h2>
+            <form id="upload-form" phx-change="validate_upload" phx-submit="upload">
+              <label class="cnc-drop" phx-drop-target={@uploads.gcode.ref}>
+                <.live_file_input upload={@uploads.gcode} class="cnc-sr-only" />
+                <span class="cnc-drop-main">Choose a file</span>
+                <span class="cnc-sub">
+                  or drop it here. .nc, .gcode, .ngc, .tap; up to 20 MB.
+                </span>
+              </label>
+              <%= for entry <- @uploads.gcode.entries do %>
+                <p class="cnc-sub">
+                  {entry.client_name}: {if entry.progress < 100,
+                    do: "uploading #{entry.progress}%",
+                    else: "reading"}
+                </p>
+                <p :for={err <- upload_errors(@uploads.gcode, entry)} class="cnc-set-error">
+                  {upload_error(err)}
+                </p>
+              <% end %>
+              <p :for={err <- upload_errors(@uploads.gcode)} class="cnc-set-error">
+                {upload_error(err)}
+              </p>
+              <p :if={@file_error} class="cnc-set-error">{@file_error}</p>
+            </form>
+            <.program_summary :if={@program} program={@program} fit={fit(@program, @machine)} />
+            <div class="cnc-row">
+              <button :if={@program} type="button" class="cnc-btn" phx-click="clear_program">
+                Clear file
+              </button>
+              <button type="button" class="cnc-btn cnc-btn--primary" phx-click="close_file">
+                {if @program, do: "Show on the map", else: "Close"}
+              </button>
+            </div>
+          </div>
+        </div>
 
         <section :if={@details?} id="console" class="cnc-console" aria-label="Controller console">
           <div class="cnc-console-bar">
@@ -856,6 +952,187 @@ defmodule CNCWeb.MachineLive do
   end
 
   defp push_pos(socket, _), do: socket
+
+  attr :program, Program, required: true
+  attr :fit, :any, required: true
+
+  defp program_summary(assigns) do
+    ~H"""
+    <div class="cnc-file-summary">
+      <p class="cnc-file-name">{@program.name}</p>
+      <dl class="cnc-facts">
+        <dt>size</dt>
+        <dd>{size_label(@program.gcode.cut_bounds)}</dd>
+        <dt>depth</dt>
+        <dd>{depth_label(@program.gcode.cut_bounds)}</dd>
+        <dt>time</dt>
+        <dd>{duration_label(@program.gcode.seconds)}</dd>
+        <dt>lines</dt>
+        <dd>{@program.gcode.lines} ({kb(@program.bytes)})</dd>
+        <dt :if={@program.gcode.tools != []}>bits</dt>
+        <dd :if={@program.gcode.tools != []}>
+          {Enum.map_join(@program.gcode.tools, ", ", &"T#{&1}")}: bit changes aren't handled yet
+        </dd>
+      </dl>
+      <p :if={@fit == :no_work_zero} class="cnc-note">
+        The controller hasn't reported a work zero yet, so the fit can't be checked.
+      </p>
+      <p :if={@fit == []} class="cnc-file-ok">Fits the travel from the current work zero.</p>
+      <p :if={is_list(@fit) and @fit != []} class="cnc-note cnc-note--warn">
+        From the current work zero it leaves the travel: {fit_label(@fit)}.
+      </p>
+      <ul :if={@program.gcode.warnings != []} class="cnc-file-warnings">
+        <li :for={w <- @program.gcode.warnings}>{warning_label(w)}</li>
+      </ul>
+    </div>
+    """
+  end
+
+  defp size_label(nil), do: "no cutting moves"
+
+  defp size_label({{x0, x1}, {y0, y1}, _}),
+    do: "#{mm(x1 - x0)} × #{mm(y1 - y0)} mm (X #{mm(x0)} to #{mm(x1)}, Y #{mm(y0)} to #{mm(y1)})"
+
+  defp depth_label(nil), do: "—"
+  defp depth_label({_, _, {z0, _}}), do: "down to Z #{mm(z0)} mm"
+
+  defp duration_label(s) when s < 60, do: "about #{max(round(s), 1)} s"
+  defp duration_label(s) when s < 3600, do: "about #{round(s / 60)} min"
+
+  defp duration_label(s),
+    do: "about #{div(round(s / 60), 60)} h #{rem(round(s / 60), 60)} min"
+
+  defp kb(bytes) when bytes < 1024 * 1024, do: "#{max(round(bytes / 1024), 1)} KB"
+  defp kb(bytes), do: "#{Float.round(bytes / 1024 / 1024, 1)} MB"
+
+  # One decimal, without a trailing ".0": 227, 86.9, -6.
+  defp mm(v),
+    do: v |> Float.round(1) |> :erlang.float_to_binary(decimals: 1) |> String.trim_trailing(".0")
+
+  defp fit_label(issues) do
+    Enum.map_join(issues, ", ", fn {axis, side, out} ->
+      "#{axis |> to_string() |> String.upcase()} by #{mm(out)} mm #{if side == :low, do: "below", else: "above"}"
+    end)
+  end
+
+  defp warning_label(%{kind: kind, line: line, count: count}) do
+    where =
+      cond do
+        line == 0 -> ""
+        count == 1 -> " (line #{line})"
+        true -> " (#{count} times, first on line #{line})"
+      end
+
+    warning_text(kind) <> where
+  end
+
+  defp warning_text(:inches), do: "Inch units: converted to mm"
+  defp warning_text(:no_feed), do: "Cutting moves without a feed rate: left out of the time"
+  defp warning_text(:machine_coordinates), do: "G53 machine-coordinate moves: not drawn"
+
+  defp warning_text(:other_work_offset),
+    do: "Another work offset (G55–G59): drawn as the current one"
+
+  defp warning_text(:predefined_position), do: "G28/G30 moves to a stored position: not drawn"
+  defp warning_text(:coordinate_offset), do: "G92/G10 offset changes: ignored by the preview"
+  defp warning_text(:probing), do: "Probing (G38): not drawn"
+  defp warning_text(:canned_cycle), do: "Drilling cycles (G81–G89): not drawn"
+  defp warning_text(:arc_plane), do: "Arcs outside the XY plane: drawn straight"
+  defp warning_text(:bad_arc), do: "An arc that doesn't add up: drawn straight"
+  defp warning_text(:no_motion_mode), do: "Coordinates without a move command: skipped"
+  defp warning_text(:bad_line), do: "Lines that aren't G-code: skipped"
+  defp warning_text({:unknown_word, l}), do: "Unknown word #{l}: ignored"
+  defp warning_text({:unsupported_g, g}), do: "G#{fmt_code(g)}: not supported, ignored"
+  defp warning_text({:unsupported_m, m}), do: "M#{fmt_code(m)}: not supported, ignored"
+
+  defp fmt_code(v) when v == trunc(v), do: Integer.to_string(trunc(v))
+  defp fmt_code(v), do: Float.to_string(v)
+
+  defp upload_error(:too_large), do: "That file is over 20 MB."
+  defp upload_error(:not_accepted), do: "Choose a G-code file (.nc, .gcode, .ngc, .tap)."
+  defp upload_error(:too_many_files), do: "One file at a time."
+  defp upload_error(err), do: "Upload failed (#{inspect(err)})."
+
+  defp handle_progress(:gcode, entry, socket) do
+    if entry.done? do
+      text =
+        consume_uploaded_entry(socket, entry, fn %{path: path} -> {:ok, File.read!(path)} end)
+
+      {mx, my, _} = socket.assigns.machine.max_rate || {3000.0, 3000.0, 1200.0}
+
+      case Program.load(entry.client_name, text, rapid_rate: min(mx, my)) do
+        {:ok, _} ->
+          {:noreply, socket}
+
+        {:error, :not_text} ->
+          {:noreply, assign(socket, file_error: "That isn't a text G-code file.")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # The toolpath for the bed view, compact: the start point, then for each
+  # segment its kind and end point (float32 [kind, x, y, z]). Points closer
+  # than @path_merge_mm to the last one kept (same kind) are merged: the bed
+  # is drawn at around a millimetre a pixel.
+  @path_merge_mm 0.25
+
+  defp push_program(socket) do
+    case socket.assigns.program do
+      nil ->
+        push_event(socket, "program", %{path: nil})
+
+      %Program{name: name, gcode: gcode} ->
+        push_event(socket, "program", %{name: name, path: Base.encode64(client_path(gcode.path))})
+    end
+  end
+
+  defp client_path(<<>>), do: <<>>
+
+  defp client_path(
+         <<_k::binary-4, x0::float-32-little, y0::float-32-little, z0::float-32-little,
+           _::binary>> = path
+       ) do
+    start =
+      <<-1.0::float-32-little, x0::float-32-little, y0::float-32-little, z0::float-32-little>>
+
+    min2 = @path_merge_mm * @path_merge_mm
+
+    {acc, last, pending} =
+      for <<kind::float-32-little, _::binary-12, x::float-32-little, y::float-32-little,
+            z::float-32-little, _::binary-4 <- path>>,
+          reduce: {[start], {-1.0, x0, y0, z0}, nil} do
+        {acc, {lk, lx, ly, lz}, _pending} ->
+          vertex =
+            <<kind::float-32-little, x::float-32-little, y::float-32-little, z::float-32-little>>
+
+          d2 = (x - lx) * (x - lx) + (y - ly) * (y - ly) + (z - lz) * (z - lz)
+
+          if kind == lk and d2 < min2,
+            # Too close: hold it, in case it's the last of a run.
+            do: {acc, {lk, lx, ly, lz}, vertex},
+            else: {[acc | vertex], {kind, x, y, z}, nil}
+      end
+
+    _ = last
+    IO.iodata_to_binary(if pending, do: [acc | pending], else: acc)
+  end
+
+  # How the program's moves sit in the machine's travel from the current
+  # work zero: [{axis, :low | :high, mm_outside}], or :no_work_zero.
+  defp fit(%Program{gcode: %{bounds: nil}}, _machine), do: []
+  defp fit(_program, %State{wco: nil}), do: :no_work_zero
+
+  defp fit(%Program{gcode: %{bounds: bounds}}, %State{wco: wco, travel: travel}) do
+    for {axis, i} <- [x: 0, y: 1, z: 2],
+        {pmin, pmax} = elem(bounds, i),
+        {tmin, tmax} = elem(travel, i),
+        offset = elem(wco, i),
+        {side, out} <- [low: tmin - (pmin + offset), high: pmax + offset - tmax],
+        out > 0.0005,
+        do: {axis, side, out}
+  end
 
   # Speed meters: current X/Y and Z speed against the machine's max rate,
   # with each tier's full-deflection speed marked. All mm/min.

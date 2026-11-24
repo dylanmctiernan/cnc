@@ -60,7 +60,19 @@ export default {
       x: css("--x"),
       y: css("--y"),
       z: css("--z"),
+      path: css("--path"),
     }
+
+    // Loaded G-code toolpath (work coordinates), drawn into an offscreen
+    // canvas and only redrawn when the file, the work zero or the view
+    // changes: a file can have hundreds of thousands of segments.
+    this.program = null
+    this.pathCache = document.createElement("canvas")
+    this.pathKey = null
+    this.handleEvent("program", ({path}) => {
+      this.program = path ? decodePath(path) : null
+      this.pathKey = null
+    })
 
     this.handleEvent("pos", (p) => this.sample(p))
     this.handleEvent("travel", ({travel}) => {
@@ -162,6 +174,7 @@ export default {
     const {ctx, view: v} = this
     ctx.clearRect(0, 0, v.width, v.height)
     this.drawBed()
+    this.drawProgram()
     this.drawWorkOrigin()
     this.drawTrail()
     this.drawTool(this.shown)
@@ -169,6 +182,68 @@ export default {
       this.drawGauge(this.shown.z)
       this.drawSpeed(now)
     }
+  },
+
+  drawProgram() {
+    if (!this.program) return
+    const {view: v} = this
+    const wco = this.wco || [0, 0, 0]
+    const dpr = window.devicePixelRatio || 1
+    const key = [v.width, v.height, v.scale, v.left, v.bottom, dpr, ...wco].join(",")
+
+    if (key !== this.pathKey) {
+      this.pathKey = key
+      const cache = this.pathCache
+      cache.width = Math.round(v.width * dpr)
+      cache.height = Math.round(v.height * dpr)
+      const ctx = cache.getContext("2d")
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      this.renderProgram(ctx, wco)
+    }
+    this.ctx.drawImage(this.pathCache, 0, 0, v.width, v.height)
+  },
+
+  // Rapids dashed and quiet; cuts in the path colour, in depth bands that
+  // get more opaque the deeper they go (the deepest is solid).
+  renderProgram(ctx, [ox, oy]) {
+    const {colors: c} = this
+    const {data, zMin, zMax} = this.program
+    const BANDS = 5
+    const rapids = new Path2D()
+    const bands = Array.from({length: BANDS}, () => new Path2D())
+    const span = zMax - zMin
+
+    let [px, py] = this.px(data[1] + ox, data[2] + oy)
+    for (let i = 4; i < data.length; i += 4) {
+      const [qx, qy] = this.px(data[i + 1] + ox, data[i + 2] + oy)
+      if (data[i] === 0) {
+        rapids.moveTo(px, py)
+        rapids.lineTo(qx, qy)
+      } else {
+        const depth = span > 0 ? (zMax - data[i + 3]) / span : 1
+        const band = bands[Math.min(BANDS - 1, Math.floor(depth * BANDS))]
+        band.moveTo(px, py)
+        band.lineTo(qx, qy)
+      }
+      px = qx
+      py = qy
+    }
+
+    ctx.lineCap = "round"
+    ctx.lineJoin = "round"
+    ctx.setLineDash([4, 4])
+    ctx.strokeStyle = c.dim
+    ctx.globalAlpha = 0.6
+    ctx.lineWidth = 1
+    ctx.stroke(rapids)
+    ctx.setLineDash([])
+    ctx.strokeStyle = c.path
+    ctx.lineWidth = 1.5
+    bands.forEach((band, k) => {
+      ctx.globalAlpha = 0.35 + (0.65 * (k + 1)) / BANDS
+      ctx.stroke(band)
+    })
+    ctx.globalAlpha = 1
   },
 
   markerColor() {
@@ -478,6 +553,24 @@ export default {
     }
     ctx.globalAlpha = 1
   },
+}
+
+// Base64 float32 [kind, x, y, z] vertices (kind -1 for the start point, 0
+// rapid, 1 feed) -> the array and the depth range of the cutting moves.
+function decodePath(b64) {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const data = new Float32Array(bytes.buffer)
+  let zMin = Infinity, zMax = -Infinity
+  for (let i = 4; i < data.length; i += 4) {
+    if (data[i] === 1) {
+      zMin = Math.min(zMin, data[i + 3])
+      zMax = Math.max(zMax, data[i + 3])
+    }
+  }
+  if (zMin === Infinity) zMin = zMax = 0
+  return {data, zMin, zMax}
 }
 
 function line(ctx, x1, y1, x2, y2) {

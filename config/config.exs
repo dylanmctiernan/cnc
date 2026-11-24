@@ -34,6 +34,10 @@ config :cnc, :machine,
   # Max rates in mm/min, until the controller reports its own ($110-$112).
   max_rate: {3000.0, 3000.0, 1200.0}
 
+# G-code file extensions, so uploads can accept them (and the browser's file
+# picker filters for them). Changing this needs `mix deps.clean mime --build`.
+config :mime, :types, %{"text/x.gcode" => ~w(nc gcode ngc tap cnc)}
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",

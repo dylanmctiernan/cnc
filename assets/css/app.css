@@ -153,6 +153,8 @@
   --x: #ff6b6b;
   --y: #51cf66;
   --z: #4dabf7;
+  /* Toolpath: not a state or an axis colour */
+  --path: #c792ea;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --touch: 2.75rem;
 }
@@ -1563,4 +1565,83 @@ body {
   .cnc-zero > .cnc-sub {
     display: none;
   }
+}
+
+/* G-code file: dialog, drop zone, summary. The dialog sits in the screen
+   grid like the console sheet, between the status bar and the dock, so Stop
+   is never covered (in the header on desktop, the dock on touch). */
+.cnc-file-dialog {
+  grid-column: 1 / -1;
+  grid-row: 2 / -2;
+  z-index: 30;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 0.75rem;
+  overflow: auto;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+}
+.cnc-file-box {
+  max-height: 100%;
+  overflow: auto;
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 64rem) {
+  .cnc-file-dialog {
+    grid-row: 2 / -1;
+  }
+}
+.cnc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.cnc-drop {
+  display: grid;
+  gap: 0.25rem;
+  justify-items: center;
+  padding: 1.5rem 1rem;
+  border: 1.5px dashed var(--edge);
+  border-radius: 3px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 120ms, background-color 120ms;
+}
+.cnc-drop:hover,
+.cnc-drop.phx-drop-target-active {
+  border-color: var(--path);
+  background: color-mix(in srgb, var(--path) 8%, transparent);
+}
+.cnc-drop:focus-within {
+  outline: 2px solid var(--path);
+  outline-offset: 2px;
+}
+.cnc-drop-main {
+  font-weight: 700;
+  color: var(--path);
+}
+.cnc-file-summary {
+  display: grid;
+  gap: 0.5rem;
+}
+.cnc-file-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.cnc-file-ok {
+  color: var(--ok);
+}
+.cnc-file-warnings {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: var(--text-dim);
+  font-size: 0.8125rem;
+}
+.cnc-file-side {
+  display: grid;
+  gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
 }
