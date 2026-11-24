@@ -4,7 +4,7 @@ defmodule CNC.Machine.State do
   broadcast as `{:machine, %State{}}`.
 
     * `state` — host view: `:disconnected | :connecting | :alarm | :idle |
-      :jogging | :homing | :busy`
+      :jogging | :homing | :busy | :uploading` (a file going to the controller)
     * `controller` — the controller's own last reported state
       (`CNC.Grbl.Status` state atom), `nil` until the first report
     * `substate` — e.g. the `1` in `Hold:1` / `Door:1`

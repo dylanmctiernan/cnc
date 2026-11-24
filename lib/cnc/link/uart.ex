@@ -35,13 +35,19 @@ defmodule CNC.Link.UART do
   @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
+  @impl CNC.Link
+  def raw_mode(pid, on?), do: GenServer.cast(pid, {:raw, on?})
+
+  @impl CNC.Link
+  def write_raw(pid, data), do: GenServer.cast(pid, {:write, data})
+
   @doc "Serial ports present on this computer, with whatever the OS knows about them."
   def ports, do: Circuits.UART.enumerate()
 
   @impl GenServer
   def init({owner, opts}) do
     {:ok, uart} = Circuits.UART.start_link()
-    {:ok, %{owner: owner, opts: opts, uart: uart, buffer: ""}, {:continue, :open}}
+    {:ok, %{owner: owner, opts: opts, uart: uart, buffer: "", raw?: false}, {:continue, :open}}
   end
 
   @impl GenServer
@@ -70,6 +76,8 @@ defmodule CNC.Link.UART do
     {:stop, {:shutdown, :closed}, s}
   end
 
+  def handle_cast({:raw, on?}, s), do: {:noreply, %{s | raw?: on?, buffer: ""}}
+
   def handle_cast({:write, data}, s) do
     case Circuits.UART.write(s.uart, data) do
       :ok -> {:noreply, s}
@@ -79,6 +87,11 @@ defmodule CNC.Link.UART do
 
   @impl GenServer
   def handle_info({:circuits_uart, _port, {:error, reason}}, s), do: disconnect(s, reason)
+
+  def handle_info({:circuits_uart, _port, data}, %{raw?: true} = s) when is_binary(data) do
+    send(s.owner, {:link, :data, data})
+    {:noreply, s}
+  end
 
   def handle_info({:circuits_uart, _port, data}, s) when is_binary(data) do
     {lines, rest} = split_lines(s.buffer <> data)

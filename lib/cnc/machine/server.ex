@@ -23,7 +23,7 @@ defmodule CNC.Machine.Server do
   @behaviour :gen_statem
   require Logger
 
-  alias CNC.Grbl.{Command, Realtime, Response, Status}
+  alias CNC.Grbl.{Command, Realtime, Response, Status, XModem}
   alias CNC.Machine.{Console, Jog, State}
 
   @poll_ms 200
@@ -33,6 +33,9 @@ defmodule CNC.Machine.Server do
   # or port looks open. Longer while connecting: an ESP32 may reboot when the
   # USB port opens and needs a few seconds to boot.
   @watchdog_ms 1_500
+  # XModem: how long to wait for the controller's next answer
+  @upload_step_ms 10_000
+  @upload_retries 10
   @connect_watchdog_ms 6_000
   @publish_ms 50
   @backoff_min 100
@@ -85,6 +88,8 @@ defmodule CNC.Machine.Server do
     pending: :queue.new(),
     # Lines collected for a request/3 while it's first in line for an ack
     request_lines: [],
+    # A file going to the controller over XModem (state :uploading)
+    upload: nil,
     console: Console.new(),
     settings: %{},
     travel_source: :config,
@@ -154,6 +159,7 @@ defmodule CNC.Machine.Server do
 
   defp event(:enter, _old, :disconnected, d) do
     delay = d.backoff
+    if d.upload, do: :gen_statem.reply(d.upload.from, {:error, :reset})
 
     d = %{
       end_session(d)
@@ -163,6 +169,7 @@ defmodule CNC.Machine.Server do
         alarm: nil,
         pending: fail_requests(d.pending),
         request_lines: [],
+        upload: nil,
         in_flight: 0,
         settings: %{},
         settings_wanted?: false,
@@ -184,6 +191,11 @@ defmodule CNC.Machine.Server do
     do:
       {:jogging, d,
        [poll(@poll_jog_ms), {{:timeout, :jog_tick}, 0, :tick}, deadman(), watchdog(d, :jogging)]}
+
+  # A file transfer owns the link: no status polls (a '?' would land in the
+  # data) and so no watchdog; the transfer's own timeout stands in.
+  defp event(:enter, _old, :uploading, d),
+    do: {:uploading, d, [cancel(:poll), cancel(:watchdog)]}
 
   # grblHAL doesn't answer status polls while homing: silence is expected.
   defp event(:enter, _old, :homing, d), do: {:homing, d, [poll(@poll_ms), cancel(:watchdog)]}
@@ -228,6 +240,25 @@ defmodule CNC.Machine.Server do
   end
 
   defp event(:info, {:EXIT, _stale, _}, s, d), do: {s, d, []}
+
+  defp event(:info, {:link, :data, bytes}, :uploading, d), do: upload_bytes(bytes, d, [])
+  defp event(:info, {:link, :data, _bytes}, s, d), do: {s, d, []}
+
+  # After EOT the link is back to lines: the command's own ok ends it.
+  defp event(:info, {:link, :line, line}, :uploading, %{upload: %{phase: :finishing}} = d) do
+    d = log(d, :in, :line, line)
+
+    case Response.parse(line) do
+      :ok -> finish_upload(d, {:ok, d.upload.size})
+      {:error, code} -> finish_upload(d, {:error, code})
+      _ -> {:uploading, d, []}
+    end
+  end
+
+  defp event(:info, {:link, :line, line}, :uploading, d),
+    do: {:uploading, log(d, :in, :line, line), []}
+
+  defp event(:state_timeout, :upload, :uploading, d), do: abort_upload(d, :timeout)
 
   defp event(:info, {:link, :line, line}, s, d) do
     parsed = Response.parse(line)
@@ -313,7 +344,7 @@ defmodule CNC.Machine.Server do
 
   # Stopping is never refused.
   defp event({:call, from}, :jog_stop, s, d) do
-    d = if d.connected?, do: realtime(d, Realtime.jog_cancel()), else: d
+    d = if d.connected? and s != :uploading, do: realtime(d, Realtime.jog_cancel()), else: d
     d = if s == :jogging, do: %{d | stopping?: true}, else: d
     {if(s == :jogging, do: :idle, else: s), d, [{:reply, from, :ok}]}
   end
@@ -406,6 +437,40 @@ defmodule CNC.Machine.Server do
     # Feed hold cancels an active jog on the controller.
     next = if cmd == :feed_hold and s == :jogging, do: :idle, else: s
     {next, d, [{:reply, from, :ok}]}
+  end
+
+  # A file onto the controller: the link puts it there itself (the sims),
+  # or XModem over the link (real hardware).
+  defp event({:call, from}, {:upload, name, data}, s, d) when s in [:alarm, :idle] do
+    cond do
+      d.motion_unsettled? or not :queue.is_empty(d.pending) ->
+        {s, d, [{:reply, from, {:error, :busy}}]}
+
+      function_exported?(d.adapter, :upload, 3) ->
+        {s, log(d, :out, :line, "(upload #{name}, #{byte_size(data)} bytes)"),
+         [{:reply, from, d.adapter.upload(d.link, name, data)}]}
+
+      function_exported?(d.adapter, :raw_mode, 2) ->
+        line = "$Xmodem/Receive=#{name}"
+        :ok = d.adapter.write_line(d.link, line)
+        :ok = d.adapter.raw_mode(d.link, true)
+
+        upload = %{
+          from: from,
+          back: s,
+          packets: List.to_tuple(XModem.packets(data)),
+          sent: 0,
+          tries: 0,
+          phase: :start,
+          size: byte_size(data)
+        }
+
+        {:uploading, %{log(d, :out, :line, line) | upload: upload},
+         [{:state_timeout, @upload_step_ms, :upload}]}
+
+      true ->
+        {s, d, [{:reply, from, {:error, :not_supported}}]}
+    end
   end
 
   # A command whose reply we want whole: answered when its ok/error arrives.
@@ -748,6 +813,81 @@ defmodule CNC.Machine.Server do
   end
 
   defp end_session(d), do: %{d | vector: {0, 0, 0}, target: nil}
+
+  ## Upload (XModem sender)
+
+  defp upload_bytes(<<>>, d, actions),
+    do: {:uploading, d, actions ++ [{:state_timeout, @upload_step_ms, :upload}]}
+
+  defp upload_bytes(<<byte, rest::binary>>, %{upload: u} = d, actions) do
+    ack = XModem.ack()
+    nak = XModem.nak()
+    can = XModem.can()
+    crc = XModem.crc_request()
+
+    case {u.phase, byte} do
+      # The receiver asks (with C, for CRC): the first block
+      {:start, ^crc} ->
+        upload_bytes(rest, send_block(d, 0), actions)
+
+      {:sending, ^ack} ->
+        next = u.sent + 1
+
+        if next < tuple_size(u.packets) do
+          upload_bytes(rest, send_block(%{d | upload: %{u | tries: 0}}, next), actions)
+        else
+          :ok = d.adapter.write_raw(d.link, <<XModem.eot()>>)
+          upload_bytes(rest, %{d | upload: %{u | phase: :eot, tries: 0}}, actions)
+        end
+
+      {:sending, ^nak} ->
+        if u.tries >= @upload_retries,
+          do: abort_upload(d, :too_many_retries),
+          else:
+            upload_bytes(
+              rest,
+              send_block(%{d | upload: %{u | tries: u.tries + 1}}, u.sent),
+              actions
+            )
+
+      {:eot, ^ack} ->
+        :ok = d.adapter.raw_mode(d.link, false)
+
+        {:uploading, %{d | upload: %{u | phase: :finishing}},
+         actions ++ [{:state_timeout, @upload_step_ms, :upload}]}
+
+      {:eot, ^nak} ->
+        :ok = d.adapter.write_raw(d.link, <<XModem.eot()>>)
+        upload_bytes(rest, d, actions)
+
+      {phase, ^can} when phase in [:sending, :eot] ->
+        finish_upload(raw_off(d), {:error, :canceled})
+
+      _other ->
+        upload_bytes(rest, d, actions)
+    end
+  end
+
+  defp send_block(%{upload: u} = d, i) do
+    :ok = d.adapter.write_raw(d.link, elem(u.packets, i))
+    %{d | upload: %{u | phase: :sending, sent: i}}
+  end
+
+  # Give up: tell the receiver (CAN CAN CAN), back to lines.
+  defp abort_upload(d, reason) do
+    can = XModem.can()
+    if d.upload.phase != :finishing, do: d.adapter.write_raw(d.link, <<can, can, can>>)
+    finish_upload(raw_off(d), {:error, reason})
+  end
+
+  defp raw_off(d) do
+    :ok = d.adapter.raw_mode(d.link, false)
+    d
+  end
+
+  defp finish_upload(%{upload: u} = d, result) do
+    {u.back, %{d | upload: nil}, [{:reply, u.from, result}]}
+  end
 
   ## Link
 

@@ -308,6 +308,35 @@ defmodule CNC.Controllers.Config do
     end
   end
 
+  @doc """
+  Write a whole config file onto the controller (`CNC.Machine.upload/4`:
+  XModem on hardware). To use it, switch to it (`activate/2`).
+  """
+  @spec upload(GenServer.server(), String.t(), String.t()) :: {:ok, String.t()} | {:error, term}
+  def upload(machine, name, text) do
+    with {:ok, name} <- valid_name(name),
+         {:ok, _bytes} <- Machine.upload(machine, name, text),
+         do: {:ok, name}
+  end
+
+  @doc """
+  Put an earlier version back into its file. What the file holds now goes
+  into the history first. If it's the file the controller loads, it takes
+  effect after a restart.
+  """
+  @spec restore(GenServer.server(), GenServer.server(), String.t(), snapshot) ::
+          {:ok, String.t()} | {:error, term}
+  def restore(machine, db, id, %{file: file, text: text}) do
+    with :ok <- keep_in_history(machine, {db, id}, file, "before restoring an earlier version"),
+         do: upload(machine, file, text)
+  end
+
+  @doc "Write a board's default config (`CNC.Boards.config/1`) onto the controller as a file."
+  @spec write_board_default(GenServer.server(), atom, String.t()) ::
+          {:ok, String.t()} | {:error, term}
+  def write_board_default(machine, board, name),
+    do: upload(machine, name, CNC.Boards.config(board))
+
   @doc "Earlier versions of this controller's config files, newest first."
   @spec history(GenServer.server(), String.t()) :: [snapshot]
   def history(db, id), do: CubDB.get(db, {:config_history, id}, [])
@@ -317,12 +346,18 @@ defmodule CNC.Controllers.Config do
 
   defp keep_in_history(_machine, nil, _file, _why), do: :ok
 
+  # A file that isn't there (yet) has nothing to keep.
   defp keep_in_history(machine, {db, id}, file, why) do
-    with {:ok, text} <- show(machine, file) do
-      entry = %{at: DateTime.utc_now(:second), file: file, text: text, why: why}
-
-      :ok =
+    case show(machine, file) do
+      {:ok, text} ->
+        entry = %{at: DateTime.utc_now(:second), file: file, text: text, why: why}
         CubDB.put(db, {:config_history, id}, Enum.take([entry | history(db, id)], @history_max))
+
+      {:error, :not_found} ->
+        :ok
+
+      error ->
+        error
     end
   end
 

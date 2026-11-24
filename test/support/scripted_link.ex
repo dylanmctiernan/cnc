@@ -1,7 +1,7 @@
 defmodule CNC.ScriptedLink do
   @moduledoc """
   Link adapter for tests. Every write is forwarded to the test process
-  as `{:line, binary}` or `{:rt, byte}`; the test plays controller by sending
+  as `{:line, binary}`, `{:rt, byte}` or (raw mode) `{:raw, bytes}`; the test plays controller by sending
   `{:link, :line, "..."}` to the owner directly.
 
   On start it sends the test `{:scripted_link, pid, owner}`.
@@ -20,6 +20,13 @@ defmodule CNC.ScriptedLink do
 
   @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
+
+  # File transfers: the test sees {:raw_mode, on?} and {:raw, bytes}.
+  @impl CNC.Link
+  def raw_mode(pid, on?), do: GenServer.cast(pid, {:raw_mode, on?})
+
+  @impl CNC.Link
+  def write_raw(pid, data), do: GenServer.cast(pid, {:raw, IO.iodata_to_binary(data)})
 
   @impl GenServer
   def init({owner, test}) do

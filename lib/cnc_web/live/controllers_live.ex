@@ -405,6 +405,7 @@ defmodule CNCWeb.ControllersLive do
       alarm: "Locked",
       idle: "Ready",
       jogging: "Jogging",
+      uploading: "Uploading",
       homing: "Homing",
       busy: "Busy"
     }[state]

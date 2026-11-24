@@ -85,8 +85,8 @@ Each answers something we couldn't learn from the sims. Note the result.
    about 50, then stop and restart the dev server. After it reconnects: X
    back at 0 means opening the port reset the board; X still at 50 means it
    didn't.
-3. **Travel from the controller.** The facts panel / Settings page shows
-   `$130`/`$131` = 1250 and `$132` = 100, and no travel warning. (The sim
+3. **Travel from the controller.** The facts panel shows travel 1250 x
+   1250 x 100 (FluidNC's `$130`–`$132`), and no travel warning. (The sim
    already showed FluidNC reports these; this confirms it on the board.)
 4. **Homing.** Click **Home**. Z homes first (cycle 1), moving up:
    - press and release the **Z** button: it backs off 2 mm,
@@ -116,6 +116,13 @@ Each answers something we couldn't learn from the sims. Note the result.
    when a line ran past the first cancel; that's Machine cancelling again.
 10. **Unplug mid-jog.** Hold a jog and pull the USB cable: expect Not
    connected, and on replugging, reconnect and Locked.
+11. **Configuration over USB.** (The sims don't use XModem.) Open the
+   controller's Configuration page: the wiring should match the ESP32
+   DevKit pin map. Change X's max rate, Save, and check the file. Then
+   **Write board default** as `bench-default`: this goes by XModem, so the
+   state shows Uploading for a moment and the file appears (same size as
+   the generated config). View it, then Delete it. Restore the version
+   kept before the save. Note any transfer that fails, with the console.
 
 ## 6. Afterwards
 

@@ -394,6 +394,9 @@ defmodule CNC.Link.FakeSim.Model do
   defp numeric?({:ok, value}), do: match?({_, ""}, Float.parse(value))
   defp numeric?(_), do: false
 
+  @doc "A file put onto the controller (an upload)."
+  def put_file(m, name, data), do: %{m | files: Map.put(m.files, name, data)}
+
   defp text_lines(text), do: String.split(String.trim_trailing(text, "\n"), "\n")
 
   defp stop(m, state), do: %{m | state: state, queue: :queue.new(), feed: 0.0, homing_left: 0}

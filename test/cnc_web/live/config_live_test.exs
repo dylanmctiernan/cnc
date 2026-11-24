@@ -82,6 +82,25 @@ defmodule CNCWeb.ConfigLiveTest do
     assert has_element?(view, "#set-x-max_rate_mm_per_min[value='2500']")
   end
 
+  test "restore a saved-over version; write the board default; restart", %{conn: conn, id: id} do
+    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+
+    view
+    |> form("#axes-form", set: %{"axes/x/max_rate_mm_per_min" => "2500"})
+    |> render_submit()
+
+    view |> element("#save-changes") |> render_click()
+    view |> element("#version-0 button", "Restore") |> render_click()
+    assert has_element?(view, "#config-history #version-1")
+
+    view |> form("#default-form", default: %{name: "board"}) |> render_submit()
+    assert has_element?(view, "#config-file-board-yaml")
+
+    view |> element("#restart-controller") |> render_click()
+    assert eventually(fn -> has_element?(view, "#config-file-config-yaml.is-active") end, 3000)
+    assert has_element?(view, "#set-x-max_rate_mm_per_min[value='3000']")
+  end
+
   test "a controller not in use offers to connect it", %{conn: conn, cnc: cnc, m: m} do
     {:ok, other} = Controllers.add(cnc.controllers, %{name: "Other", board: :fake_sim})
     {:ok, view, _} = live(conn, ~p"/controllers/#{other.id}/configuration")

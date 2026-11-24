@@ -27,9 +27,22 @@ defmodule CNC.Link.TCP do
   @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
+  @impl CNC.Link
+  def raw_mode(pid, on?), do: GenServer.cast(pid, {:raw, on?})
+
+  # Telnet: a literal 0xFF (IAC) is sent doubled, or FluidNC reads it as a
+  # telnet command.
+  @impl CNC.Link
+  def write_raw(pid, data),
+    do:
+      GenServer.cast(
+        pid,
+        {:send, :binary.replace(IO.iodata_to_binary(data), <<255>>, <<255, 255>>, [:global])}
+      )
+
   @impl GenServer
   def init({owner, opts}),
-    do: {:ok, %{owner: owner, opts: opts, socket: nil}, {:continue, :connect}}
+    do: {:ok, %{owner: owner, opts: opts, socket: nil, raw?: false}, {:continue, :connect}}
 
   @impl GenServer
   def handle_continue(:connect, %{opts: opts} = s) do
@@ -57,6 +70,11 @@ defmodule CNC.Link.TCP do
     {:stop, {:shutdown, :closed}, s}
   end
 
+  def handle_cast({:raw, on?}, s) do
+    :ok = :inet.setopts(s.socket, packet: if(on?, do: :raw, else: :line))
+    {:noreply, %{s | raw?: on?}}
+  end
+
   def handle_cast({:send, data}, s) do
     case :gen_tcp.send(s.socket, data) do
       :ok -> {:noreply, s}
@@ -65,6 +83,12 @@ defmodule CNC.Link.TCP do
   end
 
   @impl GenServer
+  def handle_info({:tcp, socket, data}, %{socket: socket, raw?: true} = s) do
+    send(s.owner, {:link, :data, data})
+    :ok = :inet.setopts(socket, active: :once)
+    {:noreply, s}
+  end
+
   def handle_info({:tcp, socket, data}, %{socket: socket} = s) do
     line = data |> String.trim_trailing("\n") |> String.trim_trailing("\r")
     send(s.owner, {:link, :line, line})

@@ -160,6 +160,26 @@ defmodule CNC.Controllers.ConfigTest do
     end
 
     @tag :tmp_dir
+    test "restore an earlier version; write the board's default as a new file", %{
+      machine: m,
+      db: db
+    } do
+      {:ok, original} = Config.show(m, "config.yaml")
+      {:ok, _} = Config.change(m, db, "c1", "axes/x/max_rate_mm_per_min", "2500")
+      {:ok, _} = Config.save(m, db, "c1")
+      [before] = Config.history(db, "c1")
+
+      assert {:ok, "config.yaml"} = Config.restore(m, db, "c1", before)
+      assert Config.show(m, "config.yaml") == {:ok, original}
+      # What it held is kept too
+      assert [%{why: "before restoring an earlier version"}, _] = Config.history(db, "c1")
+
+      assert {:ok, "six.yaml"} = Config.write_board_default(m, :six_x, "six")
+      {:ok, six} = Config.show(m, "six.yaml")
+      assert six =~ "engine: I2S_STREAM"
+    end
+
+    @tag :tmp_dir
     test "undo; a restart drops unsaved changes", %{machine: m, db: db} do
       {:ok, _} = Config.change(m, db, "c1", "axes/x/max_travel_mm", "1000")
       assert :ok = Config.undo(m, db, "c1", "axes/x/max_travel_mm")

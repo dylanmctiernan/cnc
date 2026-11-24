@@ -41,6 +41,11 @@ defmodule CNC.Link.FluidNCSim do
   @impl CNC.Link
   def close(pid), do: GenServer.cast(pid, :close)
 
+  # Its flash is a folder (native_localfs): XModem can't cross its console
+  # (it reads input as signed chars, dropping bytes >= 0x80), and needn't.
+  @impl CNC.Link
+  def upload(pid, name, data), do: GenServer.call(pid, {:upload, name, data})
+
   # Real firmware, but nothing physical moves.
   @impl CNC.Link
   def simulated?, do: true
@@ -128,6 +133,21 @@ defmodule CNC.Link.FluidNCSim do
         Logger.warning("FluidNC start failed: #{inspect(reason)} (run mix cnc.fluidnc.build)")
         {:stop, {:shutdown, {:connect_failed, reason}}, s}
     end
+  end
+
+  @impl GenServer
+  def handle_call({:upload, name, data}, _from, s) do
+    dir = Path.join(Keyword.get(s.opts, :run_dir, Path.expand(".fluidnc/run")), "native_localfs")
+    path = Path.join(dir, name)
+
+    # Written aside, then renamed: a file is never seen half-written.
+    reply =
+      with true <- Path.dirname(path) == dir || {:error, :invalid_name},
+           :ok <- File.write(path <> ".part", data),
+           :ok <- File.rename(path <> ".part", path),
+           do: {:ok, byte_size(data)}
+
+    {:reply, reply, s}
   end
 
   @impl GenServer

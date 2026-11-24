@@ -199,5 +199,20 @@ defmodule CNC.Machine do
   def request(server \\ __MODULE__, line, timeout \\ 10_000) when is_binary(line),
     do: :gen_statem.call(server, {:request, line}, timeout)
 
+  @doc """
+  Put a file onto the controller's filesystem (a config, say). Over USB or
+  Wi-Fi this is XModem: the state is `:uploading` meanwhile, with status
+  polling paused. The sims write the file directly. Only when `:idle` or
+  `:alarm` with nothing in flight (`{:error, :busy}`).
+  """
+  @spec upload(server, String.t(), binary, timeout) ::
+          {:ok, non_neg_integer} | {:error, term}
+  def upload(server \\ __MODULE__, name, data, timeout \\ 120_000)
+      when is_binary(name) and is_binary(data) do
+    if Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9_.\-]{0,60}\z/, name),
+      do: :gen_statem.call(server, {:upload, name, data}, timeout),
+      else: {:error, :invalid_name}
+  end
+
   defp call(server, request), do: :gen_statem.call(server, request)
 end

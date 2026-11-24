@@ -6,5 +6,5 @@ defmodule CNC.Grbl do
   Lines are handled without their trailing newline; the link
   (`CNC.Link`) owns framing.
   """
-  use Boundary, deps: [], exports: [Command, Response, Status, Realtime]
+  use Boundary, deps: [], exports: [Command, Response, Status, Realtime, XModem]
 end

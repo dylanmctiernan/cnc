@@ -34,6 +34,9 @@ defmodule CNC.Link.FakeSim do
   @impl CNC.Link
   def simulated?, do: true
 
+  @impl CNC.Link
+  def upload(pid, name, data), do: GenServer.call(pid, {:upload, name, data})
+
   ## Test hooks
 
   @doc "Change `:latency` / `:drop_acks` at runtime."
@@ -77,6 +80,9 @@ defmodule CNC.Link.FakeSim do
 
   def handle_call({:alarm, code}, _from, s), do: {:reply, :ok, step(s, &Model.alarm(&1, code))}
   def handle_call(:model, _from, s), do: {:reply, s.model, s}
+
+  def handle_call({:upload, name, data}, _from, s),
+    do: {:reply, {:ok, byte_size(data)}, %{s | model: Model.put_file(s.model, name, data)}}
 
   def handle_call(:disconnect, _from, s) do
     send(s.owner, {:link, :disconnected})

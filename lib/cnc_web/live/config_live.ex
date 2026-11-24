@@ -43,7 +43,7 @@ defmodule CNCWeb.ConfigLive do
          |> assign(page_title: "#{controller.name} configuration", cnc: cnc)
          |> assign(controller: controller, machine: Machine.status(cnc.machine))
          |> assign(files: nil, active_file: nil, viewing: nil, text: nil, error: nil)
-         |> assign(save_name: "", working: nil)
+         |> assign(save_name: "", working: nil, default_name: "#{controller.board}-default")
          |> assign(settings: %{}, paths: [], changes: [], history: [], showing: nil)
          |> assign(wiring: %{checked: 0, differences: []})
          |> assign(other: %{"path" => "", "value" => ""}, field_errors: %{})
@@ -174,6 +174,58 @@ defmodule CNCWeb.ConfigLive do
   def handle_event("show_version", %{"i" => i}, socket) do
     i = String.to_integer(i)
     {:noreply, assign(socket, showing: if(socket.assigns.showing == i, do: nil, else: i))}
+  end
+
+  def handle_event("restore", %{"i" => i}, socket) do
+    %{cnc: cnc, controller: c, history: history, active_file: active} = socket.assigns
+    version = Enum.at(history, String.to_integer(i))
+
+    case version && Config.restore(cnc.machine, cnc.db, c.id, version) do
+      {:ok, file} ->
+        note =
+          if file == active,
+            do: "Restored #{file}. Restart the controller to load it.",
+            else: "Restored #{file}."
+
+        {:noreply,
+         socket |> assign(error: nil, showing: nil) |> put_flash(:info, note) |> maybe_load()}
+
+      nil ->
+        {:noreply, assign(socket, error: "That version isn't in the history any more.")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  def handle_event("default_change", %{"default" => %{"name" => name}}, socket),
+    do: {:noreply, assign(socket, default_name: name)}
+
+  def handle_event("write_default", %{"default" => %{"name" => name}}, socket) do
+    %{cnc: cnc, controller: c, files: files} = socket.assigns
+
+    with {:ok, name} <- Config.valid_name(name),
+         false <- Enum.any?(files || [], &(&1.name == name)) && {:error, :exists},
+         {:ok, name} <- Config.write_board_default(cnc.machine, c.board, name) do
+      {:noreply,
+       socket
+       |> assign(error: nil)
+       |> put_flash(:info, "Wrote #{name}. Use it to switch the controller to it.")
+       |> maybe_load()}
+    else
+      {:error, reason} ->
+        {:noreply, assign(socket, default_name: name, error: error_text(reason))}
+    end
+  end
+
+  def handle_event("restart", _, socket) do
+    case Config.activate(machine(socket), socket.assigns.active_file) do
+      :ok ->
+        {:noreply, assign(socket, working: "Restarting…", viewing: nil, text: nil, error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
   end
 
   def handle_event("delete", %{"name" => name}, socket) do
@@ -424,6 +476,17 @@ defmodule CNCWeb.ConfigLive do
                         Use this config
                       </button>
                       <button
+                        :if={f.name == @active_file}
+                        type="button"
+                        class="cnc-btn"
+                        id="restart-controller"
+                        phx-click="restart"
+                        disabled={@machine.moving?}
+                        data-confirm="Restart the controller? It reloads this file (unsaved changes are dropped) and comes back locked."
+                      >
+                        Restart to reload
+                      </button>
+                      <button
                         :if={f.name != @active_file}
                         type="button"
                         class="cnc-btn cnc-btn--quiet"
@@ -466,6 +529,29 @@ defmodule CNCWeb.ConfigLive do
                 </form>
               </section>
 
+              <section class="cnc-set-group" aria-label="Board default">
+                <h2 class="cnc-h">Start from the board's default</h2>
+                <p class="cnc-sub">
+                  Write the {CNC.Boards.label(@controller.board)} default config (its pin map,
+                  with this router's travel and speeds) onto the controller as a new file.
+                  Then switch to it with Use this config.
+                </p>
+                <form
+                  id="default-form"
+                  class="cnc-ctl-form"
+                  phx-change="default_change"
+                  phx-submit="write_default"
+                >
+                  <label class="cnc-ctl-field">
+                    <span>File name</span>
+                    <input name="default[name]" value={@default_name} autocomplete="off" />
+                  </label>
+                  <div class="cnc-row">
+                    <button type="submit" class="cnc-btn">Write board default</button>
+                  </div>
+                </form>
+              </section>
+
               <section :if={@history != []} class="cnc-set-group" aria-label="Earlier versions">
                 <h2 class="cnc-h">Earlier versions</h2>
                 <ul class="cnc-ctls" id="config-history">
@@ -483,6 +569,16 @@ defmodule CNCWeb.ConfigLive do
                     <div class="cnc-row">
                       <button type="button" class="cnc-btn" phx-click="show_version" phx-value-i={i}>
                         {if @showing == i, do: "Hide", else: "View"}
+                      </button>
+                      <button
+                        type="button"
+                        class="cnc-btn"
+                        phx-click="restore"
+                        phx-value-i={i}
+                        disabled={not ready?(assigns)}
+                        data-confirm={"Write this version back into #{v.file}? What it holds now goes into the history."}
+                      >
+                        Restore
                       </button>
                     </div>
                     <pre :if={@showing == i} class="cnc-config-text">{v.text}</pre>
@@ -583,6 +679,7 @@ defmodule CNCWeb.ConfigLive do
 
   defp waiting_text(:disconnected), do: "Not connected yet: waiting for the controller."
   defp waiting_text(:connecting), do: "Connecting…"
+  defp waiting_text(:uploading), do: "Sending a file to the controller…"
   defp waiting_text(_), do: "The machine is moving: the configuration is available once it stops."
 
   defp dom_id(name), do: String.replace(name, ~r/[^A-Za-z0-9_-]/, "-")
@@ -607,6 +704,12 @@ defmodule CNCWeb.ConfigLive do
   defp error_text(:wiring),
     do: "That's wiring (pins, stepping): it's set by the board and only changes in a config file."
 
+  defp error_text(:busy), do: "The controller is busy: try again in a moment."
+  defp error_text(:canceled), do: "The controller cancelled the transfer."
+  defp error_text(:timeout), do: "The controller stopped answering during the transfer."
+  defp error_text(:too_many_retries), do: "The transfer kept failing (a noisy link?). Try again."
+  defp error_text(:not_supported), do: "This link can't send files."
+
   defp error_text(:exists), do: "There's already a file with that name."
   defp error_text(:active), do: "That's the file the controller loads: switch to another first."
   defp error_text(:not_found), do: "That file isn't on the controller."
@@ -624,6 +727,7 @@ defmodule CNCWeb.ConfigLive do
       alarm: "Locked",
       idle: "Ready",
       jogging: "Jogging",
+      uploading: "Uploading",
       homing: "Homing",
       busy: "Busy"
     }[state]
