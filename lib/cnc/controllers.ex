@@ -61,6 +61,13 @@ defmodule CNC.Controllers do
     do: GenServer.call(server, {:update_link, id, link}, 10_000)
 
   @doc """
+  Stop using the active controller: the machine disconnects and nothing is
+  in use (then any controller can be removed). Refused while moving.
+  """
+  @spec deactivate(GenServer.server()) :: :ok | {:error, :overridden | :moving}
+  def deactivate(server \\ __MODULE__), do: GenServer.call(server, :deactivate, 10_000)
+
+  @doc """
   Fork a FluidNC sim (or the fake sim): a new, independent copy to
   experiment with. A FluidNC sim's folder (config and settings) is copied.
   Boards can't be forked: a board holds one config, so two profiles would
@@ -174,6 +181,19 @@ defmodule CNC.Controllers do
       {:reply, {:ok, profile}, s}
     else
       {:error, _} = error -> {:reply, error, s}
+    end
+  end
+
+  def handle_call(:deactivate, _from, %{overridden?: true} = s),
+    do: {:reply, {:error, :overridden}, s}
+
+  def handle_call(:deactivate, _from, s) do
+    if moving?(s) do
+      {:reply, {:error, :moving}, s}
+    else
+      s = save(%{s | active: nil})
+      Machine.connect(s.machine, nil)
+      {:reply, :ok, s}
     end
   end
 

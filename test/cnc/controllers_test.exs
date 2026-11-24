@@ -104,6 +104,23 @@ defmodule CNC.ControllersTest do
       assert Controllers.select(c2, "nope") == {:error, :not_found}
     end
 
+    test "deactivate: nothing in use, machine disconnected, all removable", ctx do
+      c = start_controllers(ctx)
+      {:ok, fake} = Controllers.add(c, %{name: "Fake", board: :fake_sim})
+      :ok = Controllers.select(c, fake.id)
+      assert eventually(fn -> Machine.status(ctx.machine).connected? end, 5000)
+
+      :ok = Controllers.deactivate(c)
+      assert Controllers.active(c) == nil
+      refute Machine.status(ctx.machine).connected?
+      :ok = Controllers.remove(c, fake.id)
+      assert Controllers.list(c) == []
+
+      # Nothing in use survives a restart too
+      stop_supervised!(c)
+      assert Controllers.active(start_controllers(ctx)) == nil
+    end
+
     test "a controllers.json from before is imported once", ctx do
       File.write!(
         Path.join(ctx.dir, "controllers.json"),

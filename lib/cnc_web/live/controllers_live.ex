@@ -68,6 +68,13 @@ defmodule CNCWeb.ControllersLive do
     end
   end
 
+  def handle_event("deactivate", _, socket) do
+    case Controllers.deactivate(socket.assigns.cnc.controllers) do
+      :ok -> {:noreply, socket |> assign(error: nil) |> load()}
+      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
   def handle_event("fork", %{"id" => id}, socket) do
     case Controllers.fork(socket.assigns.cnc.controllers, id) do
       {:ok, _} -> {:noreply, socket |> assign(error: nil) |> load()}
@@ -189,6 +196,16 @@ defmodule CNCWeb.ControllersLive do
                     disabled={@overridden? or @machine.moving?}
                   >
                     Use this controller
+                  </button>
+                  <button
+                    :if={p.id == @active_id}
+                    type="button"
+                    class="cnc-btn"
+                    phx-click="deactivate"
+                    disabled={@overridden? or @machine.moving?}
+                    data-confirm={"Stop using #{p.name}? The machine disconnects."}
+                  >
+                    Disconnect
                   </button>
                   <button
                     :if={length(Boards.links(p.board)) > 1 or p.link.type in [:serial, :tcp]}
@@ -384,7 +401,10 @@ defmodule CNCWeb.ControllersLive do
 
   defp error_text(:moving), do: "Wait for the machine to stop before switching controllers."
   defp error_text(:overridden), do: "CNC_LINK is set, so controllers can't be switched."
-  defp error_text(:active), do: "That's the controller in use: switch to another first."
+
+  defp error_text(:active),
+    do: "That's the controller in use: disconnect it (or switch to another) first."
+
   defp error_text(:serial_port_required), do: "Choose the USB port the board is on."
   defp error_text(:tcp_host_required), do: "Type the board's Wi-Fi host, like fluidnc.local."
   defp error_text(:invalid), do: "Give the controller a name."

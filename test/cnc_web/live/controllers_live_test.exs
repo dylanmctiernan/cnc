@@ -113,6 +113,19 @@ defmodule CNCWeb.ControllersLiveTest do
     refute has_element?(view, "#controller-#{controller_id(view, "Bench")} button", "Fork")
   end
 
+  test "disconnect the one in use, then every controller can go", %{conn: conn, m: m} do
+    {:ok, view, _} = live(conn, ~p"/controllers")
+    id = controller_id(view, "Fake sim")
+    refute has_element?(view, "#controller-#{id} button", "Remove")
+
+    view |> element("#controller-#{id} button", "Disconnect") |> render_click()
+    assert eventually(fn -> Machine.status(m).state == :disconnected end)
+    refute has_element?(view, "#controllers li.is-active")
+
+    view |> element("#controller-#{id} button", "Remove") |> render_click()
+    assert has_element?(view, "#no-controllers")
+  end
+
   defp eventually(fun, timeout \\ 2000) do
     cond do
       fun.() -> true
