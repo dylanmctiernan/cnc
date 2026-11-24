@@ -98,6 +98,21 @@ defmodule CNCWeb.ControllersLiveTest do
     end)
   end
 
+  test "fork a sim; boards have no Fork", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/controllers")
+    first = controller_id(view, "Fake sim")
+    view |> element("#controller-#{first} button", "Fork") |> render_click()
+    assert controller_id(view, "Fake sim (copy)")
+
+    view
+    |> form("#add-form",
+      add: %{name: "Bench", board: "esp32_devkit", type: "serial", port: "/dev/x"}
+    )
+    |> render_submit()
+
+    refute has_element?(view, "#controller-#{controller_id(view, "Bench")} button", "Fork")
+  end
+
   defp eventually(fun, timeout \\ 2000) do
     cond do
       fun.() -> true

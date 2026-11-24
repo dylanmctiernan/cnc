@@ -66,28 +66,31 @@ defmodule CNC.ControllersTest do
       %{dir: dir, machine: machine}
     end
 
+    # A database per test folder: a restarted Controllers on the same folder
+    # finds what the last one saved.
     defp start_controllers(%{dir: dir, machine: machine}, opts \\ []) do
       name = :"controllers_#{System.unique_integer([:positive])}"
 
       opts =
-        Keyword.merge([name: name, data_dir: dir, machine: machine, overridden?: false], opts)
+        Keyword.merge(
+          [name: name, data_dir: dir, machine: machine, overridden?: false, db: db_for(dir)],
+          opts
+        )
 
       start_supervised!(Supervisor.child_spec({Controllers, opts}, id: name))
       name
     end
 
-    test "first run: sim (when built) and fake sim, the first one active and connected", ctx do
+    test "first run: no controllers, machine not connected", ctx do
       c = start_controllers(ctx)
-      profiles = Controllers.list(c)
-      assert %{board: :fake_sim, link: %{type: :fake_sim}} = List.last(profiles)
-      assert Controllers.active(c) == hd(profiles)
-      assert File.exists?(Path.join(ctx.dir, "controllers.json"))
-      assert eventually(fn -> Machine.status(ctx.machine).connected? end, 5000)
+      assert Controllers.list(c) == []
+      assert Controllers.active(c) == nil
+      refute Machine.status(ctx.machine).connected?
     end
 
-    test "selecting switches the machine's link; the choice survives a restart", ctx do
+    test "add, select (switches the machine's link); survives a restart", ctx do
       c = start_controllers(ctx)
-      fake = Enum.find(Controllers.list(c), &(&1.link.type == :fake_sim))
+      {:ok, fake} = Controllers.add(c, %{name: "Fake", board: :fake_sim})
 
       :ok = Controllers.select(c, fake.id)
       assert eventually(fn -> Machine.status(ctx.machine).adapter == "FakeSim" end, 5000)
@@ -97,8 +100,49 @@ defmodule CNC.ControllersTest do
       stop_supervised!(c)
       c2 = start_controllers(ctx)
       assert Controllers.active(c2).id == fake.id
-      assert Controllers.list(c2) |> Enum.map(& &1.id) |> Enum.member?(fake.id)
+      assert Enum.map(Controllers.list(c2), & &1.id) == [fake.id]
       assert Controllers.select(c2, "nope") == {:error, :not_found}
+    end
+
+    test "a controllers.json from before is imported once", ctx do
+      File.write!(
+        Path.join(ctx.dir, "controllers.json"),
+        Jason.encode!(%{
+          active: "ab2c",
+          profiles: [%{id: "ab2c", name: "Old", board: "fake_sim", link: %{type: "fake_sim"}}]
+        })
+      )
+
+      c = start_controllers(ctx)
+      assert [%{id: "ab2c", name: "Old"}] = Controllers.list(c)
+      assert Controllers.active(c).id == "ab2c"
+      assert File.exists?(Path.join(ctx.dir, "controllers.json.migrated"))
+    end
+
+    test "fork a FluidNC sim: an independent copy of its folder; boards can't", ctx do
+      c = start_controllers(ctx)
+      {:ok, sim} = Controllers.add(c, %{name: "Sim", board: :fluidnc_sim})
+      folder = Path.join([ctx.dir, "controllers", sim.id, "fluidnc"])
+      File.mkdir_p!(folder)
+      File.write!(Path.join(folder, "config.yaml"), "name: tuned\n")
+
+      {:ok, copy} = Controllers.fork(c, sim.id)
+      assert copy.name == "Sim (copy)" and copy.id != sim.id and copy.board == :fluidnc_sim
+      copied = Path.join([ctx.dir, "controllers", copy.id, "fluidnc", "config.yaml"])
+      assert File.read!(copied) == "name: tuned\n"
+
+      # Removing a sim takes its folder with it
+      :ok = Controllers.remove(c, copy.id)
+      refute File.exists?(copied)
+
+      {:ok, board} =
+        Controllers.add(c, %{
+          name: "Bench",
+          board: :esp32_devkit,
+          link: %{type: :serial, port: "/dev/x"}
+        })
+
+      assert Controllers.fork(c, board.id) == {:error, :not_forkable}
     end
 
     test "adding profiles: board defaults for the link, serial needs a port", ctx do
@@ -140,9 +184,23 @@ defmodule CNC.ControllersTest do
       c = start_controllers(ctx, overridden?: true)
       assert Controllers.overridden?(c)
       assert Controllers.active(c) == nil
-      assert Controllers.select(c, hd(Controllers.list(c)).id) == {:error, :overridden}
+      {:ok, fake} = Controllers.add(c, %{name: "Fake", board: :fake_sim})
+      assert Controllers.select(c, fake.id) == {:error, :overridden}
       refute Machine.status(ctx.machine).connected?
     end
+  end
+
+  # One CubDB per test folder (tests run in parallel; nothing shared).
+  defp db_for(dir) do
+    name = :"db_#{:erlang.phash2(dir)}"
+
+    if Process.whereis(name) == nil do
+      start_supervised!(
+        Supervisor.child_spec({CubDB, data_dir: Path.join(dir, "db"), name: name}, id: name)
+      )
+    end
+
+    name
   end
 
   describe "Machine.connect" do

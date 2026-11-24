@@ -62,7 +62,8 @@ defmodule CNC.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:boundary, "~> 0.12", runtime: false},
-      {:circuits_uart, "~> 1.5"}
+      {:circuits_uart, "~> 1.5"},
+      {:cubdb, "~> 2.0"}
     ]
   end
 

@@ -38,6 +38,13 @@ defmodule CNC.Controllers.Profile do
   @doc "A new short id: 4 characters, no look-alikes (0/o, 1/l/i)."
   def new_id, do: for(_ <- 1..4, into: "", do: <<Enum.random(@alphabet)>>)
 
+  @doc "A plain map for storage (CubDB), so changes to this struct can't break stored data."
+  def to_map(%__MODULE__{} = p),
+    do: %{id: p.id, name: p.name, board: p.board, firmware: p.firmware, link: p.link}
+
+  @doc "From a stored map back to a profile; :error if it doesn't fit anymore."
+  def from_map(map) when is_map(map), do: map |> Jason.encode!() |> Jason.decode!() |> from_json()
+
   @doc "From stored JSON (string keys) back to a profile; :error if it doesn't fit."
   def from_json(%{"id" => id, "name" => name, "board" => board, "link" => link} = map) do
     with {:ok, board} <- known_atom(board, CNC.Boards.ids()),

@@ -68,6 +68,13 @@ defmodule CNCWeb.ControllersLive do
     end
   end
 
+  def handle_event("fork", %{"id" => id}, socket) do
+    case Controllers.fork(socket.assigns.cnc.controllers, id) do
+      {:ok, _} -> {:noreply, socket |> assign(error: nil) |> load()}
+      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
   def handle_event("remove", %{"id" => id}, socket) do
     case Controllers.remove(socket.assigns.cnc.controllers, id) do
       :ok -> {:noreply, socket |> assign(error: nil) |> load()}
@@ -123,7 +130,8 @@ defmodule CNCWeb.ControllersLive do
           <p class="cnc-sub cnc-settings-intro">
             A controller is a board plus how the app reaches it. Its configuration lives on
             the controller, so changing the link (USB to Wi-Fi, say) keeps it. Switching
-            connects the machine to it, locked until you unlock or home.
+            connects the machine to it, locked until you unlock or home. Fork a sim to get
+            an independent copy to experiment with.
           </p>
 
           <p :if={@overridden?} class="cnc-note cnc-note--warn">
@@ -134,6 +142,10 @@ defmodule CNCWeb.ControllersLive do
 
           <section class="cnc-set-group" aria-label="Your controllers">
             <h2 class="cnc-h">Your controllers</h2>
+            <p :if={@profiles == []} id="no-controllers" class="cnc-note">
+              No controllers yet. Add one below: the FluidNC sim to try things on this
+              computer, or your board (USB or Wi-Fi).
+            </p>
             <ul class="cnc-ctls" id="controllers">
               <li
                 :for={p <- @profiles}
@@ -188,12 +200,22 @@ defmodule CNCWeb.ControllersLive do
                     Change link
                   </button>
                   <button
+                    :if={p.link.type in [:fluidnc_sim, :fake_sim]}
+                    type="button"
+                    class="cnc-btn"
+                    phx-click="fork"
+                    phx-value-id={p.id}
+                    title="An independent copy to experiment with"
+                  >
+                    Fork
+                  </button>
+                  <button
                     :if={p.id != @active_id}
                     type="button"
                     class="cnc-btn cnc-btn--quiet"
                     phx-click="remove"
                     phx-value-id={p.id}
-                    data-confirm={"Remove #{p.name}? Its config stays on the controller."}
+                    data-confirm={remove_confirm(p)}
                   >
                     Remove
                   </button>
@@ -348,6 +370,17 @@ defmodule CNCWeb.ControllersLive do
   defp link_attrs(_), do: nil
 
   defp drop_blank(map, key), do: if(map[key] == "", do: Map.delete(map, key), else: map)
+
+  defp remove_confirm(%Profile{name: name, link: %{type: :fluidnc_sim}}),
+    do: "Remove #{name}? Its config and settings are deleted with it."
+
+  defp remove_confirm(%Profile{name: name, link: %{type: :fake_sim}}), do: "Remove #{name}?"
+
+  defp remove_confirm(%Profile{name: name}),
+    do: "Remove #{name} from this list? Its config stays on the board."
+
+  defp error_text(:not_forkable),
+    do: "Boards can't be forked: a board holds one config. Save config versions instead."
 
   defp error_text(:moving), do: "Wait for the machine to stop before switching controllers."
   defp error_text(:overridden), do: "CNC_LINK is set, so controllers can't be switched."

@@ -486,6 +486,11 @@ defmodule CNCWeb.MachineLive do
         </header>
 
         <div class="cnc-messages">
+          <p :if={@controller == nil and @machine.adapter == nil} class="cnc-note" id="no-controller">
+            No controller chosen.
+            <.link navigate={~p"/controllers"} class="cnc-meta-link">Add or pick one</.link>
+            to connect.
+          </p>
           <div :if={@machine.state == :alarm} class="cnc-lock" role="alert">
             <span class="cnc-lock-tag">Locked</span>
             <p>
@@ -1541,6 +1546,7 @@ defmodule CNCWeb.MachineLive do
 
   # The active controller's name; with a link override (CNC_LINK), the link.
   defp controller_name(%CNC.Controllers.Profile{name: name}, _machine), do: name
+  defp controller_name(nil, %State{adapter: nil}), do: "No controller"
   defp controller_name(nil, machine), do: adapter_label(machine.adapter)
 
   defp adapter_label("FakeSim"), do: "Fake sim"

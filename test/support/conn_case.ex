@@ -59,6 +59,12 @@ defmodule CNCWeb.ConnCase do
       Supervisor.child_spec({CNC.Machine, name: machine, topic: topic, link: nil}, id: machine)
     )
 
+    db = :"db_test_#{id}"
+
+    ExUnit.Callbacks.start_supervised!(
+      Supervisor.child_spec({CubDB, data_dir: Path.join(data_dir, "db"), name: db}, id: db)
+    )
+
     ExUnit.Callbacks.start_supervised!(
       Supervisor.child_spec(
         {CNC.Controllers,
@@ -67,7 +73,8 @@ defmodule CNCWeb.ConnCase do
          data_dir: data_dir,
          machine: machine,
          overridden?: false,
-         seed: :fake_only},
+         seed: :fake_only,
+         db: db},
         id: controllers
       )
     )
