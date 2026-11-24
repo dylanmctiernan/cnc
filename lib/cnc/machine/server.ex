@@ -223,6 +223,19 @@ defmodule CNC.Machine.Server do
       else: {:idle, send_line(d, Command.jog(delta, feed), :step), [{:reply, from, :ok}]}
   end
 
+  # Terminal input. $X/$H/$$ take the same paths as the buttons so the host's
+  # view can't drift; setting writes trigger a fresh $$. Typed motion is not
+  # covered by the jog dead-man or the travel clamp (controller limits apply).
+  defp event({:call, from}, {:raw, line}, s, d) when s in [:alarm, :idle, :busy] do
+    case String.upcase(line) do
+      "$X" -> event({:call, from}, :unlock, s, d)
+      "$H" -> event({:call, from}, :home, s, d)
+      "$$" -> {s, send_line(d, line, :settings), [{:reply, from, :ok}]}
+      "$" <> _ = upper -> {s, send_line(d, line, raw_tag(upper)), [{:reply, from, :ok}]}
+      _ -> {s, send_line(d, line, :raw), [{:reply, from, :ok}]}
+    end
+  end
+
   defp event({:call, from}, cmd, s, %{connected?: true} = d)
        when cmd in [:feed_hold, :resume, :reset] do
     byte =
@@ -305,6 +318,9 @@ defmodule CNC.Machine.Server do
 
   defp on_ack(:settings, :ok, s, d), do: {s, apply_settings(d), []}
 
+  defp on_ack(:raw_setting, :ok, s, d),
+    do: {s, send_line(%{d | settings: %{}}, Command.settings(), :settings), []}
+
   defp on_ack(:settings, {:error, _} = err, s, d) do
     Logger.warning("controller rejected $$ (#{inspect(err)}); using configured travel")
     {s, d, []}
@@ -321,6 +337,9 @@ defmodule CNC.Machine.Server do
   defp on_ack(_tag, :ok, s, d), do: {s, d, []}
 
   ## Settings
+
+  # "$130=500" writes a setting; "$130" or "$G" just read.
+  defp raw_tag(upper), do: if(String.contains?(upper, "="), do: :raw_setting, else: :raw)
 
   # Max travel $130-$132 are lengths. Mapped to ranges by convention: X/Y run
   # 0..length, Z runs -length..0 (origin front-left, Z zero at the top).

@@ -411,7 +411,7 @@ body {
   grid-column: 1;
   grid-row: 3;
   display: grid;
-  grid-template-rows: auto 15rem;
+  grid-template-rows: auto 15rem auto auto;
   border-top: 1px solid var(--line);
 }
 .cnc-console-bar {
@@ -464,6 +464,40 @@ body {
 }
 .cnc-log-row.is-realtime .cnc-log-text {
   font-weight: 600;
+}
+.cnc-term {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.25rem 0.25rem;
+  border-top: 1px solid var(--line);
+}
+.cnc-term-prompt {
+  color: var(--yellow);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.cnc-term input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--graphite);
+  color: var(--alu);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+}
+.cnc-term input:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
+}
+.cnc-term-hint {
+  padding: 0 1.25rem 0.5rem 2.75rem;
+  color: var(--steel);
+  font-size: 0.8125rem;
+}
+.cnc-term-hint.is-error {
+  color: var(--red-text);
 }
 .cnc-log-row.is-error .cnc-log-text,
 .cnc-log-row.is-alarm .cnc-log-text {

@@ -239,6 +239,52 @@ defmodule CNC.MachineTest do
     end
   end
 
+  describe "terminal (send_raw)" do
+    setup do
+      m = start_machine({CNC.FakeTransport, test: self()}, "raw-#{System.unique_integer()}")
+      assert_receive {:fake_transport, _fake, ^m}
+      %{m: m}
+    end
+
+    test "passes lines through and tracks their acks", %{m: m} do
+      idle(m)
+      assert :ok = Machine.send_raw(m, "  $G  ")
+      assert_receive {:line, "$G"}
+      assert Machine.status(m).awaiting_ack == 1
+      send(m, {:transport, :line, "error:20"})
+      assert %State{awaiting_ack: 0, last_error: {:error, 20}} = Machine.status(m)
+    end
+
+    test "$x unlocks through the normal path", %{m: m} do
+      connect(m, "Alarm", {0, 0})
+      assert :ok = Machine.send_raw(m, "$x")
+      assert_receive {:line, "$X"}
+      ok(m)
+      assert Machine.status(m).state == :idle
+    end
+
+    test "a setting write re-reads settings, so travel follows", %{m: m} do
+      idle(m)
+      :ok = Machine.send_raw(m, "$130=500")
+      assert_receive {:line, "$130=500"}
+      ok(m)
+      assert_receive {:line, "$$"}
+
+      for l <- ["$130=500.000", "$131=1250.000", "$132=100.000", "ok"],
+          do: send(m, {:transport, :line, l})
+
+      assert %State{travel: {{+0.0, 500.0}, _, _}, travel_source: :controller} = Machine.status(m)
+    end
+
+    test "refused while jogging, and for blank or multi-line input", %{m: m} do
+      idle(m)
+      :ok = Machine.jog(m, {1, 0}, :normal)
+      assert Machine.send_raw(m, "$$") == {:error, {:invalid_state, :jogging}}
+      assert Machine.send_raw(m, "   ") == {:error, :invalid_line}
+      assert Machine.send_raw(m, "G0 X1\nG0 X2") == {:error, :invalid_line}
+    end
+  end
+
   # Against the in-process simulator, end to end.
   describe "with Sim" do
     setup do
@@ -284,6 +330,11 @@ defmodule CNC.MachineTest do
       m = start_machine({CNC.Transport.Sim, travel: sim_travel}, "sim-travel")
       assert eventually(fn -> Machine.status(m).travel_source == :controller end)
       assert Machine.status(m).travel == sim_travel
+    end
+
+    test "changing travel from the terminal updates the Machine", %{m: m} do
+      :ok = Machine.send_raw(m, "$131=400")
+      assert eventually(fn -> match?({_, {+0.0, 400.0}, _}, Machine.status(m).travel) end)
     end
 
     test "disconnect and reconnect lands in :alarm", %{m: m} do

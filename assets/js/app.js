@@ -27,12 +27,13 @@ import topbar from "../vendor/topbar"
 import JogKeys from "./hooks/jog_keys"
 import BedView from "./hooks/bed_view"
 import ConsoleScroll from "./hooks/console_scroll"
+import ConsoleInput from "./hooks/console_input"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, JogKeys, BedView, ConsoleScroll},
+  hooks: {...colocatedHooks, JogKeys, BedView, ConsoleScroll, ConsoleInput},
 })
 
 // Show progress bar on live navigation and form submits

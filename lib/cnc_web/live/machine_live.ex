@@ -22,7 +22,7 @@ defmodule CNCWeb.MachineLive do
     {:ok,
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
-     |> assign(details?: false, polls?: false)
+     |> assign(details?: false, polls?: false, raw_error: nil)
      |> assign(tiers: @tiers, steps: @steps)
      |> stream_configure(:console, dom_id: &"log-#{&1.id}")
      |> stream(:console, [])
@@ -112,6 +112,22 @@ defmodule CNCWeb.MachineLive do
   def handle_event("toggle_polls", _, %{assigns: %{polls?: polls?}} = socket) do
     if polls?, do: Machine.unsubscribe_polls(), else: Machine.subscribe_polls()
     {:noreply, assign(socket, polls?: !polls?)}
+  end
+
+  def handle_event("send_raw", %{"line" => line}, socket) do
+    error =
+      case Machine.send_raw(line) do
+        :ok ->
+          nil
+
+        {:error, :invalid_line} ->
+          if String.trim(line) == "", do: nil, else: "Send one line of text."
+
+        {:error, {:invalid_state, state}} ->
+          "Can't send while #{busy_word(state)}."
+      end
+
+    {:noreply, assign(socket, raw_error: error)}
   end
 
   def handle_event("clear_console", _, socket),
@@ -317,6 +333,29 @@ defmodule CNCWeb.MachineLive do
               <span class="cnc-log-text">{entry.text}</span>
             </li>
           </ol>
+          <form
+            id="console-input"
+            class="cnc-term"
+            phx-submit="send_raw"
+            phx-hook="ConsoleInput"
+            autocomplete="off"
+          >
+            <label for="console-line" class="cnc-term-prompt">→</label>
+            <input
+              id="console-line"
+              name="line"
+              type="text"
+              spellcheck="false"
+              autocapitalize="off"
+              placeholder="Send a command to the controller, e.g. $$ or $G"
+              aria-describedby="console-hint"
+            />
+            <button type="submit" class="cnc-btn">Send</button>
+          </form>
+          <p id="console-hint" class={["cnc-term-hint", @raw_error && "is-error"]}>
+            {@raw_error ||
+              "Typed moves skip the jog safety stop and the travel limit. ↑ and ↓ recall earlier commands."}
+          </p>
         </section>
       </div>
     </Layouts.app>
@@ -453,6 +492,12 @@ defmodule CNCWeb.MachineLive do
 
   defp clock({{h, m, s}, ms}),
     do: :io_lib.format("~2..0B:~2..0B:~2..0B.~3..0B", [h, m, s, ms]) |> to_string()
+
+  defp busy_word(:jogging), do: "jogging"
+  defp busy_word(:homing), do: "homing"
+  defp busy_word(:connecting), do: "connecting"
+  defp busy_word(:disconnected), do: "disconnected"
+  defp busy_word(state), do: to_string(state)
 
   defp error_text(nil), do: nil
   defp error_text({:jog, :heartbeat_lost}), do: "Jog stopped: the keyboard stopped responding."

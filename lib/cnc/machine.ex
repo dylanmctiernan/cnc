@@ -83,5 +83,23 @@ defmodule CNC.Machine do
       when dx in -1..1 and dy in -1..1 and vector != {0, 0} and mm > 0 and mm <= 50,
       do: call(server, {:jog_step, vector, mm})
 
+  @doc """
+  Send one line typed by a person straight to the controller (a terminal).
+
+  Allowed when `:idle`, `:alarm` or `:busy`. `$X`, `$H` and `$$` behave like
+  `unlock/1`, `home/1` and the settings read; after a setting write (`$N=…`)
+  the settings are re-read so travel follows. Typed motion (`G0 X500`) is
+  **not** covered by the jog dead-man or the host's travel clamp; the
+  controller's own limits and the hardware e-stop still apply.
+  """
+  @spec send_raw(server, String.t()) :: reply | {:error, :invalid_line}
+  def send_raw(server \\ __MODULE__, line) when is_binary(line) do
+    line = String.trim(line)
+
+    if line == "" or String.contains?(line, ["\n", "\r"]) or not String.printable?(line),
+      do: {:error, :invalid_line},
+      else: call(server, {:raw, line})
+  end
+
   defp call(server, request), do: :gen_statem.call(server, request)
 end

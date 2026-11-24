@@ -96,6 +96,14 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element("#console input[type=checkbox]") |> render_click()
     assert eventually(fn -> has_element?(view, "#console-log li.is-poll") end)
 
+    view |> element("#console-input") |> render_submit(%{"line" => "$$"})
+    assert eventually(fn -> has_element?(view, "#console-log li", "$130=") end)
+
+    :ok = Machine.jog({1, 0}, :normal)
+    view |> element("#console-input") |> render_submit(%{"line" => "$$"})
+    assert render(view) =~ "Can&#39;t send while jogging."
+    Machine.jog_stop()
+
     view |> element("button", "Hide details and console") |> render_click()
     refute has_element?(view, "#console")
   end
