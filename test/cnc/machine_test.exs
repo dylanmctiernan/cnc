@@ -228,6 +228,49 @@ defmodule CNC.MachineTest do
       assert Machine.status(m).state == :idle
     end
 
+    # FluidNC ignores a jog cancel unless it's already in Jog, and runs jog
+    # lines it hadn't parsed yet. A quick tap can stop before the controller
+    # has even started: those lines then run after the cancel.
+    test "lines that run past a stop are cancelled again", %{m: m} do
+      idle(m)
+      :ok = Machine.jog(m, {1, 0}, :fast)
+      assert_receive {:line, "$J=" <> _}
+      :ok = Machine.jog_stop(m)
+      assert_receive {:rt, @jog_cancel}
+
+      # The controller hadn't started: the cancel was ignored. Now it parses
+      # the queued lines (acks) and starts jogging: cancel again, each time.
+      ok(m)
+      assert_receive {:rt, @jog_cancel}, 200
+      report(m, "Jog", {1, 0})
+      assert_receive {:rt, @jog_cancel}, 200
+
+      # Idle with nothing unacked: stopping is over.
+      for _ <- 2..Machine.Jog.max_in_flight(), do: ok(m)
+      report(m, "Idle", {2, 0})
+      _ = Machine.status(m)
+      flush_rt()
+      report(m, "Jog", {2, 0})
+      refute_receive {:rt, @jog_cancel}, 100
+    end
+
+    test "a step is not cancelled by a recent stop", %{m: m} do
+      idle(m)
+      :ok = Machine.jog(m, {1, 0}, :normal)
+      :ok = Machine.jog_stop(m)
+      assert_receive {:rt, @jog_cancel}
+      for _ <- 1..Machine.Jog.max_in_flight(), do: ok(m)
+      report(m, "Idle", {0, 0})
+      _ = Machine.status(m)
+      flush_rt()
+
+      :ok = Machine.jog_step(m, {1, 0}, 10)
+      assert_receive {:line, "$J=" <> _}
+      ok(m)
+      report(m, "Jog", {1, 0})
+      refute_receive {:rt, @jog_cancel}, 100
+    end
+
     test "jog to {0, 0} stops", %{m: m} do
       idle(m)
       :ok = Machine.jog(m, {0, 1}, :fine)
@@ -754,6 +797,15 @@ defmodule CNC.MachineTest do
     Machine.jog_heartbeat(m)
     Process.sleep(100)
     keep_alive(m, ms - 100)
+  end
+
+  # Discard real-time bytes already sent (e.g. repeat cancels while stopping).
+  defp flush_rt do
+    receive do
+      {:rt, _} -> flush_rt()
+    after
+      50 -> :ok
+    end
   end
 
   defp drain(acc \\ []) do

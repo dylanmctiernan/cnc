@@ -40,7 +40,9 @@ The FluidNC sim has no switches, so homing is off (`$22=0`): Unlock instead. Edi
 
 ### Against the real board (FluidNC over USB)
 
-Upload `fluidnc/esp32_bench.yaml` to the bench ESP32 as `config.yaml`.
+Flash the bench ESP32 with FluidNC (same pinned commit as the sim) and
+`fluidnc/esp32_bench.yaml`: `fluidnc/flash.sh /dev/cu.usbserial-0001`. The
+first session is in `docs/bench-esp32.md`.
 
 ```sh
 mix cnc.ports                                          # find the board, e.g. /dev/cu.usbserial-0001

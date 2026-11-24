@@ -266,13 +266,17 @@ Answered in Phase 1 (details in `docs/bench-log.md`):
 - ~~Acceleration realism~~ Yes: jog cancel visibly decelerates, and the planner and buffers behave like firmware. It can't home or enforce soft limits.
 - ~~50 ms polling~~ Smooth enough with client-side interpolation, by eye on the Sim and grblHAL.
 
-Open for Phase 2 (verify on the board, don't assume):
+Answered against FluidNC (sim and source, commit `97dfddc`), to confirm on the board (`docs/bench-esp32.md`):
 
-- Does FluidNC's `$$` report `$130`–`$132`? If not, travel comes from `$Config/Dump` (`axes: x: max_travel_mm`).
+- ~~Does FluidNC's `$$` report `$130`–`$132`?~~ Yes: from each axis's `max_travel_mm`.
+- ~~Does homing leave machine coordinates 0..travel?~~ It does if configured so: homing toward the negative end with `mpos_mm: 0` gives 0..`max_travel_mm`, toward the positive end −`max_travel_mm`..0 (`Limit.cpp`). The position is set after the final pull-off, so homed is exactly 0 and the switch sits `pulloff_mm` outside travel. Our configs home X/Y negative and Z up.
+- ~~Are lines received but not yet acked discarded by `0x85`?~~ **No.** FluidNC acts on a jog cancel only if it's already in Jog, and the cancel flushes the planner, not lines still waiting to be parsed. A quick tap can send lines, then a cancel that arrives before the first one starts: the cancel is ignored and the lines run. Machine now "cancels until quiet": after a stop, any jog ack or Jog report gets another `0x85`, until the controller is Idle with nothing unacked. (The native sim can't show this: its console drops bytes ≥ 0x80, so `0x85` never reaches it. A FluidNC bug in the posix console only.)
+
+Open for the board:
+
 - Does opening the USB serial port reset the ESP32 (DTR/RTS)? It would show as a banner and re-lock, which is safe but should be known.
 - After an `ALARM:N`, are unacked lines dropped (no acks will come)? Machine assumes so and forgets them.
-- Are lines received but not yet acked discarded by `0x85`? grblHAL flushes everything already planned; the in-flight cap bounds the rest to 4 increments.
-- Does homing leave machine coordinates positive (0..travel), as the travel mapping assumes?
+- Does jog cancel stop promptly on the board (the sim can't test `0x85`)?
 
 ---
 

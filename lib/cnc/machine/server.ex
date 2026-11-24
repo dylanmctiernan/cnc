@@ -75,6 +75,11 @@ defmodule CNC.Machine.Server do
     tier: :normal,
     vector: {0, 0, 0},
     in_flight: 0,
+    # Set by a stop until the controller is idle with nothing unacked. FluidNC
+    # ignores a jog cancel unless it's already in Jog, and doesn't discard
+    # jog lines it hasn't parsed yet: a line can run after the cancel.
+    # While stopping, any sign of one (a jog ack, a Jog report) cancels again.
+    stopping?: false,
     pending: :queue.new(),
     console: Console.new(),
     settings: %{},
@@ -213,7 +218,7 @@ defmodule CNC.Machine.Server do
 
   defp event({:timeout, :poll}, :poll, s, d) do
     d = if d.connected?, do: realtime(d, Realtime.status()), else: d
-    {s, d, [poll(if s == :jogging, do: @poll_jog_ms, else: @poll_ms)]}
+    {s, d, [poll(if s == :jogging or d.stopping?, do: @poll_jog_ms, else: @poll_ms)]}
   end
 
   defp event({:timeout, :jog_tick}, :tick, :jogging, d),
@@ -221,7 +226,7 @@ defmodule CNC.Machine.Server do
 
   defp event({:timeout, :deadman}, :expired, :jogging, d) do
     d = realtime(d, Realtime.jog_cancel())
-    {:idle, %{d | last_error: {:jog, :heartbeat_lost}}, []}
+    {:idle, %{d | last_error: {:jog, :heartbeat_lost}, stopping?: true}, []}
   end
 
   defp event({:timeout, :watchdog}, :expired, s, d) when s not in [:disconnected, :homing] do
@@ -254,7 +259,15 @@ defmodule CNC.Machine.Server do
     do: event({:call, from}, :jog_stop, s, d)
 
   defp event({:call, from}, {:jog, vector, tier}, :idle, d) do
-    d = %{d | vector: vector, tier: tier, target: d.status.mpos, last_error: nil}
+    d = %{
+      d
+      | vector: vector,
+        tier: tier,
+        target: d.status.mpos,
+        last_error: nil,
+        stopping?: false
+    }
+
     {:jogging, d, [{:reply, from, :ok}]}
   end
 
@@ -267,6 +280,7 @@ defmodule CNC.Machine.Server do
   # Stopping is never refused.
   defp event({:call, from}, :jog_stop, s, d) do
     d = if d.connected?, do: realtime(d, Realtime.jog_cancel()), else: d
+    d = if s == :jogging, do: %{d | stopping?: true}, else: d
     {if(s == :jogging, do: :idle, else: s), d, [{:reply, from, :ok}]}
   end
 
@@ -406,6 +420,14 @@ defmodule CNC.Machine.Server do
   defp on_status(s, :alarm, d) when s != :alarm, do: {:alarm, %{d | alarm: :reported}, []}
   defp on_status(s, _, d) when s in [:alarm, :homing], do: {s, d, []}
 
+  # Stopping: a Jog report means a line ran past the cancel; cancel again.
+  # Idle with nothing unacked means it's over.
+  defp on_status(:idle, :jog, %{stopping?: true} = d),
+    do: {:idle, realtime(d, Realtime.jog_cancel()), []}
+
+  defp on_status(:idle, :idle, %{stopping?: true, in_flight: 0} = d),
+    do: {:idle, %{d | stopping?: false}, []}
+
   defp on_status(s, reported, d) when s in [:idle, :jogging] and reported in [:idle, :jog],
     do: {s, d, []}
 
@@ -425,7 +447,10 @@ defmodule CNC.Machine.Server do
 
       {{:value, tag}, rest} ->
         in_flight = if tag == :jog, do: d.in_flight - 1, else: d.in_flight
-        on_ack(tag, result, s, %{d | pending: rest, in_flight: in_flight})
+        d = %{d | pending: rest, in_flight: in_flight}
+        # A jog line planned after a stop's cancel: cancel it too.
+        d = if tag == :jog and d.stopping?, do: realtime(d, Realtime.jog_cancel()), else: d
+        on_ack(tag, result, s, d)
     end
   end
 
@@ -660,7 +685,8 @@ defmodule CNC.Machine.Server do
     %{d | console: Console.push(d.console, entry)}
   end
 
-  defp flush_pending(d), do: %{end_session(d) | pending: :queue.new(), in_flight: 0}
+  defp flush_pending(d),
+    do: %{end_session(d) | pending: :queue.new(), in_flight: 0, stopping?: false}
 
   ## Publishing (≤ 1 per @publish_ms; the latest snapshot always goes out)
 
