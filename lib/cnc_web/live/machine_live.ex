@@ -27,7 +27,7 @@ defmodule CNCWeb.MachineLive do
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, zeroing?: false)
-     |> assign(bed_open?: false)
+     |> assign(more?: false)
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
@@ -96,8 +96,10 @@ defmodule CNCWeb.MachineLive do
   end
 
   # Phones: zero buttons are tucked away until asked for.
-  # Phones: the mini-map opens the full bed view as a sheet.
-  def handle_event("toggle_bed", _, socket), do: {:noreply, update(socket, :bed_open?, &(!&1))}
+  # Phones: the More menu. Its open state lives here, not in the DOM, so
+  # status updates don't close it.
+  def handle_event("toggle_more", _, socket), do: {:noreply, update(socket, :more?, &(!&1))}
+  def handle_event("close_more", _, socket), do: {:noreply, assign(socket, more?: false)}
 
   def handle_event("toggle_zeroing", _, socket), do: {:noreply, update(socket, :zeroing?, &(!&1))}
 
@@ -192,7 +194,7 @@ defmodule CNCWeb.MachineLive do
     <Layouts.app flash={@flash}>
       <div id="jog-keys" phx-hook="JogKeys" data-tier={@tier} hidden></div>
 
-      <div class={["cnc", @details? && "has-console", @bed_open? && "show-bed"]}>
+      <div class={["cnc", @details? && "has-console"]}>
         <header class="cnc-bar">
           <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_label(@machine)}
@@ -263,27 +265,72 @@ defmodule CNCWeb.MachineLive do
             </button>
           </div>
           <%!-- Phones: secondary actions behind a menu (Stop and Resume live in the dock) --%>
-          <details class="cnc-more">
-            <summary class="cnc-btn">More</summary>
-            <div class="cnc-more-menu">
+          <div class="cnc-more">
+            <button
+              type="button"
+              class="cnc-btn"
+              phx-click="toggle_more"
+              aria-expanded={to_string(@more?)}
+              aria-controls="more-menu"
+            >
+              More
+            </button>
+            <div :if={@more?} id="more-menu" class="cnc-more-menu" phx-click-away="close_more">
               <p class="cnc-sub">{firmware_label(@machine.controller_info)}</p>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("toggle_zeroing") |> JS.push("close_more")}
+              >
+                {if @zeroing?, do: "Done zeroing", else: "Zero…"}
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("frame") |> JS.push("close_more")}
+                phx-value-frame={if frame(@machine, @frame) == :work, do: "machine", else: "work"}
+                disabled={is_nil(@machine.wpos)}
+              >
+                {if frame(@machine, @frame) == :work,
+                  do: "Show machine position",
+                  else: "Show work position"}
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={
+                  JS.dispatch("bed:clear-trail", to: "#bed")
+                  |> JS.push("close_more")
+                }
+              >
+                Clear trail
+              </button>
               <.link navigate={~p"/settings"} class="cnc-btn">Settings</.link>
-              <button type="button" class="cnc-btn" phx-click="toggle_details">
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("toggle_details") |> JS.push("close_more")}
+              >
                 {if @details?, do: "Hide console", else: "Console"}
               </button>
               <button
                 type="button"
                 class="cnc-btn"
-                phx-click="feed_hold"
+                phx-click={JS.push("feed_hold") |> JS.push("close_more")}
                 disabled={!@machine.connected?}
               >
                 Hold
               </button>
-              <button type="button" class="cnc-btn" phx-click="reset" disabled={!@machine.connected?}>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("reset") |> JS.push("close_more")}
+                disabled={!@machine.connected?}
+              >
                 Reset controller
               </button>
             </div>
-          </details>
+          </div>
         </header>
 
         <div class="cnc-messages">
@@ -339,14 +386,6 @@ defmodule CNCWeb.MachineLive do
             >
               Clear trail
             </button>
-            <button
-              type="button"
-              class="cnc-btn cnc-bed-close"
-              phx-click="toggle_bed"
-              data-haptic="light"
-            >
-              Close
-            </button>
           </div>
           <div
             id="bed"
@@ -396,28 +435,6 @@ defmodule CNCWeb.MachineLive do
                 {if @zeroing?, do: "Done", else: "Zero…"}
               </button>
             </div>
-            <%!-- Short phone screens: a live mini-map of the bed; tap for the full view --%>
-            <button
-              type="button"
-              class="cnc-minimap"
-              phx-click="toggle_bed"
-              data-haptic="light"
-              aria-label="Show the bed view"
-            >
-              <div
-                id="minimap"
-                phx-hook="BedView"
-                phx-update="ignore"
-                data-mini="true"
-                data-travel={travel_json(@machine.travel)}
-                data-x={pos(@machine, 0)}
-                data-y={pos(@machine, 1)}
-                data-z={pos(@machine, 2)}
-                data-state={@machine.state}
-              >
-                <canvas aria-hidden="true"></canvas>
-              </div>
-            </button>
             <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
               <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
               <span class="cnc-num">{fmt(axis_value(shown(@machine, @frame), i))}</span>
@@ -474,7 +491,12 @@ defmodule CNCWeb.MachineLive do
               >
                 {label}
               </button>
-              <button type="button" class="cnc-btn" disabled title="Comes with job streaming">
+              <button
+                type="button"
+                class="cnc-btn cnc-path-mode"
+                disabled
+                title="Comes with job streaming"
+              >
                 Path
               </button>
             </div>
@@ -623,6 +645,9 @@ defmodule CNCWeb.MachineLive do
             </label>
             <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_console">
               Clear
+            </button>
+            <button type="button" class="cnc-btn cnc-console-close" phx-click="toggle_details">
+              Close
             </button>
             <button
               type="button"

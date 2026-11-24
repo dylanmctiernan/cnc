@@ -121,7 +121,7 @@ defmodule CNCWeb.MachineLiveTest do
              15_000
            )
 
-    view |> element("button[phx-value-frame=machine]") |> render_click()
+    view |> element(".cnc-dro button[phx-value-frame=machine]") |> render_click()
     assert render(view) =~ "Machine position"
   end
 
@@ -143,19 +143,23 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element(".cnc-dock button", "Stop") |> render_click()
     assert Machine.status().state == :idle
 
+    view |> element(".cnc-more > button", "More") |> render_click()
     assert has_element?(view, ".cnc-more a", "Settings")
     assert has_element?(view, ".cnc-more button", "Reset controller")
+    view |> element(".cnc-more button", "Reset controller") |> render_click()
+    refute has_element?(view, "#more-menu")
     view |> element(".cnc-dro button", "Zero…") |> render_click()
     assert has_element?(view, ".cnc-dro.is-zeroing")
   end
 
-  test "phones: the mini-map opens the bed sheet and Close returns", %{conn: conn} do
+  test "phones: More holds zeroing, work/machine and clear trail", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    assert has_element?(view, ".cnc-minimap #minimap[data-mini=true]")
-    view |> element(".cnc-minimap") |> render_click()
-    assert has_element?(view, ".cnc.show-bed")
-    view |> element(".cnc-bed-close") |> render_click()
-    refute has_element?(view, ".cnc.show-bed")
+    view |> element(".cnc-more > button", "More") |> render_click()
+    view |> element(".cnc-more button", "Zero…") |> render_click()
+    view |> element(".cnc-more > button", "More") |> render_click()
+    assert has_element?(view, ".cnc-dro.is-zeroing")
+    assert has_element?(view, ".cnc-more button", "Done zeroing")
+    assert has_element?(view, ".cnc-more button", "Clear trail")
   end
 
   test "haptics: Stop ticks strong, steps and modes light", %{conn: conn} do
