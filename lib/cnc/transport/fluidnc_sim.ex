@@ -66,12 +66,18 @@ defmodule CNC.Transport.FluidNCSim do
   wait "$child"
   """
 
-  # FluidNC's settings store (native_nvs/) holds one file per setting; these
-  # two say "off" (a single 0 byte). Written before every start.
-  defp no_network(run_dir) do
+  @doc """
+  Set up a directory for FluidNC to run in: `config` as its config.yaml, and
+  its telnet/HTTP servers switched off. FluidNC's settings store
+  (native_nvs/) holds one file per setting; these two say "off" (a single 0
+  byte). Done before every start.
+  """
+  def prepare_run_dir(run_dir, config) do
     nvs = Path.join(run_dir, "native_nvs")
 
-    with :ok <- File.mkdir_p(nvs),
+    with :ok <- File.mkdir_p(Path.join(run_dir, "native_localfs")),
+         {:ok, _} <- File.copy(config, Path.join([run_dir, "native_localfs", "config.yaml"])),
+         :ok <- File.mkdir_p(nvs),
          :ok <- File.write(Path.join(nvs, "Telnet.Enable"), <<0>>) do
       File.write(Path.join(nvs, "HTTP.Enable"), <<0>>)
     end
@@ -90,9 +96,7 @@ defmodule CNC.Transport.FluidNCSim do
     run_dir = Keyword.get(opts, :run_dir, Path.expand(".fluidnc/run"))
 
     with true <- File.exists?(exe) || {:error, {:not_built, exe}},
-         :ok <- File.mkdir_p(Path.join(run_dir, "native_localfs")),
-         {:ok, _} <- File.copy(config, Path.join([run_dir, "native_localfs", "config.yaml"])),
-         :ok <- no_network(run_dir) do
+         :ok <- prepare_run_dir(run_dir, config) do
       port =
         Port.open({:spawn_executable, "/bin/sh"}, [
           :binary,
