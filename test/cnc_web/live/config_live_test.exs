@@ -13,18 +13,28 @@ defmodule CNCWeb.ConfigLiveTest do
     %{conn: conn, m: m, cnc: cnc, id: active.id}
   end
 
-  test "reached from the controllers page", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/controllers")
+  test "reached from the machine screen and the controllers page", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
 
     {:ok, _view, _} =
       view
-      |> element("#configure-#{id}")
+      |> element("#to-configuration")
       |> render_click()
-      |> follow_redirect(conn, ~p"/controllers/#{id}/configuration")
+      |> follow_redirect(conn, ~p"/configuration")
+
+    {:ok, view, _} = live(conn, ~p"/controllers")
+
+    {:ok, config, _} =
+      view
+      |> element("#to-configuration")
+      |> render_click()
+      |> follow_redirect(conn, ~p"/configuration")
+
+    assert has_element?(config, "#config-controller", "Fake sim")
   end
 
   test "first visit: the Default profile, in use; change a setting", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    {:ok, view, _} = live(conn, ~p"/configuration")
     assert has_element?(view, "#in-use", "Default")
     # A fresh sim runs its board's config: the Default made from it matches
     assert has_element?(view, "#check-ok")
@@ -65,7 +75,7 @@ defmodule CNCWeb.ConfigLiveTest do
   end
 
   test "cancelling the dialog changes nothing", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    {:ok, view, _} = live(conn, ~p"/configuration")
     view |> element("#edit-current") |> render_click()
 
     view
@@ -79,7 +89,7 @@ defmodule CNCWeb.ConfigLiveTest do
   end
 
   test "make a profile, switch to it; the controllers page shows it", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    {:ok, view, _} = live(conn, ~p"/configuration")
     view |> form("#new-profile-form", new: %{name: "Fast"}) |> render_submit()
     fast = profile_id(view, "Fast")
 
@@ -97,7 +107,7 @@ defmodule CNCWeb.ConfigLiveTest do
     conn: conn,
     id: id
   } do
-    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    {:ok, view, _} = live(conn, ~p"/configuration")
 
     for rate <- ["2500", "2600"] do
       view |> element("#edit-current") |> render_click()
@@ -130,7 +140,7 @@ defmodule CNCWeb.ConfigLiveTest do
   end
 
   test "other profiles: view, edit (stored only), then switch to it", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    {:ok, view, _} = live(conn, ~p"/configuration")
     assert has_element?(view, "#no-other-profiles")
     view |> form("#new-profile-form", new: %{name: "Slow"}) |> render_submit()
     slow = profile_id(view, "Slow")
@@ -176,7 +186,7 @@ defmodule CNCWeb.ConfigLiveTest do
     conn: conn,
     id: id
   } do
-    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    {:ok, view, _} = live(conn, ~p"/configuration")
     refute has_element?(view, "#advanced[open]")
     view |> element("#advanced summary") |> render_click()
     view |> element("#view-file") |> render_click()
@@ -212,19 +222,20 @@ defmodule CNCWeb.ConfigLiveTest do
     assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
   end
 
-  test "a controller not in use offers to connect it", %{conn: conn, cnc: cnc, m: m} do
-    {:ok, other} = Controllers.add(cnc.controllers, %{name: "Other", board: :fake_sim})
-    {:ok, view, _} = live(conn, ~p"/controllers/#{other.id}/configuration")
+  test "with no controller in use it says so; it follows the one connected", %{
+    conn: conn,
+    cnc: cnc,
+    m: m
+  } do
+    :ok = Controllers.deactivate(cnc.controllers)
+    {:ok, view, _} = live(conn, ~p"/configuration")
     assert has_element?(view, "#config-not-connected")
 
-    view |> element("#config-connect") |> render_click()
+    {:ok, other} = Controllers.add(cnc.controllers, %{name: "Other", board: :fake_sim})
+    :ok = Controllers.select(cnc.controllers, other.id)
     assert eventually(fn -> Machine.status(m).state == :alarm end, 3000)
+    assert eventually(fn -> has_element?(view, "#config-controller", "Other") end, 3000)
     assert eventually(fn -> has_element?(view, "#current") end, 3000)
-  end
-
-  test "an unknown controller goes back to the list", %{conn: conn} do
-    assert {:error, {:live_redirect, %{to: "/controllers"}}} =
-             live(conn, ~p"/controllers/zzzz/configuration")
   end
 
   defp approve(view), do: view |> element("#approve") |> render_click()

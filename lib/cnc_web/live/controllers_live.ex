@@ -128,6 +128,9 @@ defmodule CNCWeb.ControllersLive do
         <header class="cnc-bar">
           <.link navigate={~p"/"} class="cnc-btn">Back to machine</.link>
           <h1 class="cnc-page-title">Controllers</h1>
+          <.link navigate={~p"/configuration"} class="cnc-btn" id="to-configuration">
+            Configuration
+          </.link>
           <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_word(@machine.state)}
           </div>
@@ -211,13 +214,6 @@ defmodule CNCWeb.ControllersLive do
                   >
                     Disconnect
                   </button>
-                  <.link
-                    navigate={~p"/controllers/#{p.id}/configuration"}
-                    class="cnc-btn"
-                    id={"configure-#{p.id}"}
-                  >
-                    Configuration
-                  </.link>
                   <button
                     :if={length(Boards.links(p.board)) > 1 or p.link.type in [:serial, :tcp]}
                     type="button"

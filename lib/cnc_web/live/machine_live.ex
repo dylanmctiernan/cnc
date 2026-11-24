@@ -410,6 +410,9 @@ defmodule CNCWeb.MachineLive do
             <button type="button" id="open-file" class="cnc-btn" phx-click="open_file">
               Open file
             </button>
+            <.link navigate={~p"/configuration"} class="cnc-btn" id="to-configuration">
+              Configuration
+            </.link>
             <button
               type="button"
               class="cnc-btn"
@@ -468,6 +471,7 @@ defmodule CNCWeb.MachineLive do
               <.link navigate={~p"/controllers"} class="cnc-btn">
                 Controller: {controller_name(@controller, @machine)}
               </.link>
+              <.link navigate={~p"/configuration"} class="cnc-btn">Configuration</.link>
               <button
                 type="button"
                 class="cnc-btn"

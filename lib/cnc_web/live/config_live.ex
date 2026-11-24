@@ -1,12 +1,13 @@
 defmodule CNCWeb.ConfigLive do
   @moduledoc """
-  One controller's configuration (`/controllers/:id/configuration`), by
-  profile (`CNC.Controllers.Profiles`): which profile is in use (from the
-  controller), switching and making profiles, changing the values of the
-  one in use (applied straight away), what the controller runs that the
-  profile doesn't (keep or put back), the wiring check, and under Advanced
-  the files themselves (view, load one directly as an override, history).
-  Needs that controller connected; otherwise it offers to connect it.
+  The machine's configuration (`/configuration`, `CNC.Configuration`): its
+  build, its profiles and the wiring of the controller in use, together. The
+  current configuration on top (read-only, Edit to change values, with the
+  check against the controller's file), the other profiles below (switch,
+  view, diff, edit, history), histories, and under Advanced the file itself
+  and overrides (a file of your own). Every change is shown as a diff and
+  approved first. With no controller in use, it points to the Controllers
+  page.
   """
   use CNCWeb, :live_view
 
@@ -26,7 +27,7 @@ defmodule CNCWeb.ConfigLive do
   ]
 
   @impl true
-  def mount(%{"id" => id}, session, socket) do
+  def mount(_params, session, socket) do
     cnc = CNCWeb.Instance.from_session(session)
 
     if connected?(socket) do
@@ -34,31 +35,22 @@ defmodule CNCWeb.ConfigLive do
       Controllers.subscribe(cnc.controllers_topic)
     end
 
-    case Enum.find(Controllers.list(cnc.controllers), &(&1.id == id)) do
-      nil ->
-        {:ok,
-         socket
-         |> put_flash(:error, "There's no controller #{id}.")
-         |> push_navigate(to: ~p"/controllers")}
-
-      controller ->
-        {:ok,
-         socket
-         |> assign(page_title: "#{controller.name} configuration", cnc: cnc)
-         |> assign(controller: controller, machine: Machine.status(cnc.machine))
-         |> assign(profiles: [], check: nil, settings: %{}, paths: [], drift: [])
-         |> assign(wiring: %{checked: 0, differences: []}, files: [], history: [])
-         |> assign(viewing: nil, text: nil, renaming: nil, error: nil)
-         |> assign(working: nil, field_errors: %{}, other: %{"path" => "", "value" => ""})
-         |> assign(new: %{"name" => "", "from" => ""}, advanced?: false)
-         |> assign(editing_current?: false, editing_profile: nil, showing_profile: nil)
-         |> assign(diffing_profile: nil, pending: nil)
-         |> assign(expanded: MapSet.new(), history_for: nil, paste: "")
-         |> assign(build_history: [], wiring_history: [], current: %{})
-         |> allow_upload(:config_file, accept: :any, max_entries: 1, max_file_size: 256_000)
-         |> refresh_active()
-         |> maybe_load()}
-    end
+    {:ok,
+     socket
+     |> assign(page_title: "Configuration", cnc: cnc, controller: nil)
+     |> assign(machine: Machine.status(cnc.machine))
+     |> assign(profiles: [], check: nil, settings: %{}, paths: [], drift: [])
+     |> assign(wiring: %{checked: 0, differences: []}, files: [], history: [])
+     |> assign(viewing: nil, text: nil, renaming: nil, error: nil)
+     |> assign(working: nil, field_errors: %{}, other: %{"path" => "", "value" => ""})
+     |> assign(new: %{"name" => "", "from" => ""}, advanced?: false)
+     |> assign(editing_current?: false, editing_profile: nil, showing_profile: nil)
+     |> assign(diffing_profile: nil, pending: nil)
+     |> assign(expanded: MapSet.new(), history_for: nil, paste: "")
+     |> assign(build_history: [], wiring_history: [], current: %{})
+     |> allow_upload(:config_file, accept: :any, max_entries: 1, max_file_size: 256_000)
+     |> refresh_active()
+     |> maybe_load()}
   end
 
   @impl true
@@ -72,16 +64,17 @@ defmodule CNCWeb.ConfigLive do
       else: {:noreply, socket}
   end
 
-  def handle_info({:controllers, _}, socket), do: {:noreply, refresh_active(socket)}
+  # Another controller connected (or none): its wiring and file now.
+  def handle_info({:controllers, _}, socket) do
+    before = socket.assigns.controller
+    socket = refresh_active(socket)
 
-  @impl true
-  def handle_event("connect", _, socket) do
-    case Controllers.select(socket.assigns.cnc.controllers, socket.assigns.controller.id) do
-      :ok -> {:noreply, socket |> assign(error: nil) |> refresh_active()}
-      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
-    end
+    if socket.assigns.controller != before,
+      do: {:noreply, socket |> assign(check: nil, working: nil) |> maybe_load()},
+      else: {:noreply, socket}
   end
 
+  @impl true
   ## Profiles
 
   ## Asking first: what would change, approved in a dialog
@@ -471,10 +464,11 @@ defmodule CNCWeb.ConfigLive do
     <Layouts.app flash={@flash}>
       <div class="cnc-page">
         <header class="cnc-bar">
-          <.link navigate={~p"/controllers"} class="cnc-btn" id="back-to-controllers">
+          <.link navigate={~p"/"} class="cnc-btn" id="back-to-machine">Back to machine</.link>
+          <h1 class="cnc-page-title">Configuration</h1>
+          <.link navigate={~p"/controllers"} class="cnc-btn" id="to-controllers">
             Controllers
           </.link>
-          <h1 class="cnc-page-title">{@controller.name} configuration</h1>
           <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_word(@machine.state)}
           </div>
@@ -482,32 +476,30 @@ defmodule CNCWeb.ConfigLive do
 
         <main class="cnc-settings">
           <p class="cnc-sub cnc-settings-intro">
-            The controller's configuration is its wiring, the machine's build and a profile
-            (how the machine is run). The selected profile is written to
-            the controller, with the board's wiring, as its config file. Make profiles to try
-            variations and switch between them (the controller restarts and comes back
-            locked). A changed value applies straight away (wiring after a restart).
+            The machine's configuration: its build (how it's put together), its profiles (how
+            it's run) and the wiring of the controller in use. The controller's config file is
+            its wiring, the build and the selected profile. Make profiles to try variations
+            and switch between them (the controller restarts and comes back locked). A changed
+            value applies straight away (wiring after a restart).
+          </p>
+          <p :if={@controller} class="cnc-sub" id="config-controller">
+            Controller in use: <strong>{@controller.name}</strong>
+            ({CNC.Boards.label(@controller.board)})
           </p>
 
           <p :if={@error} id="config-error" class="cnc-set-error">{@error}</p>
 
           <%= cond do %>
-            <% not @active? -> %>
+            <% @controller == nil -> %>
               <section class="cnc-set-group" id="config-not-connected">
                 <p class="cnc-note">
-                  {@controller.name} isn't the controller in use. Connect it to see and change
-                  its configuration.
+                  No controller is in use. Connect one to see its config file and change the
+                  configuration; the build and profiles are kept here and written to it.
                 </p>
                 <div class="cnc-row">
-                  <button
-                    type="button"
-                    id="config-connect"
-                    class="cnc-btn cnc-btn--primary"
-                    phx-click="connect"
-                    disabled={@machine.moving?}
-                  >
-                    Connect {@controller.name}
-                  </button>
+                  <.link navigate={~p"/controllers"} class="cnc-btn cnc-btn--primary">
+                    Go to Controllers
+                  </.link>
                 </div>
               </section>
             <% @working -> %>
@@ -1514,15 +1506,15 @@ defmodule CNCWeb.ConfigLive do
 
   defp machine(socket), do: socket.assigns.cnc.machine
 
-  # This controller in use and the machine ready for commands.
+  # A controller in use and the machine ready for commands.
   defp ready?(assigns),
     do:
-      assigns.active? and assigns.machine.connected? and assigns.machine.state in [:alarm, :idle]
+      assigns.controller != nil and assigns.machine.connected? and
+        assigns.machine.state in [:alarm, :idle]
 
-  defp refresh_active(socket) do
-    active = Controllers.active(socket.assigns.cnc.controllers)
-    assign(socket, active?: active != nil and active.id == socket.assigns.controller.id)
-  end
+  # The configuration is the machine's; the controller is whichever is in use.
+  defp refresh_active(socket),
+    do: assign(socket, controller: Controllers.active(socket.assigns.cnc.controllers))
 
   defp maybe_load(socket) do
     %{cnc: cnc, controller: c} = socket.assigns
