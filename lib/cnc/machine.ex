@@ -176,6 +176,14 @@ defmodule CNC.Machine do
   def go_to_work_zero(server \\ __MODULE__), do: call(server, :go_to_work_zero)
 
   @doc """
+  Connect to another controller: `{adapter, opts}` (a `CNC.Link` adapter),
+  or `nil` for none. Stops the current link first (with a jog cancel if
+  it's connected); the new controller starts locked, as on any connect.
+  """
+  @spec connect(server, {module, keyword} | nil) :: :ok
+  def connect(server \\ __MODULE__, link), do: call(server, {:connect, link})
+
+  @doc """
   Send one line typed by a person straight to the controller (a terminal).
 
   Allowed when `:idle`, `:alarm` or `:busy`. `$X`, `$H` and `$$` behave like

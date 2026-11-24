@@ -16,6 +16,8 @@ defmodule CNCApp do
       {Phoenix.PubSub, name: CNC.PubSub},
       CNC.Machine,
       CNC.Program,
+      # After Machine: connects it to the active controller
+      CNC.Controllers,
       CNCWeb.Endpoint
     ]
 

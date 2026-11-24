@@ -1,0 +1,235 @@
+defmodule CNC.Controllers do
+  @moduledoc """
+  The controllers you have and which one the machine is using. A controller
+  profile (`CNC.Controllers.Profile`) is a board plus a link; its
+  configuration lives on the controller itself.
+
+  Profiles and the active choice are kept in `<data_dir>/controllers.json`.
+  On first run it holds a FluidNC sim (when built, and active) and the fake
+  sim. Selecting a profile tells `CNC.Machine` to connect to it (the
+  controller starts locked, as on any connect).
+
+  A link set in config (`config :cnc, :link`, e.g. from `CNC_LINK=…`)
+  overrides the active profile: the machine uses it directly and selecting
+  is refused, so scripts and tests stay explicit.
+
+  Each FluidNC sim profile runs in its own folder under the data dir, so its
+  config and settings persist across restarts, like a board's flash.
+  """
+  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Profile]
+  use GenServer
+  require Logger
+
+  alias CNC.Boards, as: Board
+  alias CNC.Controllers.Profile
+  alias CNC.Machine
+
+  @topic "controllers"
+
+  def start_link(opts \\ []) do
+    {name, opts} = Keyword.pop(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
+  end
+
+  @doc "All profiles, in the order added."
+  def list(server \\ __MODULE__), do: GenServer.call(server, :list)
+
+  @doc "The active profile, or nil (none yet, or a link override is in use)."
+  def active(server \\ __MODULE__), do: GenServer.call(server, :active)
+
+  @doc "True when a configured link overrides the profiles (CNC_LINK, tests)."
+  def overridden?(server \\ __MODULE__), do: GenServer.call(server, :overridden?)
+
+  @doc "Make a profile active and connect the machine to it."
+  @spec select(GenServer.server(), String.t()) :: :ok | {:error, :not_found | :overridden}
+  def select(server \\ __MODULE__, id), do: GenServer.call(server, {:select, id}, 10_000)
+
+  @doc """
+  Add a profile: `%{name: ..., board: ..., link: ...}`. The link defaults to
+  the board's usual kind (a serial link needs its `port`).
+  """
+  @spec add(GenServer.server(), map) :: {:ok, Profile.t()} | {:error, term}
+  def add(server \\ __MODULE__, attrs), do: GenServer.call(server, {:add, attrs})
+
+  @doc "Receive `{:controllers, %{profiles: [...], active: id | nil}}` on changes."
+  def subscribe, do: Phoenix.PubSub.subscribe(CNC.PubSub, @topic)
+
+  @doc """
+  The `CNC.Link` adapter and options for a profile. A FluidNC sim gets its
+  own run folder under `data_dir`, starting from its board's default config.
+  """
+  @spec link_spec(Profile.t(), Path.t()) :: {module, keyword}
+  def link_spec(%Profile{link: %{type: :fluidnc_sim}} = p, data_dir) do
+    {CNC.Link.FluidNCSim,
+     run_dir: Path.join([data_dir, "controllers", p.id, "fluidnc"]), config: Board.config(p.board)}
+  end
+
+  def link_spec(%Profile{link: %{type: :fake_sim}}, _), do: {CNC.Link.FakeSim, []}
+
+  def link_spec(%Profile{link: %{type: :serial, port: port, speed: speed}}, _),
+    do: {CNC.Link.UART, port: port, speed: speed}
+
+  def link_spec(%Profile{link: %{type: :tcp, host: host, port: port}}, _),
+    do: {CNC.Link.TCP, host: host, port: port}
+
+  ## Server
+
+  @impl true
+  def init(opts) do
+    data_dir =
+      Keyword.get_lazy(opts, :data_dir, fn -> Application.fetch_env!(:cnc, :data_dir) end)
+
+    s = %{
+      data_dir: data_dir,
+      machine: Keyword.get(opts, :machine, Machine),
+      overridden?:
+        Keyword.get_lazy(opts, :overridden?, fn -> Application.get_env(:cnc, :link) != nil end),
+      profiles: [],
+      active: nil
+    }
+
+    s = load(s)
+    if not s.overridden?, do: connect_active(s)
+    {:ok, s}
+  end
+
+  @impl true
+  def handle_call(:list, _from, s), do: {:reply, s.profiles, s}
+  def handle_call(:active, _from, %{overridden?: true} = s), do: {:reply, nil, s}
+  def handle_call(:active, _from, s), do: {:reply, find(s, s.active), s}
+  def handle_call(:overridden?, _from, s), do: {:reply, s.overridden?, s}
+
+  def handle_call({:select, _id}, _from, %{overridden?: true} = s),
+    do: {:reply, {:error, :overridden}, s}
+
+  def handle_call({:select, id}, _from, s) do
+    case find(s, id) do
+      nil ->
+        {:reply, {:error, :not_found}, s}
+
+      _profile ->
+        s = save(%{s | active: id})
+        connect_active(s)
+        {:reply, :ok, s}
+    end
+  end
+
+  def handle_call({:add, attrs}, _from, s) do
+    case build(attrs) do
+      {:ok, profile} ->
+        s = save(%{s | profiles: s.profiles ++ [profile]})
+        {:reply, {:ok, profile}, s}
+
+      error ->
+        {:reply, error, s}
+    end
+  end
+
+  defp build(%{name: name, board: board} = attrs) when is_binary(name) and name != "" do
+    if board in Board.ids() do
+      link = Map.get(attrs, :link) || %{type: Board.default_link(board)}
+
+      case link do
+        %{type: :serial} = l when not is_map_key(l, :port) ->
+          {:error, :serial_port_required}
+
+        %{type: :serial} = l ->
+          {:ok,
+           %Profile{
+             id: Profile.new_id(),
+             name: name,
+             board: board,
+             link: Map.put_new(l, :speed, 115_200)
+           }}
+
+        %{type: :tcp} = l ->
+          {:ok,
+           %Profile{
+             id: Profile.new_id(),
+             name: name,
+             board: board,
+             link: Map.put_new(l, :port, 23)
+           }}
+
+        %{type: type} = l when type in [:fluidnc_sim, :fake_sim] ->
+          {:ok, %Profile{id: Profile.new_id(), name: name, board: board, link: l}}
+
+        _ ->
+          {:error, :invalid_link}
+      end
+    else
+      {:error, :unknown_board}
+    end
+  end
+
+  defp build(_), do: {:error, :invalid}
+
+  defp find(s, id), do: Enum.find(s.profiles, &(&1.id == id))
+
+  defp connect_active(s) do
+    case find(s, s.active) do
+      nil -> :ok
+      profile -> Machine.connect(s.machine, link_spec(profile, s.data_dir))
+    end
+  end
+
+  ## Storage
+
+  defp file(s), do: Path.join(s.data_dir, "controllers.json")
+
+  defp load(s) do
+    with {:ok, json} <- File.read(file(s)),
+         {:ok, %{"profiles" => raw} = data} <- Jason.decode(json) do
+      profiles = for map <- raw, {:ok, p} <- [Profile.from_json(map)], do: p
+      %{s | profiles: profiles, active: data["active"]}
+    else
+      {:error, :enoent} ->
+        seed(s)
+
+      other ->
+        Logger.warning("controllers.json unreadable (#{inspect(other)}); starting fresh")
+        seed(s)
+    end
+  end
+
+  # First run: the FluidNC sim when it's built (and active), and the fake sim.
+  defp seed(s) do
+    sim? = CNC.Link.FluidNCSim.available?()
+
+    fake = %Profile{
+      id: Profile.new_id(),
+      name: "Fake sim",
+      board: :fluidnc_sim,
+      link: %{type: :fake_sim}
+    }
+
+    sim =
+      if sim?,
+        do: [
+          %Profile{
+            id: Profile.new_id(),
+            name: "FluidNC sim",
+            board: :fluidnc_sim,
+            link: %{type: :fluidnc_sim}
+          }
+        ],
+        else: []
+
+    profiles = sim ++ [fake]
+    save(%{s | profiles: profiles, active: hd(profiles).id})
+  end
+
+  defp save(s) do
+    File.mkdir_p!(s.data_dir)
+    json = Jason.encode!(%{profiles: s.profiles, active: s.active}, pretty: true)
+    File.write!(file(s), json)
+
+    Phoenix.PubSub.broadcast(
+      CNC.PubSub,
+      @topic,
+      {:controllers, %{profiles: s.profiles, active: s.active}}
+    )
+
+    s
+  end
+end

@@ -117,11 +117,12 @@ defmodule CNC.Machine.Server do
         Keyword.get(machine, :max_rate, {3000.0, 3000.0, 1200.0})
       end)
 
+    # link: nil starts with no controller (CNC.Controllers connects one).
     {adapter, adapter_opts} =
-      Keyword.get_lazy(opts, :link, fn ->
-        config = Application.fetch_env!(:cnc, :link)
-        {Keyword.fetch!(config, :adapter), Keyword.get(config, :opts, [])}
-      end)
+      case Keyword.get_lazy(opts, :link, fn -> app_link() end) do
+        nil -> {nil, []}
+        {adapter, adapter_opts} -> {adapter, adapter_opts}
+      end
 
     {:ok, :disconnected,
      %__MODULE__{
@@ -193,6 +194,10 @@ defmodule CNC.Machine.Server do
 
   ## Connection
 
+  # No controller chosen yet: stay disconnected until connect/2.
+  defp event(:state_timeout, :reconnect, :disconnected, %{adapter: nil} = d),
+    do: {:disconnected, d, []}
+
   defp event(:state_timeout, :reconnect, :disconnected, d) do
     case d.adapter.start_link(self(), d.adapter_opts) do
       {:ok, pid} ->
@@ -209,6 +214,18 @@ defmodule CNC.Machine.Server do
   defp event(:info, {:link, :connected}, s, d), do: {s, %{d | connected?: true}, []}
   defp event(:info, {:link, :disconnected}, _s, d), do: {:disconnected, d, []}
   defp event(:info, {:EXIT, pid, _}, _s, %{link: pid} = d), do: {:disconnected, d, []}
+
+  # Switch to another controller (or none). Stop the current link first
+  # (jog cancel if it's up), wait for it to exit and drop anything it sent,
+  # so a late line from the old controller can't be read as the new one's.
+  # Then connect straight away; the new controller starts locked as always.
+  defp event({:call, from}, {:connect, link}, _s, d) do
+    d = stop_link(d)
+    {adapter, adapter_opts} = link || {nil, []}
+    d = %{d | adapter: adapter, adapter_opts: adapter_opts, backoff: 0}
+    {:disconnected, d, [{:reply, from, :ok}, {:state_timeout, 0, :reconnect}]}
+  end
+
   defp event(:info, {:EXIT, _stale, _}, s, d), do: {s, d, []}
 
   defp event(:info, {:link, :line, line}, s, d) do
@@ -784,7 +801,7 @@ defmodule CNC.Machine.Server do
     %State{
       state: s,
       connected?: d.connected? and s != :disconnected,
-      adapter: d.adapter |> Module.split() |> List.last(),
+      adapter: d.adapter && d.adapter |> Module.split() |> List.last(),
       controller: d.status && d.status.state,
       substate: d.status && d.status.substate,
       mpos: d.status && d.status.mpos,
@@ -808,6 +825,41 @@ defmodule CNC.Machine.Server do
       settings_rev: d.settings_rev,
       settings_write: d.settings_write
     }
+  end
+
+  ## Switching links
+
+  defp app_link do
+    case Application.get_env(:cnc, :link) do
+      nil -> nil
+      config -> {Keyword.fetch!(config, :adapter), Keyword.get(config, :opts, [])}
+    end
+  end
+
+  defp stop_link(%{link: nil} = d), do: d
+
+  defp stop_link(%{link: pid} = d) do
+    if d.connected?, do: d.adapter.write_realtime(pid, Realtime.jog_cancel())
+    :ok = d.adapter.close(pid)
+
+    receive do
+      {:EXIT, ^pid, _} -> :ok
+    after
+      2_000 -> Process.exit(pid, :kill)
+    end
+
+    flush_link_messages()
+    %{d | link: nil, connected?: false}
+  end
+
+  # Messages a link sent before exiting arrive before its exit signal.
+  defp flush_link_messages do
+    receive do
+      {:link, _, _} -> flush_link_messages()
+      {:link, _} -> flush_link_messages()
+    after
+      0 -> :ok
+    end
   end
 
   ## Speed

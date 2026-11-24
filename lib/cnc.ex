@@ -9,9 +9,24 @@ defmodule CNC do
     * `CNC.Machine` — the only process that owns a link to the controller; state + jogging.
     * `CNC.GCode`   — pure G-code → toolpath, for previews.
     * `CNC.Program` — the loaded G-code file, shared by every device.
+    * `CNC.Boards`      — the catalogue of boards (hardware types) and their
+      defaults, including the config template. Pure data.
+    * `CNC.Controllers` — your controllers (profiles: a board + a link, the
+      config on the controller) and which one the machine is using.
 
   Only `CNC.Machine` is exported, so callers outside the domain (the web UI)
   cannot reach the protocol or the link.
   """
-  use Boundary, deps: [], exports: [Machine, Machine.State, Settings, Program, GCode.Program]
+  use Boundary,
+    deps: [],
+    exports: [
+      Machine,
+      Machine.State,
+      Settings,
+      Program,
+      GCode.Program,
+      Controllers,
+      Controllers.Profile,
+      Boards
+    ]
 end

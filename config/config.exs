@@ -22,8 +22,9 @@ config :cnc, CNCWeb.Endpoint,
   pubsub_server: CNC.PubSub,
   live_view: [signing_salt: "resrjewd"]
 
-# Controller link. Dev/test default is the in-process simulator.
-config :cnc, :link, adapter: CNC.Link.FakeSim, opts: []
+# The app's own data: controller profiles (CNC.Controllers), their config
+# history, each FluidNC sim's folder. Git-ignored in dev; /data on the Pi.
+config :cnc, :data_dir, Path.expand("../.cnc", __DIR__)
 
 # The machine's physical travel in mm (machine coordinates, origin front-left
 # after homing). After connecting, the Machine reads the controller's

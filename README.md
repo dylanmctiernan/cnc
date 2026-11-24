@@ -29,20 +29,26 @@ mix phx.server      # http://localhost:4000
 mix test
 ```
 
-`mix phx.server` drives FluidNC running natively on this computer (the real
-firmware with `priv/fluidnc/sim.yaml`; nothing physical moves). Without the
-build it falls back to the fake sim (a simple imitation built into the app);
-`CNC_LINK=fake` forces that. Tests use the fake sim; the `test/cnc/fluidnc_sim_*_test.exs` modules
-runs against native FluidNC when it's built.
+`mix phx.server` drives the active **controller profile** (`CNC.Controllers`,
+kept in `.cnc/controllers.json`). The first run adds "FluidNC sim" (the real
+firmware running on this computer; nothing physical moves) when it's built,
+and "Fake sim" (a simple imitation built into the app); the first is active.
+`CNC_LINK=fake|uart|tcp` bypasses the profiles. Tests use the fake sim; the
+`test/cnc/fluidnc_sim_*_test.exs` modules run against native FluidNC when
+it's built.
 
-The FluidNC sim has no switches, so homing is off (`$22=0`): Unlock instead. Edits to
-`priv/fluidnc/sim.yaml` apply when the app restarts (FluidNC reads it at start).
+Every controller starts from one config: this machine
+(`priv/fluidnc/config.yaml.eex`: travel, speeds, homing) with its board's
+pins (`CNC.Boards`: FluidNC sim, ESP32 DevKit, 6x). After that the
+controller's own config is the source of truth: a FluidNC sim keeps it in
+`.cnc/controllers/<id>/fluidnc/`, a board in its flash. The FluidNC sim has
+no switches, so homing is off (`$22=0`): Unlock instead.
 
 ### Against the real board (FluidNC over USB)
 
-Flash the bench ESP32 with FluidNC (same pinned commit as the sim) and
-`priv/fluidnc/esp32_bench.yaml`: `mix cnc.fluidnc.flash /dev/cu.usbserial-0001`. The
-first session is in `docs/bench-esp32.md`.
+Flash the bench ESP32 with FluidNC (same pinned commit as the sim) and its
+board's default config: `mix cnc.fluidnc.flash /dev/cu.usbserial-0001`
+(`--board six_x` for the 6x). The first session is in `docs/bench-esp32.md`.
 
 ```sh
 mix cnc.ports                                          # find the board, e.g. /dev/cu.usbserial-0001

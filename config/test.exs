@@ -23,3 +23,8 @@ config :phoenix,
 
 # Screen tests run their own machine and program store (CNCWeb.Instance).
 config :cnc, instance_from_session: true
+
+# Tests use the fake sim directly (a link override, so CNC.Controllers
+# leaves the app's machine alone) and never touch the dev data folder.
+config :cnc, :link, adapter: CNC.Link.FakeSim, opts: []
+config :cnc, :data_dir, Path.join(System.tmp_dir!(), "cnc-test-data")

@@ -39,33 +39,16 @@ if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
   config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
 end
 
-# Controller link. Dev uses native FluidNC once built (mix cnc.fluidnc.build),
-# else the fake sim; tests always use the fake sim (config.exs).
-#   CNC_LINK=fluidnc mix phx.server         # native FluidNC, priv/fluidnc/sim.yaml
+# Controller link override. Normally the active controller profile is used
+# (CNC.Controllers: pick one in Settings); setting CNC_LINK bypasses the
+# profiles for scripts and one-offs. Tests always use the fake sim (test.exs).
 #   CNC_LINK=fake mix phx.server            # fake sim (built in)
 #   CNC_LINK=tcp CNC_TCP=fluidnc.local:23 mix phx.server   # FluidNC over Wi-Fi (telnet)
 #   CNC_LINK=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
-#   CNC_UART_SPEED=115200                        # default; see `mix cnc.ports`
-fluidnc_built? = File.exists?(Path.expand("../.fluidnc/bin/fluidnc", __DIR__))
-
-link =
-  System.get_env("CNC_LINK") ||
-    if(config_env() == :dev and fluidnc_built?, do: "fluidnc")
-
-case link do
+#   CNC_UART_SPEED=115200                   # default; see `mix cnc.ports`
+case System.get_env("CNC_LINK") do
   nil ->
     :ok
-
-  "fluidnc" ->
-    root = Path.expand("..", __DIR__)
-
-    config :cnc, :link,
-      adapter: CNC.Link.FluidNCSim,
-      opts: [
-        executable: Path.join(root, ".fluidnc/bin/fluidnc"),
-        config: Path.join(root, "priv/fluidnc/sim.yaml"),
-        run_dir: Path.join(root, ".fluidnc/run")
-      ]
 
   "fake" ->
     config :cnc, :link, adapter: CNC.Link.FakeSim, opts: []
@@ -89,7 +72,7 @@ case link do
       opts: [port: port, speed: String.to_integer(System.get_env("CNC_UART_SPEED", "115200"))]
 
   other ->
-    raise "unknown CNC_LINK #{inspect(other)} (expected fluidnc, fake, tcp or uart)"
+    raise "unknown CNC_LINK #{inspect(other)} (expected fake, tcp or uart)"
 end
 
 if config_env() == :prod do

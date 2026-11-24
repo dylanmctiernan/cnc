@@ -1,7 +1,7 @@
 defmodule CNC.FluidNCSim.ConnectTest do
   @moduledoc """
   CNC.Machine against real FluidNC firmware running natively
-  (`CNC.Link.FluidNCSim`), with this machine's `priv/fluidnc/sim.yaml`.
+  (`CNC.Link.FluidNCSim`), with the sim board's config from `CNC.Boards`.
 
   Runs when FluidNC has been built (`mix cnc.fluidnc.build`); skipped otherwise
   (see test_helper.exs). Each test starts its own FluidNC in a temporary

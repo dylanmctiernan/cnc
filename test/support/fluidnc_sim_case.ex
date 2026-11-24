@@ -27,7 +27,7 @@ defmodule CNC.FluidNCSimCase do
     link =
       {CNC.Link.FluidNCSim,
        executable: Path.expand(".fluidnc/bin/fluidnc"),
-       config: Path.expand("priv/fluidnc/sim.yaml"),
+       config: CNC.Boards.config(:fluidnc_sim),
        run_dir: dir}
 
     topic = "fluidnc-#{System.unique_integer([:positive])}"

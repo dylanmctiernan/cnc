@@ -3,16 +3,18 @@ defmodule CNC.Link.FluidNCSim do
   Link to FluidNC running natively on this computer (see `mix cnc.fluidnc.build`):
   the real firmware as a child program, spoken to over its stdin/stdout.
 
-  Each connect starts a fresh FluidNC with the current `priv/fluidnc/sim.yaml`,
-  so a config edit applies on the next reconnect (an app restart; the UI's
-  Reset is a soft reset inside FluidNC and doesn't reload it). FluidNC keeps its `$` settings (NVS) in the run directory.
+  Each connect starts FluidNC on its run directory's config.yaml (the
+  controller's own, kept across restarts); FluidNC reads it at start, and
+  its `$` settings (NVS) live in the same folder.
 
   Options:
 
     * `:executable` — the FluidNC binary (default `.fluidnc/bin/fluidnc`)
-    * `:config` — the config.yaml to run (default `priv/fluidnc/sim.yaml`)
-    * `:run_dir` — working directory for FluidNC's files (default
-      `.fluidnc/run`); one per concurrently running instance
+    * `:config` — the starting config.yaml (text), written only if the run
+      directory has none yet: after that the sim's own file is the source of
+      truth and persists, like a board's flash
+    * `:run_dir` — FluidNC's own folder (config, settings); one per
+      controller (`CNC.Controllers` gives each FluidNC sim profile its own)
 
   Stock FluidNC, set up from outside rather than patched:
 
@@ -67,19 +69,30 @@ defmodule CNC.Link.FluidNCSim do
   """
 
   @doc """
-  Set up a directory for FluidNC to run in: `config` as its config.yaml, and
-  its telnet/HTTP servers switched off. FluidNC's settings store
+  Set up a directory for FluidNC to run in: `config` as its config.yaml if it
+  has none yet, and its telnet/HTTP servers switched off. FluidNC's settings store
   (native_nvs/) holds one file per setting; these two say "off" (a single 0
   byte). Done before every start.
   """
   def prepare_run_dir(run_dir, config) do
     nvs = Path.join(run_dir, "native_nvs")
+    config_file = Path.join([run_dir, "native_localfs", "config.yaml"])
 
-    with :ok <- File.mkdir_p(Path.join(run_dir, "native_localfs")),
-         {:ok, _} <- File.copy(config, Path.join([run_dir, "native_localfs", "config.yaml"])),
+    with :ok <- File.mkdir_p(Path.dirname(config_file)),
+         :ok <- first_config(config_file, config),
          :ok <- File.mkdir_p(nvs),
          :ok <- File.write(Path.join(nvs, "Telnet.Enable"), <<0>>) do
       File.write(Path.join(nvs, "HTTP.Enable"), <<0>>)
+    end
+  end
+
+  # The config is the controller's own once it exists (edits and $CD saves
+  # persist, like a board's flash): only a missing one is written.
+  defp first_config(file, config) do
+    cond do
+      File.exists?(file) -> :ok
+      is_binary(config) -> File.write(file, config)
+      true -> {:error, :no_config}
     end
   end
 
@@ -92,7 +105,7 @@ defmodule CNC.Link.FluidNCSim do
   @impl GenServer
   def handle_continue(:start, %{opts: opts} = s) do
     exe = Keyword.get(opts, :executable, default_executable())
-    config = Keyword.get(opts, :config, Application.app_dir(:cnc, "priv/fluidnc/sim.yaml"))
+    config = Keyword.get(opts, :config)
     run_dir = Keyword.get(opts, :run_dir, Path.expand(".fluidnc/run"))
 
     with true <- File.exists?(exe) || {:error, {:not_built, exe}},

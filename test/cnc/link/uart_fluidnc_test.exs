@@ -17,7 +17,7 @@ defmodule CNC.Link.UARTFluidNCTest do
   @bridge Path.expand("../../support/fluidnc_serial.py", __DIR__)
 
   setup %{tmp_dir: dir} do
-    :ok = FluidNCSim.prepare_run_dir(dir, Path.expand("priv/fluidnc/sim.yaml"))
+    :ok = FluidNCSim.prepare_run_dir(dir, CNC.Boards.config(:fluidnc_sim))
     python = System.find_executable("python3") || flunk("python3 is needed for the pty bridge")
 
     bridge =

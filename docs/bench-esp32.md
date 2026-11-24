@@ -29,19 +29,20 @@ mix cnc.fluidnc.flash /dev/cu.usbserial-0001
 
 This builds FluidNC from the same pinned commit as the FluidNC sim (the
 `noradio` build: serial only, no Wi-Fi access point), writes it, then writes
-`priv/fluidnc/esp32_bench.yaml` to the board as `config.yaml`. The first run
+the ESP32 DevKit board's default config (`CNC.Boards`: this machine with the
+bench pins) to the board as `config.yaml`. The first run
 downloads the ESP32 toolchain (a few minutes).
 
 If it stops at `Connecting....`, hold the board's **BOOT** button until the
 upload starts. Nothing else should have the port open (stop the dev server
 if it's on `uart`).
 
-Changing the config later: edit `esp32_bench.yaml` and run the same command
-(firmware is rebuilt only if needed).
+After this the board's own config is the one that counts: change it from the
+app's Settings (coming next) rather than by reflashing.
 
 ## 3. Wire the buttons
 
-Pins come from `esp32_bench.yaml`. Use the labels printed on the board; on
+Pins come from the ESP32 DevKit board in `CNC.Boards` (`lib/cnc/boards.ex`). Use the labels printed on the board; on
 30-pin boards GPIO 16 and 17 are often labelled **RX2** and **TX2**.
 
 | Function | GPIO | Wire |
