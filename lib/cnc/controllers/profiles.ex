@@ -5,8 +5,11 @@ defmodule CNC.Controllers.Profiles do
 
   Profiles live in the app (CubDB, per controller), with the one selected.
   The controller holds a single config file, `config.yaml`, generated from
-  the selected profile: the board's default config (`CNC.Boards.config/1`,
-  which owns the wiring) with the profile's values set (`render/2`).
+  the selected profile: the board's wiring (`CNC.Boards.config/1`) and
+  exactly the profile's values (`render/2`), nothing merged in; a setting
+  the profile doesn't have is left to FluidNC's own default. The board's
+  default values are only a starting point, copied into a profile made
+  from them.
   Switching writes the other profile into that file and restarts the
   controller.
 
@@ -103,8 +106,9 @@ defmodule CNC.Controllers.Profiles do
          %{} = profile <- selected(db, controller.id) || {:error, :no_profile},
          {:ok, text} <- Config.show(machine, loaded || @config_file) do
       in_file = editable(text)
-      # What the profile writes: the board's defaults plus its values.
-      expected = editable(render(controller.board, profile))
+      # What the profile writes: exactly its values (wiring is checked
+      # against the board on its own).
+      expected = profile.values
 
       differences =
         for %{path: path, from: want, to: have} <- diff_maps(expected, in_file),
@@ -443,17 +447,26 @@ defmodule CNC.Controllers.Profiles do
   @spec diff(atom, profile, profile) :: [
           %{path: String.t(), from: String.t() | nil, to: String.t() | nil}
         ]
-  def diff(board, a, b), do: diff_maps(editable(render(board, a)), editable(render(board, b)))
+  def diff(_board, a, b), do: diff_maps(a.values, b.values)
 
-  @doc "The file a profile makes for a board: the board's default config with the profile's values."
+  @doc """
+  The file a profile makes for a board: the board's wiring (and its name
+  and the machine's), then exactly the profile's values. Nothing else from
+  the board's default config: a setting the profile doesn't have is left
+  out, and FluidNC uses its own default for it.
+  """
   @spec render(atom, profile) :: String.t()
   def render(board, profile) do
+    wiring =
+      board
+      |> Boards.config()
+      |> Yaml.parse()
+      |> Yaml.filter(&(not editable?(&1)))
+
     tree =
       profile.values
       |> Enum.sort()
-      |> Enum.reduce(Yaml.parse(Boards.config(board)), fn {path, v}, tree ->
-        Yaml.put(tree, path, v)
-      end)
+      |> Enum.reduce(wiring, fn {path, v}, tree -> Yaml.put(tree, path, v) end)
 
     """
     # Written by the CNC app: board #{Boards.label(board)}, profile "#{profile.name}".

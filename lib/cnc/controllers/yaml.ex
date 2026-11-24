@@ -89,6 +89,31 @@ defmodule CNC.Controllers.Yaml do
     Enum.find_index(tree, fn {k, _} -> String.downcase(k) == key end)
   end
 
+  @doc """
+  Keep only the values whose path `keep?` accepts. Maps left empty go,
+  except those that were empty to begin with (`kinematics: Cartesian:`,
+  which mean something by being there).
+  """
+  @spec filter(tree, (String.t() -> boolean)) :: tree
+  def filter(tree, keep?, prefix \\ []) do
+    for {key, node} <- tree,
+        kept = filter_node(node, keep?, prefix ++ [String.downcase(key)]),
+        kept != nil,
+        do: {key, kept}
+  end
+
+  defp filter_node({:value, _} = v, keep?, path),
+    do: if(keep?.(Enum.join(path, "/")), do: v, else: nil)
+
+  defp filter_node({:map, []} = empty, _keep?, _path), do: empty
+
+  defp filter_node({:map, children}, keep?, path) do
+    case filter(children, keep?, path) do
+      [] -> nil
+      kept -> {:map, kept}
+    end
+  end
+
   @doc "Write a tree out as config text."
   @spec render(tree) :: String.t()
   def render(tree), do: IO.iodata_to_binary(render(tree, ""))

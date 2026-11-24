@@ -16,11 +16,35 @@ defmodule CNC.Controllers.ProfilesTest do
              "name: R\naxes:\n  X:\n    steps_per_mm: 100\n    homing:\n      cycle: 2\nstart:\n  must_home: false\n"
 
     assert Yaml.parse(Yaml.render(tree)) == tree
+
+    # Filtering keeps what's asked for, and empty maps that were empty
+    t = Yaml.parse("a: 1\nk:\n  C:\nx:\n  y: 2\n  z: 3\n")
+    assert Yaml.render(Yaml.filter(t, &(&1 == "x/z"))) == "k:\n  C:\nx:\n  z: 3\n"
     # Every board's config survives a round trip
     for board <- CNC.Boards.ids() do
       text = CNC.Boards.config(board)
       assert Config.parse(Yaml.render(Yaml.parse(text))) == Config.parse(text)
     end
+  end
+
+  test "a profile's file: the board's wiring and exactly its values, nothing merged in" do
+    profile = %{
+      id: "p",
+      name: "Tiny",
+      values: %{"axes/x/max_rate_mm_per_min" => "2000"},
+      history: []
+    }
+
+    text = Profiles.render(:esp32_devkit, profile)
+    values = Map.new(Config.parse(text))
+
+    assert values["axes/x/max_rate_mm_per_min"] == "2000"
+    # Wiring from the board
+    assert values["axes/x/motor0/standard_stepper/step_pin"] == "gpio.25"
+    assert values["stepping/engine"] == "RMT"
+    # The board's tuning defaults aren't filled in
+    refute Map.has_key?(values, "axes/y/max_rate_mm_per_min")
+    refute Map.has_key?(values, "axes/x/acceleration_mm_per_sec2")
   end
 
   # A machine on the fake sim and a database, per test.
