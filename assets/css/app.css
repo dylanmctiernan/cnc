@@ -2927,3 +2927,145 @@ body {
   min-height: 100dvh;
 }
 
+/* The pendant: one task, the whole screen, big targets */
+.ui-pendant {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 100dvh;
+  padding: max(var(--space-3), env(safe-area-inset-top)) var(--space-4)
+    max(var(--space-3), env(safe-area-inset-bottom));
+}
+.ui-pendant-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ui-pendant-top .ui-pill {
+  min-height: 2.5rem;
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+}
+.ui-pendant-pos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+.ui-axis-x {
+  color: var(--x);
+}
+.ui-axis-y {
+  color: var(--y);
+}
+.ui-axis-z {
+  color: var(--z);
+}
+.ui-pendant-locked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.ui-pendant-locked p {
+  margin: 0;
+}
+.ui-pendant-speed {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+.ui-seg {
+  display: grid;
+  justify-items: center;
+  gap: 0.1rem;
+  min-height: 3.25rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  text-transform: capitalize;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.ui-seg.is-on {
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--surface-0);
+}
+.ui-seg-unit {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  text-transform: none;
+  opacity: 0.8;
+}
+/* The joystick fills what's left: the stick as big as fits, Z beside it */
+.ui-pendant-joy {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(4.5rem, 18vw, 6.5rem);
+  align-content: center;
+  justify-items: center;
+  gap: var(--space-4);
+  min-height: 0;
+}
+.ui-pendant-joy {
+  align-items: stretch;
+}
+.ui-pendant-joy .cnc-joy-pad {
+  align-self: center;
+  width: min(100%, 34rem, calc(100dvh - 16rem));
+  min-width: 12rem;
+  height: auto;
+  aspect-ratio: 1;
+}
+/* Z as tall as the stick */
+.ui-pendant-joy .cnc-joy-z {
+  align-self: center;
+  width: 100%;
+  height: min(34rem, calc(100dvh - 16rem), calc(100vw - 9rem));
+  min-height: 12rem;
+}
+.ui-pendant-foot {
+  text-align: center;
+}
+.ui-pendant-back {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* Tablets and phones on their side: controls left, the stick right */
+@media (orientation: landscape) and (min-width: 40rem) {
+  .ui-pendant {
+    display: grid;
+    grid-template-columns: minmax(16rem, 1fr) minmax(0, 1.4fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    column-gap: var(--space-8);
+  }
+  .ui-pendant-top,
+  .ui-pendant-locked,
+  .ui-pendant-foot {
+    grid-column: 1 / -1;
+  }
+  .ui-pendant-speed {
+    grid-column: 1;
+    grid-template-columns: 1fr;
+    align-self: start;
+  }
+  .ui-pendant-joy {
+    grid-column: 2;
+    grid-row: 2 / 4;
+  }
+}
+

@@ -14,7 +14,7 @@ defmodule CNCWeb.MachineLive do
   alias CNC.{Machine, Program}
   alias CNC.Machine.State
 
-  @tiers [fine: {5, 1}, normal: {20, 5}, fast: {50, 10}]
+  @tiers CNCWeb.Jog.tiers()
   @steps [0.1, 1, 10, 50]
   @console_rows 200
   @fade_ms 8_000
@@ -100,7 +100,8 @@ defmodule CNCWeb.MachineLive do
 
   @impl true
   def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier} = params, socket) do
-    with {:ok, vector} <- analog_vector(x, y, params["z"] || 0), {:ok, tier} <- tier(tier) do
+    with {:ok, vector} <- CNCWeb.Jog.analog_vector(x, y, params["z"] || 0),
+         {:ok, tier} <- CNCWeb.Jog.tier(tier) do
       Machine.jog(srv(socket), vector, tier)
     end
 
@@ -131,7 +132,7 @@ defmodule CNCWeb.MachineLive do
   end
 
   def handle_event("tier", %{"tier" => tier}, socket) do
-    case tier(tier) do
+    case CNCWeb.Jog.tier(tier) do
       {:ok, tier} -> {:noreply, socket |> assign(tier: tier) |> push_pos(socket.assigns.machine)}
       :error -> {:noreply, socket}
     end
@@ -1479,21 +1480,6 @@ defmodule CNCWeb.MachineLive do
   end
 
   # Joystick or keys: each component a number in -1..1.
-  defp analog_vector(x, y, z) do
-    with {:ok, x} <- analog(x), {:ok, y} <- analog(y), {:ok, z} <- analog(z), do: {:ok, {x, y, z}}
-  end
-
-  defp analog(v) when is_number(v) and v >= -1 and v <= 1, do: {:ok, v}
-
-  defp analog(v) when is_binary(v) do
-    case Float.parse(v) do
-      {f, ""} -> analog(f)
-      _ -> :error
-    end
-  end
-
-  defp analog(_), do: :error
-
   # Step buttons: whole directions only.
   defp vector(x, y, z) do
     with {x, ""} when x in -1..1 <- Integer.parse(to_string(x)),
@@ -1502,13 +1488,6 @@ defmodule CNCWeb.MachineLive do
       {:ok, {x, y, z}}
     else
       _ -> :error
-    end
-  end
-
-  defp tier(tier) do
-    case Enum.find(Keyword.keys(@tiers), &(to_string(&1) == tier)) do
-      nil -> :error
-      tier -> {:ok, tier}
     end
   end
 

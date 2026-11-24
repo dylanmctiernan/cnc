@@ -31,6 +31,11 @@ defmodule CNCWeb.Router do
       live "/configuration/file", ConfigLive, :file
       live "/configuration/history", ConfigLive, :history
     end
+
+    # The pendant: a phone or tablet as a jog controller, no rail
+    live_session :pendant, on_mount: [CNCWeb.Pin, CNCWeb.Shell] do
+      live "/pendant", PendantLive
+    end
   end
 
   # Other scopes may use custom stacks.
