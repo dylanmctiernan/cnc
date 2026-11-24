@@ -28,13 +28,14 @@ import JogKeys from "./hooks/jog_keys"
 import BedView from "./hooks/bed_view"
 import ConsoleScroll from "./hooks/console_scroll"
 import ConsoleInput from "./hooks/console_input"
+import Joystick from "./hooks/joystick"
 import {mountPinPad} from "./pin_pad"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, JogKeys, BedView, ConsoleScroll, ConsoleInput},
+  hooks: {...colocatedHooks, JogKeys, BedView, ConsoleScroll, ConsoleInput, Joystick},
 })
 
 // Show progress bar on live navigation and form submits

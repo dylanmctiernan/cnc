@@ -65,6 +65,20 @@ defmodule CNCWeb.MachineLiveTest do
     render_hook(view, "jog_stop", %{})
   end
 
+  test "joystick: analog jog events drive the machine proportionally", %{conn: conn} do
+    {:ok, view, html} = live(conn, ~p"/")
+    assert html =~ ~s(phx-hook="Joystick")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> Machine.status().state == :idle end)
+
+    render_hook(view, "jog", %{"x" => 0.5, "y" => -0.24, "z" => 0, "tier" => "normal"})
+    assert Machine.status().jog == {0.5, -0.24, 0}
+    render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => 0.3, "tier" => "normal"})
+    assert Machine.status().jog == {0, 0, 0.3}
+    render_hook(view, "jog_stop", %{})
+    assert Machine.status().state == :idle
+  end
+
   test "rejects malformed jog input", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
@@ -73,6 +87,8 @@ defmodule CNCWeb.MachineLiveTest do
     render_hook(view, "jog", %{"x" => 5, "y" => 0, "tier" => "fast"})
     render_hook(view, "jog", %{"x" => 1, "y" => 0, "tier" => "ludicrous"})
     render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => 2, "tier" => "fast"})
+    render_hook(view, "jog", %{"x" => -1.01, "y" => 0, "tier" => "fast"})
+    render_hook(view, "jog", %{"x" => "nope", "y" => 0, "tier" => "fast"})
     assert Machine.status().state == :idle
   end
 

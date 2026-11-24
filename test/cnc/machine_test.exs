@@ -83,13 +83,32 @@ defmodule CNC.MachineTest do
       assert_receive {:line, "$J=G91 G21 Z-0.250 F300"}
     end
 
-    test "X+Z moves keep Z within its tier", %{m: m} do
+    test "X+Z moves: each axis at its own tier", %{m: m} do
       idle(m)
       idle_at(m, {100, 100}, -50)
       :ok = Machine.jog(m, {1, 0, 1}, :fast)
-      # 45° in XZ: Z capped at 10 mm/s → path 14.14 mm/s (F849), so each axis
-      # moves 0.5 mm per 50 ms tick: Z at exactly its 10 mm/s.
-      assert_receive {:line, "$J=G91 G21 X0.500 Z0.500 F849"}
+      # X at 50 mm/s, Z at 10 mm/s: 2.5 and 0.5 mm per 50 ms tick, path F3059.
+      assert_receive {:line, "$J=G91 G21 X2.500 Z0.500 F3059"}
+    end
+
+    test "analog vectors jog proportionally", %{m: m} do
+      idle(m)
+      idle_at(m, {100, 100}, -50)
+      :ok = Machine.jog(m, {-0.25, 0.0, 0.0}, :normal)
+      # a quarter of 20 mm/s: 0.25 mm per tick at F300
+      assert_receive {:line, "$J=G91 G21 X-0.250 F300"}
+      assert Machine.status(m).jog == {-0.25, 0.0, 0.0}
+
+      :ok = Machine.jog(m, {0.0, 0.0, 0.0}, :normal)
+      assert_receive {:rt, 0x85}, 50
+      assert_raise FunctionClauseError, fn -> Machine.jog(m, {1.5, 0, 0}, :normal) end
+    end
+
+    test "a barely-deflected stick sends nothing rather than F0", %{m: m} do
+      idle(m)
+      idle_at(m, {100, 100}, -50)
+      :ok = Machine.jog(m, {0.001, 0.0, 0.0}, :fine)
+      refute_receive {:line, "$J=" <> _}, 150
     end
 
     test "Z can't jog above the top of travel", %{m: m} do
@@ -280,7 +299,7 @@ defmodule CNC.MachineTest do
       assert Machine.status(m).state == :idle
     end
 
-    test "connecting gets longer to see the first status", %{m: m, fake: fake} do
+    test "connecting gets longer to see the first status", %{fake: fake} do
       Process.sleep(300)
       assert Process.alive?(fake)
       ref = Process.monitor(fake)

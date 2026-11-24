@@ -39,8 +39,24 @@ defmodule CNC.Machine.JogTest do
   end
 
   test "increment normalises diagonals to tier speed" do
-    {{dx, dy, +0.0}, 3000} = Jog.increment({1, -1, 0}, :fast)
+    {{dx, dy, +0.0}, feed} = Jog.increment({1, -1, 0}, :fast)
     assert_in_delta :math.sqrt(dx * dx + dy * dy), 2.5, 1.0e-9
+    assert_in_delta feed, 3000, 1.0e-6
+  end
+
+  test "analog: speed is proportional to deflection" do
+    {{dx, +0.0, +0.0}, feed} = Jog.increment({0.5, 0, 0}, :normal)
+    assert_in_delta dx, 0.5, 1.0e-9
+    assert_in_delta feed, 600, 1.0e-6
+
+    {{dx, dy, +0.0}, _} = Jog.increment({0.3, 0.4, 0}, :normal)
+    assert_in_delta :math.sqrt(dx * dx + dy * dy), 0.5, 1.0e-9
+  end
+
+  test "each axis keeps its own tier when combined" do
+    {{dx, +0.0, dz}, _} = Jog.increment({1, 0, 1}, :fast)
+    assert_in_delta dx, 2.5, 1.0e-9
+    assert_in_delta dz, 0.5, 1.0e-9
   end
 
   test "Z-only increments use the Z tier" do
@@ -48,12 +64,17 @@ defmodule CNC.Machine.JogTest do
     assert_in_delta dz, 0.5, 1.0e-9
   end
 
-  property "the Z component never exceeds the Z tier speed" do
-    check all v <- tuple({member_of(-1..1), member_of(-1..1), member_of(-1..1)}),
-              v != {0, 0, 0},
+  property "no axis group exceeds its tier speed; feed matches the move" do
+    check all v <-
+                tuple(
+                  {float(min: -1.0, max: 1.0), float(min: -1.0, max: 1.0),
+                   float(min: -1.0, max: 1.0)}
+                ),
+              v != {0.0, 0.0, 0.0},
               tier <- member_of([:fine, :normal, :fast]) do
-      {{_, _, dz}, feed} = Jog.increment(v, tier)
+      {{dx, dy, dz}, feed} = Jog.increment(v, tier)
       assert abs(dz) / Jog.dt_ms() * 1000 <= Jog.z_speed(tier) + 1.0e-9
+      assert :math.sqrt(dx * dx + dy * dy) / Jog.dt_ms() * 1000 <= Jog.speed(tier) + 1.0e-9
 
       assert_in_delta Jog.magnitude(elem(Jog.increment(v, tier), 0)) / Jog.dt_ms() * 1000 * 60,
                       feed,

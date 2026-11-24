@@ -4,12 +4,15 @@ defmodule CNC.Machine.Jog do
   travel clamp.
 
   Continuous jogging sends one short relative move per tick (`dt`). Each
-  increment is `speed × dt` long at `speed` feed, so it takes exactly `dt` to
-  execute and the controller never holds more than a few ticks of motion.
+  increment covers what the axes travel in `dt` at the commanded velocity,
+  so it takes exactly `dt` to execute and the controller never holds more
+  than a few ticks of motion.
 
-  Z has its own, slower tiers. A move with a Z component is slowed so Z never
-  exceeds its tier speed; X/Y-only moves run at the X/Y tier speed, with
-  diagonals normalised so path speed equals the tier speed.
+  A jog vector is analog: each component in `-1..1` (keys give -1/0/1, a
+  joystick anything in between). X/Y velocity is `vector × tier speed`, with
+  the X/Y part capped at length 1 so diagonals run at the tier speed, not
+  faster. Z velocity is `z × Z tier speed`. Each axis stays within its own
+  tier.
   """
 
   @tiers %{fine: 5, normal: 20, fast: 50}
@@ -19,7 +22,7 @@ defmodule CNC.Machine.Jog do
   @inset 0.001
 
   @type tier :: :fine | :normal | :fast
-  @type vector :: {-1..1, -1..1, -1..1}
+  @type vector :: {number, number, number}
 
   def tiers, do: Map.keys(@tiers)
   def dt_ms, do: @dt_ms
@@ -31,25 +34,22 @@ defmodule CNC.Machine.Jog do
   @doc "Z tier speed in mm/s."
   def z_speed(tier), do: Map.fetch!(@z_tiers, tier)
 
-  @doc "One tick's move for a held-key vector: `{{dx, dy, dz}, feed_mm_min}`."
-  def increment({dx, dy, dz}, tier) do
-    norm = :math.sqrt(dx * dx + dy * dy + dz * dz)
-    {ux, uy, uz} = {dx / norm, dy / norm, dz / norm}
-    v = path_speed(uz, tier)
-    len = v * @dt_ms / 1000
-    {{ux * len, uy * len, uz * len}, v * 60}
+  @doc """
+  One tick's move for a jog vector: `{{dx, dy, dz}, feed_mm_min}`. Feed is
+  the path speed, so the move takes exactly `dt`.
+  """
+  def increment({x, y, z}, tier) do
+    xy = :math.sqrt(x * x + y * y)
+    scale = if xy > 1, do: 1 / xy, else: 1
+    {vx, vy, vz} = {x * scale * speed(tier), y * scale * speed(tier), z * z_speed(tier)}
+    dt = @dt_ms / 1000
+    {{vx * dt, vy * dt, vz * dt}, magnitude({vx, vy, vz}) * 60}
   end
 
   @doc "A single step of `mm` along each non-zero axis of `vector`."
   def step({dx, dy, dz}, mm, tier) do
     feed = if dz != 0, do: z_speed(tier), else: speed(tier)
     {{dx * mm, dy * mm, dz * mm}, feed * 60}
-  end
-
-  # Path speed such that the Z component stays within the Z tier.
-  defp path_speed(uz, tier) do
-    v = speed(tier)
-    if abs(uz) * v > z_speed(tier), do: z_speed(tier) / abs(uz), else: v
   end
 
   @doc """

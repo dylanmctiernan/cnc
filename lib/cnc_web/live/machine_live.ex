@@ -49,7 +49,7 @@ defmodule CNCWeb.MachineLive do
 
   @impl true
   def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier} = params, socket) do
-    with {:ok, vector} <- vector(x, y, params["z"] || 0), {:ok, tier} <- tier(tier) do
+    with {:ok, vector} <- analog_vector(x, y, params["z"] || 0), {:ok, tier} <- tier(tier) do
       Machine.jog(vector, tier)
     end
 
@@ -276,6 +276,39 @@ defmodule CNCWeb.MachineLive do
           </section>
 
           <section class="cnc-group">
+            <h2 class="cnc-h">Joystick</h2>
+            <div
+              id="joystick"
+              class={["cnc-joy", @machine.state not in [:idle, :jogging] && "is-off"]}
+              phx-hook="Joystick"
+              phx-update="ignore"
+              data-tier={@tier}
+            >
+              <div
+                class="cnc-joy-pad"
+                role="application"
+                aria-label="X/Y joystick: drag to jog, release to stop"
+              >
+                <span class="cnc-joy-label" style="top: 0.25rem; left: 50%">Y+</span>
+                <span class="cnc-joy-label" style="bottom: 0.25rem; left: 50%">Y−</span>
+                <span class="cnc-joy-label" style="left: 0.5rem; top: 50%">X−</span>
+                <span class="cnc-joy-label" style="right: 0.5rem; top: 50%">X+</span>
+                <span class="cnc-joy-knob"></span>
+              </div>
+              <div
+                class="cnc-joy-z"
+                role="application"
+                aria-label="Z slider: drag up or down to jog, release to stop"
+              >
+                <span class="cnc-joy-label" style="top: 0.25rem; left: 50%">Z+</span>
+                <span class="cnc-joy-label" style="bottom: 0.25rem; left: 50%">Z−</span>
+                <span class="cnc-joy-knob"></span>
+              </div>
+            </div>
+            <p class="cnc-sub">Push further to go faster, up to the jog speed. Release to stop.</p>
+          </section>
+
+          <section class="cnc-group">
             <h2 class="cnc-h">Step <span class="cnc-unit">mm</span></h2>
             <div class="cnc-seg" role="group" aria-label="Step size">
               <button
@@ -477,6 +510,23 @@ defmodule CNCWeb.MachineLive do
 
   defp push_pos(socket, _), do: socket
 
+  # Joystick or keys: each component a number in -1..1.
+  defp analog_vector(x, y, z) do
+    with {:ok, x} <- analog(x), {:ok, y} <- analog(y), {:ok, z} <- analog(z), do: {:ok, {x, y, z}}
+  end
+
+  defp analog(v) when is_number(v) and v >= -1 and v <= 1, do: {:ok, v}
+
+  defp analog(v) when is_binary(v) do
+    case Float.parse(v) do
+      {f, ""} -> analog(f)
+      _ -> :error
+    end
+  end
+
+  defp analog(_), do: :error
+
+  # Step buttons: whole directions only.
   defp vector(x, y, z) do
     with {x, ""} when x in -1..1 <- Integer.parse(to_string(x)),
          {y, ""} when y in -1..1 <- Integer.parse(to_string(y)),

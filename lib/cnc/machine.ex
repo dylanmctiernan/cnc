@@ -62,18 +62,24 @@ defmodule CNC.Machine do
 
   @doc """
   Start or update a continuous jog. `vector` is `{dx, dy, dz}` (or `{dx, dy}`
-  for X/Y only) with each in `-1..1`: the held keys. All zeros stops. Must be
-  kept alive with `jog_heartbeat/1` at least every 250 ms, or the jog is
+  for X/Y only), each component in `-1..1`: keys give -1/0/1, a joystick any
+  value in between (speed is proportional). All zeros stops. Must be kept
+  alive with `jog_heartbeat/1` at least every 250 ms, or the jog is
   cancelled.
   """
-  @spec jog(server, Jog.vector() | {-1..1, -1..1}, Jog.tier()) :: reply
+  @spec jog(server, Jog.vector() | {number, number}, Jog.tier()) :: reply
   def jog(server \\ __MODULE__, vector, tier)
 
   def jog(server, {dx, dy}, tier), do: jog(server, {dx, dy, 0}, tier)
 
-  def jog(server, {dx, dy, dz} = vector, tier)
-      when dx in -1..1 and dy in -1..1 and dz in -1..1 and tier in [:fine, :normal, :fast],
-      do: call(server, {:jog, vector, tier})
+  def jog(server, {dx, dy, dz}, tier)
+      when is_number(dx) and is_number(dy) and is_number(dz) and
+             dx >= -1 and dx <= 1 and dy >= -1 and dy <= 1 and dz >= -1 and dz <= 1 and
+             tier in [:fine, :normal, :fast] do
+    if dx == 0 and dy == 0 and dz == 0,
+      do: jog_stop(server),
+      else: call(server, {:jog, {dx, dy, dz}, tier})
+  end
 
   @spec jog_heartbeat(server) :: reply
   def jog_heartbeat(server \\ __MODULE__), do: call(server, :jog_heartbeat)

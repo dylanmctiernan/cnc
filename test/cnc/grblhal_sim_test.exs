@@ -103,6 +103,26 @@ defmodule CNC.GrblhalSimTest do
     assert elem(Machine.status(m).mpos, 2) > -0.01
   end
 
+  test "analog jog: half deflection moves about half as far", %{m: m} do
+    unlock(m)
+    {x0, _, _} = Machine.status(m).mpos
+    dir = if x0 < 600, do: 1, else: -1
+
+    distance = fn scale ->
+      {start, _, _} = Machine.status(m).mpos
+      :ok = Machine.jog(m, {dir * scale, 0, 0}, :normal)
+      keep_alive(m, 1000)
+      :ok = Machine.jog_stop(m)
+      assert eventually(fn -> Machine.status(m).controller == :idle end, 3000)
+      abs(elem(Machine.status(m).mpos, 0) - start)
+    end
+
+    full = distance.(1.0)
+    half = distance.(0.5)
+    assert full > 10
+    assert_in_delta half / full, 0.5, 0.15
+  end
+
   test "soft reset reboots the controller and the host relocks", %{m: m} do
     unlock(m)
     :ok = Machine.reset(m)

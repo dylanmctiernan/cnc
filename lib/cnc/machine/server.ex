@@ -447,7 +447,8 @@ defmodule CNC.Machine.Server do
     {raw, feed} = Jog.increment(d.vector, d.tier)
     delta = Jog.clamp(d.target, raw, d.travel)
 
-    if not Jog.zero?(delta) and d.in_flight < Jog.max_in_flight() and
+    # feed >= 1 mm/min: a barely-deflected stick shouldn't send F0.
+    if not Jog.zero?(delta) and feed >= 1 and d.in_flight < Jog.max_in_flight() and
          Jog.room_ahead?(d.target, d.status.mpos, Jog.magnitude(raw)) do
       %{send_line(d, Command.jog(delta, feed), :jog) | target: Jog.add(d.target, delta)}
     else
