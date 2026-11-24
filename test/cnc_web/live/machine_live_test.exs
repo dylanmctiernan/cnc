@@ -149,6 +149,21 @@ defmodule CNCWeb.MachineLiveTest do
     assert has_element?(view, ".cnc-dro.is-zeroing")
   end
 
+  test "phones: the mini-map opens the bed sheet and Close returns", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    assert has_element?(view, ".cnc-minimap #minimap[data-mini=true]")
+    view |> element(".cnc-minimap") |> render_click()
+    assert has_element?(view, ".cnc.show-bed")
+    view |> element(".cnc-bed-close") |> render_click()
+    refute has_element?(view, ".cnc.show-bed")
+  end
+
+  test "haptics: Stop ticks strong, steps and modes light", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    assert has_element?(view, ".cnc-dock .cnc-stop[data-haptic=strong]")
+    assert has_element?(view, "button[phx-click=control_mode][data-haptic=light]")
+  end
+
   test "Add to Home Screen: manifest and Apple tags", %{conn: conn} do
     html = conn |> get(~p"/") |> html_response(200)
     assert html =~ ~s(rel="manifest")

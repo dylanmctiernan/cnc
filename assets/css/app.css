@@ -1095,7 +1095,16 @@ a.cnc-btn {
 /* Elements that only exist for some tiers */
 .cnc-dock,
 .cnc-more,
-.cnc-zero-toggle {
+.cnc-zero-toggle,
+.cnc-minimap,
+.cnc-bed-close {
+  display: none;
+}
+
+.cnc-more summary {
+  list-style: none;
+}
+.cnc-more summary::-webkit-details-marker {
   display: none;
 }
 
@@ -1318,10 +1327,262 @@ body {
     display: inline;
     margin-left: 0.375rem;
   }
-  .cnc-jog > .cnc-sub {
+  .cnc-jog > .cnc-sub,
+  .cnc-jog > .cnc-h {
     display: none;
   }
   .cnc-dro > .cnc-row .cnc-btn {
     flex: 1;
+  }
+}
+
+/* Short phones (portrait): the bed would be below the fold, so show a live
+   mini-map beside the readout; tapping it opens the full view as a sheet.
+   Tall narrow windows (iPad Split View) have room and keep the bed inline. */
+@media (max-width: 39.99rem) and (max-height: 55.99rem) {
+  .cnc-view {
+    display: none;
+  }
+  .cnc.show-bed .cnc-view {
+    display: grid;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: var(--bg);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+  }
+  .cnc.show-bed .cnc-bed {
+    aspect-ratio: auto;
+  }
+  /* Stop stays reachable over the bed sheet */
+  .cnc.show-bed .cnc-dock {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+  }
+  .cnc.show-bed .cnc-view {
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+  .cnc-bed-close {
+    display: inline-grid;
+    place-items: center;
+  }
+  .cnc-view-bar {
+    gap: 0.5rem;
+  }
+  .cnc-view-bar .cnc-h {
+    margin-right: auto;
+  }
+
+  /* Readout: mini-map left, X / Y / Z stacked right */
+  .cnc-dro {
+    grid-template-columns: 6.75rem minmax(0, 1fr);
+  }
+  .cnc-minimap {
+    display: block;
+    grid-column: 1;
+    grid-row: 2 / span 3;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--bg);
+    cursor: pointer;
+  }
+  .cnc-minimap #minimap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 6.25rem;
+  }
+  .cnc-minimap canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .cnc-dro > .cnc-dro-row {
+    grid-column: 2;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+  }
+  .cnc-dro-row .cnc-btn--zero {
+    grid-column: auto;
+  }
+  .cnc-num {
+    font-size: 1.25rem;
+  }
+}
+
+/* Short screens: size the joystick to what's left of the height */
+@media (max-width: 39.99rem) and (max-height: 40rem) {
+  .cnc-joy {
+    --joy: min(15rem, calc(100vw - 6.5rem), calc(100dvh - 21rem));
+  }
+  .cnc-rail {
+    gap: 0.5rem;
+  }
+}
+
+/* Phones: notes are one compact line, not a wall of text */
+@media (max-width: 39.99rem), (orientation: landscape) and (max-height: 31.99rem) {
+  .cnc-note,
+  .cnc-lock {
+    font-size: 0.75rem;
+    padding: 0.375rem 0.5rem;
+  }
+}
+
+/* Phones sideways: bed on the left, controls on the right. Every pixel of
+   height counts, so: phone header, no view title bar, stacked readout,
+   zeroing behind "Zero…". Overrides the phone and tablet tiers above. */
+@media (orientation: landscape) and (max-height: 31.99rem) {
+  .cnc {
+    height: 100dvh;
+    grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem);
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "status status"
+      "msgs msgs"
+      "dro jog"
+      "view jog"
+      "dock jog";
+  }
+
+  /* header: state, badge, More */
+  .cnc-bar {
+    padding-top: max(0.25rem, env(safe-area-inset-top));
+    padding-bottom: 0.25rem;
+    align-items: center;
+  }
+  .cnc-state {
+    min-height: 2.25rem;
+    min-width: 6rem;
+    font-size: 0.875rem;
+  }
+  .cnc-actions,
+  .cnc-meta {
+    display: none;
+  }
+  .cnc-more {
+    display: block;
+    position: relative;
+    margin-left: auto;
+  }
+  .cnc-more summary {
+    list-style: none;
+    display: grid;
+    place-items: center;
+  }
+  .cnc-more-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.25rem);
+    z-index: 10;
+    display: grid;
+    gap: 0.375rem;
+    min-width: 12rem;
+    padding: 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--raised);
+  }
+
+  /* bed fills the left */
+  .cnc-view,
+  .cnc.show-bed .cnc-view {
+    display: grid;
+    position: static;
+    grid-row: auto;
+    grid-template-rows: minmax(0, 1fr);
+    padding-left: env(safe-area-inset-left);
+  }
+  .cnc-view-bar {
+    display: none;
+  }
+  .cnc-bed {
+    height: auto;
+    aspect-ratio: auto;
+  }
+  .cnc-minimap,
+  .cnc-bed-close,
+  .cnc-rail--more,
+  .cnc-console {
+    display: none;
+  }
+
+  /* The main panel's sections are placed directly: readout above the bed
+     (left), jog controls alone on the right. */
+  .cnc-rail--main {
+    display: contents;
+  }
+  .cnc-dro {
+    grid-area: dro;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.25rem 0.375rem;
+    padding: 0.25rem 0.5rem 0.25rem max(0.5rem, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--line);
+  }
+  .cnc-dro-head,
+  .cnc-dro > .cnc-sub,
+  .cnc-dro > .cnc-row {
+    grid-column: 1 / -1;
+  }
+  .cnc-dro-head .cnc-h {
+    display: none;
+  }
+  .cnc-jog {
+    grid-area: jog;
+    align-content: start;
+    gap: 0.375rem;
+    padding: 0.375rem max(0.5rem, env(safe-area-inset-right)) 0.375rem 0.5rem;
+    overflow-y: auto;
+    border-left: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .cnc-dro-head {
+    flex-wrap: wrap;
+  }
+  .cnc-dro > .cnc-dro-row {
+    grid-column: auto;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    padding: 0.125rem 0.375rem;
+  }
+  .cnc-dro-row .cnc-btn--zero {
+    grid-column: 1 / -1;
+  }
+  .cnc-num {
+    font-size: 1rem;
+  }
+  .cnc-zero-toggle {
+    display: inline-grid;
+    place-items: center;
+  }
+  .cnc-dro:not(.is-zeroing) .cnc-btn--zero,
+  .cnc-dro:not(.is-zeroing) > .cnc-row,
+  .cnc-dro:not(.is-zeroing) > .cnc-sub {
+    display: none;
+  }
+  .cnc-jog > .cnc-sub,
+  .cnc-jog > .cnc-h {
+    display: none;
+  }
+  .cnc-jog .cnc-seg .cnc-unit {
+    display: inline;
+    margin-left: 0.375rem;
+  }
+  .cnc-joy {
+    --joy: min(12rem, calc(100dvh - 11rem));
+    grid-template-columns: var(--joy) 3.75rem;
+  }
+  .cnc-dock {
+    padding-left: max(0.5rem, env(safe-area-inset-left));
+  }
+  .cnc-dock .cnc-btn {
+    min-height: 2.75rem;
   }
 }

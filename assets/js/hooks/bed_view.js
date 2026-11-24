@@ -15,6 +15,8 @@ export default {
     this.canvas = this.el.querySelector("canvas")
     this.ctx = this.canvas.getContext("2d")
     this.travel = JSON.parse(this.el.dataset.travel)
+    // Mini-map: no labels, no Z gauge, small marker
+    this.mini = this.el.dataset.mini === "true"
 
     const start = {
       x: parseFloat(this.el.dataset.x) || 0,
@@ -111,8 +113,11 @@ export default {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
     const [[x0, x1], [y0, y1], [z0, z1] = [-100, 0]] = this.travel
-    const room = width - GAUGE
-    const scale = Math.min((room - PAD * 2) / (x1 - x0), (height - PAD * 2) / (y1 - y0))
+    // Drawn small (phone landscape, Split View): tighter margins, end labels only
+    this.compact = !this.mini && (height < 300 || width < 380)
+    const pad = this.mini ? 3 : this.compact ? 22 : PAD
+    const room = width - (this.mini ? 0 : this.compact ? 48 : GAUGE)
+    const scale = Math.min((room - pad * 2) / (x1 - x0), (height - pad * 2) / (y1 - y0))
     const bedH = (y1 - y0) * scale
     this.view = {
       width, height, scale, x0, x1, y0, y1, z0, z1,
@@ -150,7 +155,7 @@ export default {
     this.drawWorkOrigin()
     this.drawTrail()
     this.drawTool(this.shown)
-    this.drawGauge(this.shown.z)
+    if (!this.mini) this.drawGauge(this.shown.z)
   },
 
   markerColor() {
@@ -183,15 +188,19 @@ export default {
     ctx.lineWidth = 1.5
     ctx.strokeRect(l, t, r - l, b - t)
 
+    if (this.mini) return
+
     // Scale every 250 mm, outside the bed
     ctx.fillStyle = c.dim
     ctx.font = `11px ${FONT}`
     ctx.textAlign = "center"
     ctx.textBaseline = "top"
-    for (let mm = v.x0; mm <= v.x1; mm += 250) ctx.fillText(mm, this.px(mm, 0)[0], b + 6)
+    const step = this.compact ? v.x1 - v.x0 : 250
+    for (let mm = v.x0; mm <= v.x1; mm += step) ctx.fillText(mm, this.px(mm, 0)[0], b + 4)
     ctx.textAlign = "right"
     ctx.textBaseline = "middle"
-    for (let mm = v.y0; mm <= v.y1; mm += 250) ctx.fillText(mm, l - 6, this.px(0, mm)[1])
+    const ystep = this.compact ? v.y1 - v.y0 : 250
+    for (let mm = v.y0; mm <= v.y1; mm += ystep) ctx.fillText(mm, l - 4, this.px(0, mm)[1])
 
     // Origin axes, front-left, in axis colours
     const [ox, oy] = this.px(0, 0)
@@ -218,12 +227,14 @@ export default {
     const [ox, oy] = this.px(wx, wy)
     ctx.strokeStyle = c.text
     ctx.lineWidth = 1.5
-    line(ctx, ox, oy, ox + 18, oy)
-    line(ctx, ox, oy, ox, oy - 18)
+    const arm = this.mini ? 6 : 18
+    line(ctx, ox, oy, ox + arm, oy)
+    line(ctx, ox, oy, ox, oy - arm)
     ctx.beginPath()
     ctx.arc(ox, oy, 3, 0, Math.PI * 2)
     ctx.fillStyle = c.text
     ctx.fill()
+    if (this.mini) return
     ctx.font = `500 11px ${FONT}`
     ctx.textAlign = "left"
     ctx.textBaseline = "top"
@@ -264,7 +275,8 @@ export default {
     const [jx, jy] = this.jog || [0, 0, 0]
     if (jx || jy) {
       const n = Math.hypot(jx, jy)
-      const ex = px + (jx / n) * 34, ey = py - (jy / n) * 34
+      const len = this.mini ? 14 : 34
+      const ex = px + (jx / n) * len, ey = py - (jy / n) * len
       ctx.strokeStyle = c.bg
       ctx.lineWidth = 5
       line(ctx, px, py, ex, ey)
@@ -276,12 +288,14 @@ export default {
     // Crosshair + ring at the reported position
     ctx.strokeStyle = c.text
     ctx.lineWidth = 1
-    line(ctx, px - 18, py, px - 10, py)
-    line(ctx, px + 10, py, px + 18, py)
-    line(ctx, px, py - 18, px, py - 10)
-    line(ctx, px, py + 10, px, py + 18)
+    if (!this.mini) {
+      line(ctx, px - 18, py, px - 10, py)
+      line(ctx, px + 10, py, px + 18, py)
+      line(ctx, px, py - 18, px, py - 10)
+      line(ctx, px, py + 10, px, py + 18)
+    }
     ctx.beginPath()
-    ctx.arc(px, py, 7, 0, Math.PI * 2)
+    ctx.arc(px, py, this.mini ? 4 : 7, 0, Math.PI * 2)
     ctx.fillStyle = this.markerColor()
     ctx.fill()
     ctx.strokeStyle = c.bg

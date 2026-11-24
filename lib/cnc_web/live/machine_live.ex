@@ -27,6 +27,7 @@ defmodule CNCWeb.MachineLive do
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, zeroing?: false)
+     |> assign(bed_open?: false)
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
@@ -95,6 +96,9 @@ defmodule CNCWeb.MachineLive do
   end
 
   # Phones: zero buttons are tucked away until asked for.
+  # Phones: the mini-map opens the full bed view as a sheet.
+  def handle_event("toggle_bed", _, socket), do: {:noreply, update(socket, :bed_open?, &(!&1))}
+
   def handle_event("toggle_zeroing", _, socket), do: {:noreply, update(socket, :zeroing?, &(!&1))}
 
   def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step),
@@ -188,7 +192,7 @@ defmodule CNCWeb.MachineLive do
     <Layouts.app flash={@flash}>
       <div id="jog-keys" phx-hook="JogKeys" data-tier={@tier} hidden></div>
 
-      <div class={["cnc", @details? && "has-console"]}>
+      <div class={["cnc", @details? && "has-console", @bed_open? && "show-bed"]}>
         <header class="cnc-bar">
           <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_label(@machine)}
@@ -226,6 +230,7 @@ defmodule CNCWeb.MachineLive do
             <button
               type="button"
               class="cnc-btn cnc-stop"
+              data-haptic="strong"
               phx-click="stop"
               disabled={!@machine.connected?}
               title="Cancel any jog and hold (Esc)"
@@ -334,6 +339,14 @@ defmodule CNCWeb.MachineLive do
             >
               Clear trail
             </button>
+            <button
+              type="button"
+              class="cnc-btn cnc-bed-close"
+              phx-click="toggle_bed"
+              data-haptic="light"
+            >
+              Close
+            </button>
           </div>
           <div
             id="bed"
@@ -383,6 +396,28 @@ defmodule CNCWeb.MachineLive do
                 {if @zeroing?, do: "Done", else: "Zero…"}
               </button>
             </div>
+            <%!-- Short phone screens: a live mini-map of the bed; tap for the full view --%>
+            <button
+              type="button"
+              class="cnc-minimap"
+              phx-click="toggle_bed"
+              data-haptic="light"
+              aria-label="Show the bed view"
+            >
+              <div
+                id="minimap"
+                phx-hook="BedView"
+                phx-update="ignore"
+                data-mini="true"
+                data-travel={travel_json(@machine.travel)}
+                data-x={pos(@machine, 0)}
+                data-y={pos(@machine, 1)}
+                data-z={pos(@machine, 2)}
+                data-state={@machine.state}
+              >
+                <canvas aria-hidden="true"></canvas>
+              </div>
+            </button>
             <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
               <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
               <span class="cnc-num">{fmt(axis_value(shown(@machine, @frame), i))}</span>
@@ -390,6 +425,7 @@ defmodule CNCWeb.MachineLive do
                 :if={frame(@machine, @frame) == :work}
                 type="button"
                 class="cnc-btn cnc-btn--zero"
+                data-haptic="light"
                 phx-click="zero"
                 phx-value-axes={String.downcase(axis)}
                 disabled={@machine.state != :idle}
@@ -432,6 +468,7 @@ defmodule CNCWeb.MachineLive do
                 type="button"
                 class="cnc-btn"
                 aria-pressed={to_string(@control_mode == mode)}
+                data-haptic="light"
                 phx-click="control_mode"
                 phx-value-mode={mode}
               >
@@ -447,6 +484,7 @@ defmodule CNCWeb.MachineLive do
                 type="button"
                 class="cnc-btn"
                 aria-pressed={to_string(@tier == tier)}
+                data-haptic="light"
                 phx-click="tier"
                 phx-value-tier={tier}
               >
@@ -673,6 +711,7 @@ defmodule CNCWeb.MachineLive do
           <button
             type="button"
             class="cnc-btn cnc-stop"
+            data-haptic="strong"
             phx-click="stop"
             disabled={!@machine.connected?}
           >
@@ -700,6 +739,7 @@ defmodule CNCWeb.MachineLive do
       type="button"
       class={["cnc-btn", "is-#{String.first(@area)}"]}
       style={"grid-area: #{@area}"}
+      data-haptic="light"
       phx-click="step"
       phx-value-x={@x}
       phx-value-y={@y}
