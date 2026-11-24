@@ -113,12 +113,15 @@ defmodule CNC.Link.FakeSim.Model do
   end
 
   # What the fake sim takes from its running config: each axis's travel
-  # (X/Y 0..mm, Z -mm..0) and max rate (the fastest is its feed limit).
+  # (X/Y 0..mm, Z -mm..0) and max rate (the fastest is its feed limit). A
+  # setting the config leaves out falls back to the default, as FluidNC's do.
   defp take(m) do
+    defaults = %__MODULE__{}
+
     travel =
       ~w(x y z)
       |> Enum.with_index()
-      |> Enum.reduce(m.travel, fn {axis, i}, travel ->
+      |> Enum.reduce(defaults.travel, fn {axis, i}, travel ->
         case number(m.running, "axes/#{axis}/max_travel_mm") do
           mm when is_float(mm) and mm > 0 -> put_travel(travel, i, mm)
           _ -> travel
@@ -131,7 +134,7 @@ defmodule CNC.Link.FakeSim.Model do
           is_float(r) and r > 0,
           do: r
 
-    %{m | travel: travel, max_feed: if(rates == [], do: m.max_feed, else: Enum.max(rates))}
+    %{m | travel: travel, max_feed: if(rates == [], do: defaults.max_feed, else: Enum.max(rates))}
   end
 
   defp number(text, path) do

@@ -85,6 +85,27 @@ defmodule CNC.Controllers.ConfigTest do
     :ok = Config.activate(m, "kept.yaml")
     assert File.read!(Path.join(dir, "config_filename")) == "kept.yaml"
 
+    # An override with more than it takes: all of it is kept and readable;
+    # what it leaves out falls back to the default
+    own =
+      "name: Mine\naxes:\n  x:\n    acceleration_mm_per_sec2: 333\n  y:\n    max_travel_mm: 700\n"
+
+    # (after the restart above has settled)
+    assert eventually(
+             fn -> match?(%{state: :alarm, awaiting_ack: 0}, Machine.status(m)) end,
+             3000
+           )
+
+    {:ok, _} = Config.upload(m, "config.yaml", own)
+    :ok = Config.activate(m, "config.yaml")
+
+    assert eventually(
+             fn -> match?({{+0.0, 1250.0}, {+0.0, 700.0}, _}, Machine.status(m).travel) end,
+             3000
+           )
+
+    assert Config.get(m, "axes/x/acceleration_mm_per_sec2") == {:ok, "333"}
+
     model =
       CNC.Link.FakeSim.Model.new(
         files: %{"kept.yaml" => File.read!(Path.join([dir, "localfs", "kept.yaml"]))},
