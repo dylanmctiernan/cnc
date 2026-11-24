@@ -894,6 +894,157 @@ button {
   75% { transform: translateX(-3px); }
 }
 
+/* Settings page */
+a.cnc-btn {
+  display: inline-grid;
+  place-items: center;
+  text-decoration: none;
+}
+.cnc-page {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+.cnc-page-title {
+  font-size: 1rem;
+  font-weight: 700;
+  align-self: center;
+  margin-right: auto;
+}
+.cnc-settings {
+  width: min(100%, 56rem);
+  justify-self: center;
+  padding: 1rem 0.75rem 2rem;
+  display: grid;
+  gap: 1.25rem;
+  align-content: start;
+}
+.cnc-set-group {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+.cnc-set-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem 1rem;
+  align-items: center;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+.cnc-set-row.is-changed {
+  border-left-color: var(--move);
+}
+.cnc-set-row.is-invalid {
+  border-left-color: var(--red);
+}
+.cnc-set-label {
+  display: grid;
+  grid-template-columns: 3.25rem 1fr;
+  gap: 0 0.5rem;
+}
+.cnc-set-n {
+  color: var(--cyan);
+}
+.cnc-set-help {
+  grid-column: 2;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+.cnc-set-input {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.cnc-set-input input {
+  width: 8.5rem;
+  min-height: 2.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+}
+.cnc-set-input input:focus-visible {
+  outline: 2px solid var(--yellow);
+  outline-offset: 1px;
+}
+.cnc-set-input .cnc-unit {
+  min-width: 4.5rem;
+  font-size: 0.75rem;
+}
+.cnc-set-result {
+  font-size: 0.75rem;
+}
+.cnc-set-result.is-ok { color: var(--ok); }
+.cnc-set-result.is-pending { color: var(--warn); }
+.cnc-set-result.is-error { color: var(--red-text); }
+.cnc-set-error {
+  grid-column: 1 / -1;
+  color: var(--red-text);
+  font-size: 0.8125rem;
+}
+.cnc-review-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.cnc-review-bar > span {
+  margin-right: auto;
+  color: var(--text-dim);
+}
+.cnc-review {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--bg) 75%, transparent);
+}
+.cnc-review-box {
+  width: min(100%, 36rem);
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+}
+.cnc-review-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.cnc-review-table th,
+.cnc-review-table td {
+  padding: 0.375rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.cnc-review-table th {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+.cnc-review-from {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+.cnc-review-to {
+  color: var(--move);
+  font-weight: 700;
+}
+
 /* Narrow screens: one column, bed first */
 /* Narrow screens: one column. Readout and jog first (thumb reach), then
    the bed, then steps and details. */

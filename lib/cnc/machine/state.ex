@@ -31,6 +31,10 @@ defmodule CNC.Machine.State do
       version: binary | nil, simulated?: boolean}` from `$I` and the boot
       banner; `simulated?` is true for the built-in Sim and for controllers
       reporting `[DRIVER:Simulator]` (the grblHAL simulator)
+    * `settings_rev` — increases each time the settings are (re)read; fetch
+      them with `CNC.Machine.settings/1`
+    * `settings_write` — results of the last `write_settings/2`:
+      `%{n => :pending | :ok | {:error, code}}`
     * `homing_enabled?` — from the controller's `$22`: `false` means `$H`
       will be refused (`error:5`); `nil` if it doesn't report `$22`
     * `travel_issues` — `[{axis, reported_mm, max_mm}]` for axes where the
@@ -59,5 +63,7 @@ defmodule CNC.Machine.State do
             travel_source: :config,
             travel_issues: [],
             homing_enabled?: nil,
-            controller_info: %{firmware: nil, version: nil, simulated?: false}
+            controller_info: %{firmware: nil, version: nil, simulated?: false},
+            settings_rev: 0,
+            settings_write: %{}
 end

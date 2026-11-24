@@ -234,6 +234,7 @@ defmodule CNCWeb.MachineLive do
             <button type="button" class="cnc-btn" phx-click="reset" disabled={!@machine.connected?}>
               Reset
             </button>
+            <.link navigate={~p"/settings"} class="cnc-btn">Settings</.link>
             <button
               type="button"
               class="cnc-btn"

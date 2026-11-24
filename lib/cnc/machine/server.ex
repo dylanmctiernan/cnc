@@ -68,6 +68,10 @@ defmodule CNC.Machine.Server do
     info: %{},
     info_partial: %{},
     banner: nil,
+    # Bumped whenever a settings read completes, so pages know to refresh.
+    settings_rev: 0,
+    # Results of the last write_settings: %{n => :pending | :ok | {:error, code}}
+    settings_write: %{},
     tier: :normal,
     vector: {0, 0, 0},
     in_flight: 0,
@@ -292,6 +296,22 @@ defmodule CNC.Machine.Server do
     end
   end
 
+  defp event({:call, from}, :settings, s, d), do: {s, d, [{:reply, from, d.settings}]}
+
+  defp event({:call, from}, {:write_settings, changes}, s, d) when s in [:idle, :alarm] do
+    if d.motion_unsettled? or (d.status && d.status.state in [:run, :jog, :home]) do
+      {s, d, [{:reply, from, {:error, :moving}}]}
+    else
+      d =
+        Enum.reduce(changes, %{d | settings_write: %{}}, fn {n, value}, d ->
+          d = send_line(d, "$#{n}=#{value}", {:setting, n})
+          %{d | settings_write: Map.put(d.settings_write, n, :pending)}
+        end)
+
+      {s, d, [{:reply, from, :ok}]}
+    end
+  end
+
   defp event({:call, from}, {:work_zero, axes}, :idle, d) do
     line = Command.set_work(for axis <- axes, do: {axis, 0})
     {:idle, send_line(d, line, :raw), [{:reply, from, :ok}]}
@@ -409,7 +429,16 @@ defmodule CNC.Machine.Server do
     end
   end
 
-  defp on_ack(:settings, :ok, s, d), do: {s, apply_settings(d), []}
+  defp on_ack(:settings, :ok, s, d),
+    do: {s, %{apply_settings(d) | settings_rev: d.settings_rev + 1}, []}
+
+  # One written setting answered. Once all have, read them back to verify.
+  defp on_ack({:setting, n}, result, s, d) do
+    write = Map.put(d.settings_write, n, result)
+    done? = not Enum.any?(write, fn {_, r} -> r == :pending end)
+    d = %{d | settings_write: write, settings_wanted?: d.settings_wanted? or done?}
+    {s, maybe_read_settings(d, d.status && d.status.state), []}
+  end
 
   defp on_ack(:raw_setting, :ok, s, d),
     do: {s, send_line(%{d | settings: %{}}, Command.settings(), :settings), []}
@@ -663,7 +692,9 @@ defmodule CNC.Machine.Server do
       travel_source: d.travel_source,
       travel_issues: d.travel_issues,
       homing_enabled?: homing_enabled?(d.settings),
-      controller_info: identify(d)
+      controller_info: identify(d),
+      settings_rev: d.settings_rev,
+      settings_write: d.settings_write
     }
   end
 
