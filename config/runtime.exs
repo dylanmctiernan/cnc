@@ -22,6 +22,13 @@ end
 
 config :cnc, CNCWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# CNC_LAN=1 serves the UI to other devices on the local network (dev only).
+# There's no login: anyone on the network can drive the machine. Fine for the
+# simulators; think twice once real hardware is connected.
+if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
+  config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
+end
+
 # Controller link. Default (config.exs) is the in-process simulator.
 #   CNC_TRANSPORT=grblhal_sim mix phx.server     # docker compose up grblhal-sim
 #   CNC_GRBLHAL=host:port                        # default localhost:2323

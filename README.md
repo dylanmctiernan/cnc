@@ -42,3 +42,11 @@ GRBLHAL_SIM=localhost:2323 mix test --only grblhal_sim
 
 It serves one TCP client at a time (the newest wins), so don't run the tests
 while the dev server is connected to it.
+
+### From another device on your network
+
+```sh
+CNC_LAN=1 mix phx.server          # then open http://<this-mac's-ip>:4000
+```
+
+Dev only. There's no login, so anyone on the network can drive the machine.
