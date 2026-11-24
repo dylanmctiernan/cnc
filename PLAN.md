@@ -80,7 +80,7 @@ compilers: [:boundary] ++ Mix.compilers()
 {:boundary, "~> 0.10", runtime: false}
 ```
 
-CI runs `mix compile --warnings-as-errors`, so a boundary violation breaks the build.
+`mix compile --warnings-as-errors` (part of `mix precommit`) turns a boundary violation into a build failure.
 
 ---
 
@@ -214,8 +214,8 @@ Hook rules:
 
 ## 7. Tooling
 
-- **mise** pins Erlang and Elixir (`.mise.toml`); CI reads the same file.
-- CI: `mix format --check-formatted`, `mix compile --warnings-as-errors` (Boundary), `mix test`.
+- **mise** pins Erlang and Elixir (`.mise.toml`).
+- All checks run locally: `mix precommit` = `compile --warnings-as-errors` (Boundary), `deps.unlock --unused`, `format`, `test`.
 - `ExUnit.configure(exclude: [:grblhal_sim])`. Run with `GRBLHAL_SIM=localhost:2323 mix test --only grblhal_sim`.
 - `docker/grblhal-sim/Dockerfile` builds/pins grblHAL_sim and applies `$` settings on start; `docker compose up grblhal-sim`.
 - `docs/bench-log.md` for manual checks.
@@ -226,7 +226,7 @@ Hook rules:
 
 | # | Milestone | Done when |
 |---|---|---|
-| M0 | Scaffold `cnc` (no Ecto/mailer/gettext), Boundary compiler, mise, CI | CI green; a deliberate cross-boundary call fails compile |
+| M0 | Scaffold `cnc` (no Ecto/mailer/gettext), Boundary compiler, mise | `mix precommit` green; a deliberate cross-boundary call fails compile |
 | M1 | `CNC.Grbl` parse + encode | Table tests pass on real status/ok/error/alarm/banner/msg samples; round-trip properties pass |
 | M2 | `CNC.Motion.Sim` | Responds to `?`, `$X`, `$H`, `$J=`, `0x85`, `!`, `~`; position integrates; soft-limit `error:15` |
 | M3 | `CNC.Machine` + jogging (vs Sim) | Tests: state transitions; ≤4 outstanding jogs; heartbeat loss → `0x85` within 300 ms; `jog_stop` → immediate `0x85`; jog rejected in `:alarm` |
