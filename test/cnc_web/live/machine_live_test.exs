@@ -54,6 +54,7 @@ defmodule CNCWeb.MachineLiveTest do
     {_, _, z0} = Machine.status().mpos
 
     # At the top of Z travel already: down works, up is clamped.
+    view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
     view |> element("button", "Z−") |> render_click()
     assert eventually(fn -> abs(elem(Machine.status().mpos, 2) - (z0 - 1)) < 0.001 end)
@@ -92,6 +93,7 @@ defmodule CNCWeb.MachineLiveTest do
              abs(wx) < 1.0e-6 and abs(wy) < 1.0e-6
            end)
 
+    view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='10']") |> render_click()
     view |> element("button", "X+") |> render_click()
     # Work = machine - offset, in floats: compare with a tolerance.
@@ -142,6 +144,7 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> render(view) =~ "Ready" end)
     {x0, y0, _} = Machine.status().mpos
 
+    view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
     view |> element("button", "Y+") |> render_click()
 

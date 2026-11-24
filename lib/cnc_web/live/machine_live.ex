@@ -26,7 +26,7 @@ defmodule CNCWeb.MachineLive do
     {:ok,
      socket
      |> assign(machine: machine, tier: :normal, step: 10, help?: false)
-     |> assign(frame: :work, action_error: nil)
+     |> assign(frame: :work, action_error: nil, control_mode: :joystick)
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
@@ -93,6 +93,9 @@ defmodule CNCWeb.MachineLive do
       step -> {:noreply, assign(socket, step: step)}
     end
   end
+
+  def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step),
+    do: {:noreply, assign(socket, control_mode: String.to_existing_atom(mode))}
 
   def handle_event("toggle_help", _, socket), do: {:noreply, update(socket, :help?, &(!&1))}
 
@@ -361,6 +364,21 @@ defmodule CNCWeb.MachineLive do
 
           <section class="cnc-group cnc-jog" aria-label="Jog">
             <h2 class="cnc-h">Jog <span class="cnc-unit">X/Y and Z, mm/s at full push</span></h2>
+            <div class="cnc-seg cnc-seg--small" role="group" aria-label="Control mode">
+              <button
+                :for={{mode, label} <- [joystick: "Joystick", step: "Step"]}
+                type="button"
+                class="cnc-btn"
+                aria-pressed={to_string(@control_mode == mode)}
+                phx-click="control_mode"
+                phx-value-mode={mode}
+              >
+                {label}
+              </button>
+              <button type="button" class="cnc-btn" disabled title="Comes with job streaming">
+                Path
+              </button>
+            </div>
             <div class="cnc-seg" role="group" aria-label="Jog speed">
               <button
                 :for={{tier, {xy, z}} <- @tiers}
@@ -374,6 +392,7 @@ defmodule CNCWeb.MachineLive do
               </button>
             </div>
             <div
+              :if={@control_mode == :joystick}
               id="joystick"
               class="cnc-joy"
               phx-hook="Joystick"
@@ -402,35 +421,54 @@ defmodule CNCWeb.MachineLive do
                 <span class="cnc-joy-knob"></span>
               </div>
             </div>
+            <div :if={@control_mode == :step} class="cnc-group">
+              <div class="cnc-seg" role="group" aria-label="Step size">
+                <button
+                  :for={mm <- @steps}
+                  type="button"
+                  class="cnc-btn"
+                  aria-pressed={to_string(@step == mm)}
+                  phx-click="step_size"
+                  phx-value-mm={mm}
+                >
+                  {mm}
+                </button>
+              </div>
+              <div class="cnc-pad">
+                <.step_button x={0} y={1} z={0} label="Y+" area="yp" idle?={@machine.state == :idle} />
+                <.step_button
+                  x={-1}
+                  y={0}
+                  z={0}
+                  label="X−"
+                  area="xm"
+                  idle?={@machine.state == :idle}
+                />
+                <span class="cnc-pad-mm">{@step}</span>
+                <.step_button x={1} y={0} z={0} label="X+" area="xp" idle?={@machine.state == :idle} />
+                <.step_button
+                  x={0}
+                  y={-1}
+                  z={0}
+                  label="Y−"
+                  area="ym"
+                  idle?={@machine.state == :idle}
+                />
+                <.step_button x={0} y={0} z={1} label="Z+" area="zp" idle?={@machine.state == :idle} />
+                <.step_button
+                  x={0}
+                  y={0}
+                  z={-1}
+                  label="Z−"
+                  area="zm"
+                  idle?={@machine.state == :idle}
+                />
+              </div>
+            </div>
           </section>
         </aside>
 
         <aside class="cnc-rail cnc-rail--more" aria-label="Steps and details">
-          <section class="cnc-group">
-            <h2 class="cnc-h">Step <span class="cnc-unit">mm</span></h2>
-            <div class="cnc-seg" role="group" aria-label="Step size">
-              <button
-                :for={mm <- @steps}
-                type="button"
-                class="cnc-btn"
-                aria-pressed={to_string(@step == mm)}
-                phx-click="step_size"
-                phx-value-mm={mm}
-              >
-                {mm}
-              </button>
-            </div>
-            <div class="cnc-pad">
-              <.step_button x={0} y={1} z={0} label="Y+" area="yp" idle?={@machine.state == :idle} />
-              <.step_button x={-1} y={0} z={0} label="X−" area="xm" idle?={@machine.state == :idle} />
-              <span class="cnc-pad-mm">{@step}</span>
-              <.step_button x={1} y={0} z={0} label="X+" area="xp" idle?={@machine.state == :idle} />
-              <.step_button x={0} y={-1} z={0} label="Y−" area="ym" idle?={@machine.state == :idle} />
-              <.step_button x={0} y={0} z={1} label="Z+" area="zp" idle?={@machine.state == :idle} />
-              <.step_button x={0} y={0} z={-1} label="Z−" area="zm" idle?={@machine.state == :idle} />
-            </div>
-          </section>
-
           <dl :if={@details?} class="cnc-facts" aria-label="Controller details">
             <dt>planner</dt>
             <dd>{buffer_label(@machine.buffer, 0, "blocks")}</dd>
