@@ -5,11 +5,16 @@ defmodule CNCWeb.UI do
 
   Rules every screen follows:
 
+    * **Nothing floats over content.** Controls get their own strip (the
+      map's toolbar), messages the fixed message line; never a button or
+      note laid over a drawing, a readout or another control. Exceptions:
+      modal dialogs (they take over a task on purpose) and a cover that
+      replaces a control that can't be used (the pendant's stick).
     * **No layout shift.** Controls never appear, disappear or change size
       under the operator's hand: something that's sometimes unavailable is
       disabled, not removed (Resume, the zoom's File); labels that change
-      keep their size; things that come and go (notes, dialogs, covers) lie
-      over the content instead of pushing it. `mix e2e.layout` checks this
+      keep their size; messages go in the message line, which is always
+      there. `mix e2e.layout` checks this
       in a browser against the dev server; add a step for each new
       interaction (assets/e2e/layout_shift.mjs).
     * **Grey is normal, colour means attention** (ISA-101): a calm state
@@ -267,10 +272,15 @@ defmodule CNCWeb.UI do
   attr :label, :string, default: "3D view of the machine, the toolpath and the tool"
   attr :class, :any, default: nil
 
+  attr :views, :boolean,
+    default: true,
+    doc:
+      "its own File/Iso/Top/Front buttons; false when the page puts `viewport_views/1` in a toolbar"
+
   @doc """
   The 3D viewport. Drag to orbit, right-drag (or two fingers) to pan, wheel
-  or pinch to zoom; File frames the loaded toolpath, Iso, Top and Front the
-  whole machine.
+  or pinch to zoom; Iso, Top and Front frame the loaded part (or the whole
+  machine without one), Machine the whole travel.
   """
   def viewport(assigns) do
     ~H"""
@@ -282,17 +292,27 @@ defmodule CNCWeb.UI do
       data-travel={@travel}
     >
       <canvas role="img" aria-label={@label}></canvas>
-      <div class="ui-viewport-views" role="group" aria-label="View">
-        <button
-          :for={{view, label} <- [file: "File", iso: "Iso", top: "Top", front: "Front"]}
-          type="button"
-          class="ui-btn ui-btn--sm"
-          id={"#{@id}-#{view}"}
-          phx-click={JS.dispatch("viewport:view", to: "##{@id}", detail: %{view: view})}
-        >
-          {label}
-        </button>
-      </div>
+      <.viewport_views :if={@views} for={@id} class="ui-viewport-views" />
+    </div>
+    """
+  end
+
+  attr :for, :string, required: true, doc: "the viewport's id"
+  attr :class, :any, default: nil
+
+  @doc "The 3D view's standard views, for a toolbar: Iso, Top and Front frame the part (if one is loaded), Machine the whole travel."
+  def viewport_views(assigns) do
+    ~H"""
+    <div class={["cnc-seg cnc-seg--small", @class]} role="group" aria-label="View">
+      <button
+        :for={{view, label} <- [iso: "Iso", top: "Top", front: "Front", machine: "Machine"]}
+        type="button"
+        class="cnc-btn"
+        id={"#{@for}-#{view}"}
+        phx-click={JS.dispatch("viewport:view", to: "##{@for}", detail: %{view: view})}
+      >
+        {label}
+      </button>
     </div>
     """
   end

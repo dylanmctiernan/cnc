@@ -1,7 +1,8 @@
 // The 3D viewport (CNCWeb.UI.viewport): the machine in three.js, Z up, in
 // machine coordinates (mm). The bed and its grid, the travel envelope, the
 // work zero (X/Y/Z axes), the loaded toolpath (cuts solid, rapids faint) and
-// the tool. Orbit, pan and zoom; Iso/Top/Front views. It renders only when
+// the tool. Orbit, pan and zoom; Iso/Top/Front frame the part (if any),
+// Machine the whole travel. It renders only when
 // something changed, so an idle view costs nothing.
 //
 // The standard machine-view events (the 2D bed view listens to the same):
@@ -27,8 +28,13 @@ export default {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
     this.scene = new THREE.Scene()
-    this.camera = new THREE.PerspectiveCamera(40, 1, 1, 20000)
-    this.camera.up.set(0, 0, 1)
+    // Perspective for Iso and Machine; orthographic for Top and Front (true
+    // views: things line up and can be judged by eye, as in CAD)
+    this.persp = new THREE.PerspectiveCamera(40, 1, 1, 20000)
+    this.ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -20000, 20000)
+    for (const c of [this.persp, this.ortho]) c.up.set(0, 0, 1)
+    this.camera = this.persp
+    this.orthoHalf = 100
 
     this.controls = new OrbitControls(this.camera, canvas)
     this.controls.enableDamping = false
@@ -75,7 +81,7 @@ export default {
     this.handleEvent("program", ({path}) => {
       this.pathData = path ? decode(path) : null
       this.buildPath()
-      this.render()
+      this.view(this.lastView || "iso")
     })
     this.handleEvent("travel", ({travel}) => {
       this.travel = travel
@@ -110,16 +116,31 @@ export default {
     const {clientWidth: w, clientHeight: h} = this.el
     if (!w || !h) return
     this.renderer.setSize(w, h, false)
-    this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
+    this.aspect = w / h
+    this.persp.aspect = this.aspect
+    this.persp.updateProjectionMatrix()
+    this.setOrthoFrustum()
     this.render()
   },
 
-  // Look at the whole travel (or, for "file", the loaded toolpath) from a
-  // standard direction.
+  useCamera(camera) {
+    this.camera = camera
+    this.controls.object = camera
+  },
+
+  setOrthoFrustum() {
+    const h = this.orthoHalf, a = this.aspect || 1
+    Object.assign(this.ortho, {left: -h * a, right: h * a, top: h, bottom: -h})
+    this.ortho.updateProjectionMatrix()
+  },
+
+  // A standard direction (iso, top, front), framing the loaded part with
+  // some room around it, or the whole travel when there's no part (or for
+  // "machine", which is the iso view of the whole travel).
   view(name) {
     let [[x0, x1], [y0, y1], [z0, z1]] = this.travel
-    if (name === "file" && this.pathBox) {
+    const part = name !== "machine" && this.pathBox
+    if (part) {
       const [wx, wy, wz] = this.wco
       const b = this.pathBox
       ;[[x0, x1], [y0, y1], [z0, z1]] = [
@@ -129,21 +150,38 @@ export default {
       ]
     }
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2
-    // Far enough that the whole travel fits, whatever the view's shape
-    const half = Math.max(x1 - x0, y1 - y0, 10) / 2
-    const fit = half / Math.tan((this.camera.fov * Math.PI) / 360)
-    const d = (fit * (name === "top" ? 1.12 : 2.1)) / Math.min(1, this.camera.aspect)
+    const pad = part ? 1.3 : 1.08
+    const aspect = this.aspect || 1
+    let d
+    if (name === "top" || name === "front") {
+      // Orthographic: the frame is exactly the extent (plus padding), fitted
+      // to the view's shape. Front sees X across and Z up.
+      const w = Math.max(x1 - x0, 10) / 2
+      const h = Math.max(name === "top" ? y1 - y0 : z1 - z0, 10) / 2
+      this.orthoHalf = Math.max(h, w / aspect) * pad
+      this.ortho.zoom = 1
+      this.setOrthoFrustum()
+      this.useCamera(this.ortho)
+      d = 5000
+    } else {
+      // Far enough that it all fits, whatever the view's shape
+      const half = (Math.max(x1 - x0, y1 - y0, 10) / 2) * (part ? 1.3 : 1)
+      const fit = half / Math.tan((this.persp.fov * Math.PI) / 360)
+      d = (fit * 2.1) / Math.min(1, aspect)
+      this.useCamera(this.persp)
+    }
     const dirs = {
       iso: [0.75, -1.1, 0.9],
-      file: [0.75, -1.1, 0.9],
+      machine: [0.75, -1.1, 0.9],
       top: [0, -0.0001, 1],
-      front: [0, -1, 0.12],
+      front: [0, -1, 0],
     }
     const [dx, dy, dz] = dirs[name] || dirs.iso
     const len = Math.hypot(dx, dy, dz)
     this.controls.target.set(cx, cy, cz)
     this.camera.position.set(cx + (dx / len) * d, cy + (dy / len) * d, cz + (dz / len) * d)
     this.controls.update()
+    this.lastView = name
     this.render()
   },
 

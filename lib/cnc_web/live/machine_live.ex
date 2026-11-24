@@ -458,7 +458,10 @@ defmodule CNCWeb.MachineLive do
           </div>
         </header>
 
-        <div class="cnc-messages">
+        <%!-- The message line: always there, one message at a time, the
+             most important first (as listed); "+N" when more are waiting.
+             It never covers anything and never pushes anything. --%>
+        <div class="cnc-messages" id="messages">
           <p :if={@controller == nil and @machine.adapter == nil} class="cnc-note" id="no-controller">
             No controller chosen.
             <.link navigate={~p"/controllers"} class="cnc-meta-link">Add or pick one</.link>
@@ -466,7 +469,7 @@ defmodule CNCWeb.MachineLive do
           </p>
           <div :if={@machine.state == :alarm} class="cnc-lock" role="alert">
             <span class="cnc-lock-tag">Locked</span>
-            <p>
+            <p title={alarm_text(@machine.alarm)}>
               {alarm_text(@machine.alarm)}
               <span :if={@machine.homing_enabled? == false}>
                 This controller has homing turned off ($22), so unlock to continue.
@@ -538,9 +541,11 @@ defmodule CNCWeb.MachineLive do
             <span class="cnc-view-bar-gap"></span>
             <%!-- Always there, same size: no shift when a file loads or the
                  zoom changes (in 3D the viewport has its own views) --%>
+            <UI.viewport_views :if={@view_mode == :"3d"} for="viewport" />
             <div
+              :if={@view_mode == :top}
               id="zoom-toggle"
-              class={["cnc-seg cnc-seg--small cnc-zoom-seg", @view_mode != :top && "is-hidden"]}
+              class="cnc-seg cnc-seg--small cnc-zoom-seg"
               role="group"
               aria-label="Zoom"
             >
@@ -563,6 +568,7 @@ defmodule CNCWeb.MachineLive do
             id="viewport"
             travel={travel_json(@machine.travel)}
             class="cnc-bed"
+            views={false}
           />
           <div
             :if={@view_mode == :top}

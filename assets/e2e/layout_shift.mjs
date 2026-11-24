@@ -21,7 +21,7 @@ const TOLERANCE = 0.5 // px
 
 const MACHINE = [
   "#machine-state", "#open-file", "#bar-resume", "#bar-hold", "#rail-hold",
-  ".cnc-view-bar", "#view-top", "#view-3d", "#zoom-toggle", ".cnc-view",
+  ".cnc-view-bar", "#view-top", "#view-3d", ".cnc-view", "#messages",
   ".cnc-dro", ".cnc-dro-tools", ".cnc-ctl", ".cnc-ctl .cnc-tabs", ".cnc-side",
 ]
 const CONFIG = ["#rail-hold", ".ui-page-header", "#in-use", "#tabs"]
