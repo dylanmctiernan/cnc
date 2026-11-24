@@ -24,4 +24,15 @@ defmodule CNCWeb.Router do
   # scope "/api", CNCWeb do
   #   pipe_through :api
   # end
+
+  # LiveDashboard in development only (dev_routes is set in config/dev.exs).
+  if Application.compile_env(:cnc, :dev_routes) do
+    import Phoenix.LiveDashboard.Router
+
+    scope "/dev" do
+      pipe_through :browser
+
+      live_dashboard "/dashboard", metrics: CNCWeb.Telemetry
+    end
+  end
 end
