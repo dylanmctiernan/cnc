@@ -38,3 +38,6 @@ npm-debug.log
 
 # Native FluidNC build (mix cnc.fluidnc.build)
 /.fluidnc/
+
+# Local device id for mix cnc.mdns.announce
+/.cnc/
