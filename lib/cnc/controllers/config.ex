@@ -270,6 +270,9 @@ defmodule CNC.Controllers.Config do
 
   defp valid_path(_), do: {:error, :invalid_setting}
 
+  @doc "A value that's safe to send as `$/path=value` (one line, no `=`)."
+  def valid_value?(value), do: match?({:ok, _}, valid_value(value))
+
   defp valid_value(value) when is_binary(value) do
     value = String.trim(value)
 

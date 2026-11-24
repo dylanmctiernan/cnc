@@ -47,9 +47,14 @@ defmodule CNC.Controllers.ProfilesTest do
     refute Map.has_key?(values, "stepping/engine")
     assert %{name: "Default"} = Profiles.selected(db, "c1")
 
-    assert {:ok, %{matches?: true, loaded: "config.yaml", written_by_app?: false}} =
+    # A file the app didn't write differs from what the profile would write
+    # (it leaves settings out), until the profile is written
+    assert {:ok, %{matches?: false, loaded: "config.yaml", written_by_app?: false}} =
              Profiles.check(m, db, ctl)
 
+    assert Profiles.last_seen(db, "c1") == %{name: "Default", matches?: false}
+    :ok = Profiles.switch(m, db, ctl, Profiles.selected(db, "c1").id)
+    assert eventually(fn -> match?({:ok, %{matches?: true}}, Profiles.check(m, db, ctl)) end)
     assert Profiles.last_seen(db, "c1") == %{name: "Default", matches?: true}
   end
 
@@ -127,12 +132,18 @@ defmodule CNC.Controllers.ProfilesTest do
     {:ok, _} = Profiles.set(m, db, ctl, [{"axes/x/max_rate_mm_per_min", "2500"}])
     [before | _] = Config.history(db, "c1")
     {:ok, _} = Config.restore(m, db, "c1", before)
+    # (The page restarts the controller after restoring its file.)
+    :ok = Config.activate(m, "config.yaml")
+    assert eventually(fn -> Machine.status(m).state == :alarm end)
 
-    assert {:ok, %{matches?: false, differences: [%{path: "axes/x/max_rate_mm_per_min"}]}} =
-             Profiles.check(m, db, ctl)
+    {:ok, %{matches?: false, differences: diffs}} = Profiles.check(m, db, ctl)
 
+    assert %{profile: "2500", controller: "3000.000"} =
+             Enum.find(diffs, &(&1.path == "axes/x/max_rate_mm_per_min"))
+
+    # The file's values win: they go into the profile, which is written
     :ok = Profiles.take_file(m, db, ctl)
-    assert {:ok, %{matches?: true}} = Profiles.check(m, db, ctl)
+    assert eventually(fn -> match?({:ok, %{matches?: true}}, Profiles.check(m, db, ctl)) end)
     assert [%{values: %{"axes/x/max_rate_mm_per_min" => "3000.000"}}] = Profiles.list(db, "c1")
   end
 
@@ -151,9 +162,13 @@ defmodule CNC.Controllers.ProfilesTest do
     assert [%{values: %{"axes/z/max_rate_mm_per_min" => "700"}}] = Profiles.list(db, "c1")
   end
 
-  test "loading another file directly is an override", %{m: m, db: db, ctl: ctl} do
+  test "another file loaded is an override; uploading your own replaces config.yaml", %{
+    m: m,
+    db: db,
+    ctl: ctl
+  } do
     {:ok, _} = Config.save_running_as(m, "mine.yaml")
-    :ok = Profiles.use_file(m, "mine.yaml")
+    :ok = Config.activate(m, "mine.yaml")
 
     assert eventually(fn ->
              match?({:ok, %{override?: true, loaded: "mine.yaml"}}, Profiles.check(m, db, ctl))
@@ -161,6 +176,38 @@ defmodule CNC.Controllers.ProfilesTest do
 
     assert Profiles.set(m, db, ctl, [{"axes/x/max_rate_mm_per_min", "1"}]) == {:error, :override}
     assert %{matches?: false} = Profiles.last_seen(db, "c1")
+
+    # The escape hatch: a file of your own becomes config.yaml
+    {:ok, text} = Config.show(m, "mine.yaml")
+    own = String.replace(text, "max_rate_mm_per_min: 3000.000", "max_rate_mm_per_min: 1500")
+    assert Profiles.replace_file(m, db, ctl, "") == {:error, :not_a_config}
+    :ok = Profiles.replace_file(m, db, ctl, own)
+
+    assert eventually(fn ->
+             match?(
+               {:ok, %{loaded: "config.yaml", matches?: false, written_by_app?: false}},
+               Profiles.check(m, db, ctl)
+             )
+           end)
+
+    {:ok, %{differences: diffs}} = Profiles.check(m, db, ctl)
+    assert Enum.any?(diffs, &(&1.controller == "1500"))
+
+    # A file that leaves settings out differs by those too
+    :ok =
+      Profiles.replace_file(
+        m,
+        db,
+        ctl,
+        "name: Mine\naxes:\n  x:\n    max_rate_mm_per_min: 3000\n"
+      )
+
+    assert eventually(fn ->
+             match?({:ok, %{written_by_app?: false}}, Profiles.check(m, db, ctl))
+           end)
+
+    {:ok, %{differences: diffs}} = Profiles.check(m, db, ctl)
+    assert Enum.any?(diffs, &(&1.path == "axes/y/max_rate_mm_per_min" and &1.controller == nil))
   end
 
   defp eventually(fun, timeout \\ 5000) do

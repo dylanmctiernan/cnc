@@ -26,8 +26,15 @@ defmodule CNCWeb.ConfigLiveTest do
   test "first visit: the Default profile, in use; change a setting", %{conn: conn, id: id} do
     {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
     assert has_element?(view, "#in-use", "Default")
-    assert has_element?(view, "#check-ok")
-    assert has_element?(view, "#profiles li.is-active", "Default")
+    # The controller's own file isn't what the app writes (it leaves settings out)
+    assert has_element?(view, "#check-differs", "wasn't written by the app")
+    view |> element("#write-profile") |> render_click()
+    assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
+    assert has_element?(view, "#current", "Default")
+    assert has_element?(view, "#current-x-max_rate_mm_per_min", "3000")
+    refute has_element?(view, "#axes-form")
+
+    view |> element("#edit-current") |> render_click()
     assert has_element?(view, "#set-x-max_rate_mm_per_min[value='3000']")
 
     view
@@ -56,55 +63,86 @@ defmodule CNCWeb.ConfigLiveTest do
     fast = profile_id(view, "Fast")
 
     view |> element("#profile-#{fast} button", "Switch to this") |> render_click()
-    assert eventually(fn -> has_element?(view, "#profile-#{fast}.is-active") end, 3000)
+    assert eventually(fn -> has_element?(view, "#current", "Fast") end, 3000)
     assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
-    assert has_element?(view, "#in-use", "Fast")
+    assert has_element?(view, "#profiles", "Default")
 
     {:ok, list, _} = live(conn, ~p"/controllers")
     assert has_element?(list, "#profile-of-#{id}", "Fast")
   end
 
-  test "an earlier version restored: the file differs; keep it or write the profile", %{
+  test "an earlier version restored: the file differs; write the profile back", %{
     conn: conn,
     id: id
   } do
     {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    view |> element("#edit-current") |> render_click()
 
     view
     |> form("#axes-form", set: %{"axes/x/max_rate_mm_per_min" => "2500"})
     |> render_submit()
 
+    view |> element("#advanced summary") |> render_click()
     view |> element("#version-0 button", "Restore") |> render_click()
-    assert has_element?(view, "#check-differs")
+    assert eventually(fn -> has_element?(view, "#check-differs") end, 3000)
     assert has_element?(view, "#diff-axes-x-max_rate_mm_per_min")
 
     view |> element("#write-profile") |> render_click()
     assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
-
-    # A new profile isn't written anywhere until switched to: one file stays
-    view |> form("#new-profile-form", new: %{name: "Spare"}) |> render_submit()
-    assert has_element?(view, "#config-files li", "config.yaml")
-    refute has_element?(view, "#config-files li", "spare")
   end
 
-  test "advanced: view the file; load another directly (an override)", %{
+  test "other profiles: view, edit (stored only), then switch to it", %{conn: conn, id: id} do
+    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
+    assert has_element?(view, "#no-other-profiles")
+    view |> form("#new-profile-form", new: %{name: "Slow"}) |> render_submit()
+    slow = profile_id(view, "Slow")
+
+    view |> element("#profile-#{slow} button", "View") |> render_click()
+    assert has_element?(view, "#view-#{slow}-x-max_rate_mm_per_min", "3000")
+
+    view |> element("#profile-#{slow} button", "Edit") |> render_click()
+
+    view
+    |> form("#edit-profile-#{slow}",
+      set: %{"axes/x/max_rate_mm_per_min" => "1000", "axes/y/max_rate_mm_per_min" => "fast"}
+    )
+    |> render_submit()
+
+    assert has_element?(view, ".cnc-set-error", "number")
+
+    view
+    |> form("#edit-profile-#{slow}", set: %{"axes/x/max_rate_mm_per_min" => "1000"})
+    |> render_submit()
+
+    # Stored, not sent: the current settings are unchanged
+    assert has_element?(view, "#current-x-max_rate_mm_per_min", "3000")
+    assert has_element?(view, "#view-#{slow}-x-max_rate_mm_per_min", "1000")
+
+    view |> element("#profile-#{slow} button", "Switch to this") |> render_click()
+    assert eventually(fn -> has_element?(view, "#current", "Slow") end, 3000)
+    assert eventually(fn -> has_element?(view, "#current-x-max_rate_mm_per_min", "1000") end)
+  end
+
+  test "advanced: view the file; upload your own (it becomes config.yaml)", %{
     conn: conn,
-    id: id,
-    m: m
+    id: id
   } do
     {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
     refute has_element?(view, "#advanced[open]")
     view |> element("#advanced summary") |> render_click()
-    view |> element("#config-file-config-yaml button", "View") |> render_click()
-    # Stays open through updates
+    view |> element("#view-file") |> render_click()
     assert has_element?(view, "#advanced[open]")
     assert has_element?(view, "#config-text", "max_rate_mm_per_min")
 
-    {:ok, _} = CNC.Controllers.Config.save_running_as(m, "mine.yaml")
-    {:ok, view, _} = live(conn, ~p"/controllers/#{id}/configuration")
-    view |> element("#config-file-mine-yaml button", "Use this file directly") |> render_click()
-    assert eventually(fn -> has_element?(view, "#check-override") end, 3000)
-    refute has_element?(view, "#axes-form")
+    own = "name: Mine\naxes:\n  x:\n    max_rate_mm_per_min: 1500\n"
+
+    view
+    |> file_input("#upload-form", :config_file, [%{name: "mine.yaml", content: own}])
+    |> render_upload("mine.yaml")
+
+    view |> form("#upload-form") |> render_submit()
+    assert eventually(fn -> has_element?(view, "#check-differs") end, 3000)
+    assert has_element?(view, "#check-differs", "wasn't written by the app")
 
     view |> element("#write-profile") |> render_click()
     assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
@@ -117,7 +155,7 @@ defmodule CNCWeb.ConfigLiveTest do
 
     view |> element("#config-connect") |> render_click()
     assert eventually(fn -> Machine.status(m).state == :alarm end, 3000)
-    assert eventually(fn -> has_element?(view, "#config-file-config-yaml") end, 3000)
+    assert eventually(fn -> has_element?(view, "#current") end, 3000)
   end
 
   test "an unknown controller goes back to the list", %{conn: conn} do

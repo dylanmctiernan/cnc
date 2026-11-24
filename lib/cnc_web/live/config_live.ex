@@ -48,6 +48,8 @@ defmodule CNCWeb.ConfigLive do
          |> assign(viewing: nil, text: nil, showing: nil, renaming: nil, error: nil)
          |> assign(working: nil, field_errors: %{}, other: %{"path" => "", "value" => ""})
          |> assign(new: %{"name" => "", "from" => ""}, advanced?: false)
+         |> assign(editing_current?: false, editing_profile: nil, showing_profile: nil)
+         |> allow_upload(:config_file, accept: :any, max_entries: 1, max_file_size: 256_000)
          |> refresh_active()
          |> maybe_load()}
     end
@@ -143,16 +145,57 @@ defmodule CNCWeb.ConfigLive do
   ## Settings of the profile in use
 
   # The axis table: every value that differs from what's running is set.
+  def handle_event("edit_current", _, socket),
+    do: {:noreply, assign(socket, editing_current?: true, field_errors: %{})}
+
+  def handle_event("cancel_edit_current", _, socket),
+    do: {:noreply, assign(socket, editing_current?: false, field_errors: %{})}
+
+  # The axis table: every value that differs from the profile is set.
   def handle_event("apply_axes", %{"set" => values}, socket) do
-    %{settings: settings} = socket.assigns
+    current = socket.assigns.check.profile.values
 
     changes =
       for {path, value} <- values,
           String.trim(value) != "",
-          not same_value?(settings[path], value),
+          not same_value?(current[path], value),
           do: {path, value}
 
     apply_changes(socket, changes)
+  end
+
+  def handle_event("show_all", %{"profile" => pid}, socket) do
+    showing = if socket.assigns.showing_profile == pid, do: nil, else: pid
+    {:noreply, assign(socket, showing_profile: showing)}
+  end
+
+  def handle_event("edit_profile", %{"profile" => pid}, socket),
+    do: {:noreply, assign(socket, editing_profile: pid, field_errors: %{})}
+
+  def handle_event("cancel_edit_profile", _, socket),
+    do: {:noreply, assign(socket, editing_profile: nil, field_errors: %{})}
+
+  def handle_event("save_profile", %{"profile" => pid, "set" => values}, socket) do
+    %{cnc: cnc, controller: c, profiles: profiles} = socket.assigns
+    current = Enum.find_value(profiles, %{}, &(&1.id == pid && &1.values))
+
+    changes =
+      for {path, value} <- values,
+          String.trim(value) != "",
+          not same_value?(current[path], value),
+          do: {path, value}
+
+    case Profiles.edit(cnc.db, c.id, pid, changes) do
+      {:ok, %{errors: errors}} when errors == %{} ->
+        {:noreply, socket |> assign(editing_profile: nil, field_errors: %{}) |> maybe_load()}
+
+      {:ok, %{errors: errors}} ->
+        errors = Map.new(errors, fn {path, reason} -> {path, error_text(reason)} end)
+        {:noreply, socket |> assign(field_errors: errors) |> maybe_load()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
   end
 
   def handle_event("other_change", %{"other" => other}, socket),
@@ -183,8 +226,11 @@ defmodule CNCWeb.ConfigLive do
     %{cnc: cnc, controller: c} = socket.assigns
 
     case Profiles.take_file(cnc.machine, cnc.db, c) do
-      :ok -> {:noreply, socket |> assign(error: nil) |> maybe_load()}
-      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
+      :ok ->
+        {:noreply, assign(socket, working: "Writing it: the controller restarts…", error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
     end
   end
 
@@ -211,34 +257,29 @@ defmodule CNCWeb.ConfigLive do
   def handle_event("close_view", _, socket),
     do: {:noreply, assign(socket, viewing: nil, text: nil)}
 
-  def handle_event("use_file", %{"name" => name}, socket) do
-    case Profiles.use_file(machine(socket), name) do
-      :ok ->
-        {:noreply,
-         assign(socket, working: "Loading #{name}: the controller restarts…", error: nil)}
+  def handle_event("validate_upload", _, socket), do: {:noreply, socket}
 
-      {:error, reason} ->
-        {:noreply, assign(socket, error: error_text(reason))}
-    end
-  end
-
-  def handle_event("restart", _, socket) do
-    case Config.activate(machine(socket), active_file(socket.assigns)) do
-      :ok -> {:noreply, assign(socket, working: "Restarting…", error: nil)}
-      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
-    end
-  end
-
-  def handle_event("delete", %{"name" => name}, socket) do
+  # The escape hatch: a file of your own becomes the controller's config.
+  def handle_event("upload_file", _, socket) do
     %{cnc: cnc, controller: c} = socket.assigns
 
-    case Config.delete(cnc.machine, name, {cnc.db, c.id}) do
-      :ok ->
-        socket = if socket.assigns.viewing == name, do: assign(socket, viewing: nil), else: socket
-        {:noreply, socket |> assign(error: nil) |> maybe_load()}
+    uploaded =
+      consume_uploaded_entries(socket, :config_file, fn %{path: path}, entry ->
+        {:ok, {entry.client_name, File.read!(path)}}
+      end)
 
-      {:error, reason} ->
-        {:noreply, assign(socket, error: error_text(reason))}
+    with [{name, text}] <- uploaded,
+         true <- Regex.match?(~r/\.ya?ml\z/i, name) || {:error, :not_yaml},
+         :ok <- Profiles.replace_file(cnc.machine, cnc.db, c, text) do
+      {:noreply,
+       assign(socket,
+         working: "Writing #{name} as #{Profiles.file()}: the controller restarts…",
+         viewing: nil,
+         error: nil
+       )}
+    else
+      [] -> {:noreply, socket}
+      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
     end
   end
 
@@ -247,25 +288,36 @@ defmodule CNCWeb.ConfigLive do
     {:noreply, assign(socket, showing: if(socket.assigns.showing == i, do: nil, else: i))}
   end
 
+  # An earlier version back into its file; for the controller's file, a
+  # restart loads it (then it shows as differing from the profile).
   def handle_event("restore", %{"i" => i}, socket) do
     %{cnc: cnc, controller: c, history: history} = socket.assigns
     version = Enum.at(history, String.to_integer(i))
 
-    case version && Config.restore(cnc.machine, cnc.db, c.id, version) do
-      {:ok, file} ->
-        note =
-          if file == active_file(socket.assigns),
-            do: "Restored #{file}. Restart the controller to load it.",
-            else: "Restored #{file}."
+    with %{} <- version || {:error, :not_found},
+         {:ok, file} <- Config.restore(cnc.machine, cnc.db, c.id, version) do
+      if file == Profiles.file() do
+        case Config.activate(cnc.machine, file) do
+          :ok ->
+            {:noreply,
+             assign(socket,
+               working: "Restoring #{file}: the controller restarts…",
+               showing: nil,
+               error: nil
+             )}
 
+          {:error, reason} ->
+            {:noreply, assign(socket, error: error_text(reason))}
+        end
+      else
         {:noreply,
-         socket |> assign(error: nil, showing: nil) |> put_flash(:info, note) |> maybe_load()}
-
-      nil ->
-        {:noreply, assign(socket, error: "That version isn't in the history any more.")}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, error: error_text(reason))}
+         socket
+         |> assign(error: nil, showing: nil)
+         |> put_flash(:info, "Restored #{file}.")
+         |> maybe_load()}
+      end
+    else
+      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
     end
   end
 
@@ -318,131 +370,298 @@ defmodule CNCWeb.ConfigLive do
             <% not ready?(assigns) -> %>
               <p class="cnc-note" id="config-waiting">{waiting_text(@machine.state)}</p>
             <% true -> %>
-              <section :if={@check} class="cnc-set-group" id="in-use" aria-label="In use">
-                <p class="cnc-in-use">
-                  Profile <strong>{@check.profile.name}</strong>
-                  <%= cond do %>
-                    <% @check.matches? -> %>
-                      <span class="cnc-ok" id="check-ok">
-                        is what the controller runs ({@check.loaded} matches it).
-                      </span>
-                    <% @check.override? -> %>
-                      <span class="cnc-warn" id="check-override">
-                        is selected, but the controller loaded {@check.loaded} directly.
-                      </span>
-                    <% true -> %>
-                      <span class="cnc-warn" id="check-differs">
-                        is selected, but the controller's {@check.loaded} differs from it{if not @check.written_by_app?,
-                          do: " (it wasn't written by the app)"}.
-                      </span>
-                  <% end %>
-                </p>
-                <div :if={not @check.matches?} id="check-differences">
-                  <ul :if={@check.differences != []} class="cnc-changes">
-                    <li
-                      :for={d <- Enum.take(@check.differences, 12)}
-                      id={"diff-#{dom_id(d.path)}"}
-                    >
-                      <code>{d.path}</code>
-                      <span class="cnc-change-vals">
-                        profile {shown(d.profile) || "none"}, controller
-                        <strong>{shown(d.controller) || "none"}</strong>
-                      </span>
-                    </li>
-                  </ul>
-                  <p :if={length(@check.differences) > 12} class="cnc-sub">
-                    and {length(@check.differences) - 12} more.
-                  </p>
-                  <div class="cnc-row">
-                    <button
-                      type="button"
-                      id="write-profile"
-                      class="cnc-btn cnc-btn--primary"
-                      phx-click="switch"
-                      phx-value-profile={@check.profile.id}
-                      disabled={@machine.moving?}
-                      data-confirm={"Write #{@check.profile.name} to the controller and restart it? What its file holds now goes into the history."}
-                    >
-                      Write {@check.profile.name} and restart
-                    </button>
-                    <button
-                      :if={not @check.override?}
-                      type="button"
-                      id="take-file"
-                      class="cnc-btn"
-                      phx-click="take_file"
-                      data-confirm={"Replace #{@check.profile.name}'s values with the controller's file?"}
-                    >
-                      Keep the controller's values in {@check.profile.name}
-                    </button>
+              <section
+                :if={@check}
+                class="cnc-set-group"
+                id="current"
+                aria-label="Current settings"
+              >
+                <h2 class="cnc-h">Current settings</h2>
+                <div class="cnc-ctl-card is-active" id={"profile-#{@check.profile.id}"}>
+                  <div class="cnc-ctl-card-head">
+                    <h3 :if={@renaming != @check.profile.id} class="cnc-ctl-name" id="current-name">
+                      {@check.profile.name}
+                    </h3>
+                    <.rename_form :if={@renaming == @check.profile.id} profile={@check.profile} />
+                    <span class="cnc-ctl-tag">Selected</span>
                   </div>
+                  <div id="in-use">
+                    <p class="cnc-in-use">
+                      Profile <strong>{@check.profile.name}</strong>
+                      <%= cond do %>
+                        <% @check.matches? -> %>
+                          <span class="cnc-ok" id="check-ok">
+                            is what the controller runs ({@check.loaded} matches it).
+                          </span>
+                        <% @check.override? -> %>
+                          <span class="cnc-warn" id="check-override">
+                            is selected, but the controller loaded {@check.loaded} directly.
+                          </span>
+                        <% true -> %>
+                          <span class="cnc-warn" id="check-differs">
+                            is selected, but the controller's {@check.loaded} differs from it{if not @check.written_by_app?,
+                              do: " (it wasn't written by the app)"}.
+                          </span>
+                      <% end %>
+                    </p>
+                    <div :if={not @check.matches?} id="check-differences" class="cnc-warn-block">
+                      <ul :if={conflicts(@check) != []} class="cnc-changes">
+                        <li :for={d <- Enum.take(conflicts(@check), 12)} id={"diff-#{dom_id(d.path)}"}>
+                          <code>{d.path}</code>
+                          <span class="cnc-change-vals">
+                            profile {shown(d.profile) || "not in it"}, file
+                            <strong>{shown(d.controller)}</strong>
+                          </span>
+                        </li>
+                      </ul>
+                      <p :if={length(conflicts(@check)) > 12} class="cnc-sub">
+                        and {length(conflicts(@check)) - 12} more.
+                      </p>
+                      <p :if={left_out(@check) > 0} class="cnc-sub" id="diff-left-out">
+                        The file leaves out {left_out(@check)} settings the profile has (FluidNC uses
+                        its defaults for those).
+                      </p>
+                      <div class="cnc-row">
+                        <button
+                          type="button"
+                          id="write-profile"
+                          class="cnc-btn cnc-btn--primary"
+                          phx-click="switch"
+                          phx-value-profile={@check.profile.id}
+                          disabled={@machine.moving?}
+                          data-confirm={"Write #{@check.profile.name} to the controller and restart it? What its file holds now goes into the history."}
+                        >
+                          Write {@check.profile.name} and restart
+                        </button>
+                        <button
+                          :if={not @check.override?}
+                          type="button"
+                          id="take-file"
+                          class="cnc-btn"
+                          phx-click="take_file"
+                          data-confirm={"Replace #{@check.profile.name}'s values with the controller's file?"}
+                        >
+                          Keep the controller's values in {@check.profile.name}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <%!-- Only when the file is the profile's: otherwise the file check above
+                       already explains why the running values differ. --%>
+                  <div :if={@drift != [] and @check.matches?} id="config-drift" class="cnc-warn-block">
+                    <p class="cnc-warn">
+                      The controller is running values that differ from {@check.profile.name} (changed in the console, say):
+                    </p>
+                    <ul class="cnc-changes">
+                      <li :for={d <- @drift} id={"drift-#{dom_id(d.path)}"}>
+                        <code>{d.path}</code>
+                        <span class="cnc-change-vals">
+                          profile {shown(d.profile)}, running <strong>{shown(d.controller)}</strong>
+                        </span>
+                      </li>
+                    </ul>
+                    <div class="cnc-row">
+                      <button
+                        type="button"
+                        id="keep-drift"
+                        class="cnc-btn cnc-btn--primary"
+                        phx-click="keep_drift"
+                      >
+                        Keep them in {@check.profile.name}
+                      </button>
+                      <button type="button" id="put-back" class="cnc-btn" phx-click="put_back">
+                        Put the profile's back
+                      </button>
+                    </div>
+                  </div>
+
+                  <%= if @editing_current? and not @check.override? do %>
+                    <form id="axes-form" class="cnc-axes-form" phx-submit="apply_axes">
+                      <.axes_table
+                        values={@check.profile.values}
+                        editable
+                        id_prefix="set"
+                        errors={@field_errors}
+                      />
+                      <p :for={{path, msg} <- @field_errors} class="cnc-set-error">
+                        {path}: {msg}
+                      </p>
+                      <div class="cnc-row">
+                        <button type="submit" class="cnc-btn cnc-btn--primary" id="apply-axes">
+                          Apply
+                        </button>
+                        <button type="button" class="cnc-btn" phx-click="cancel_edit_current">
+                          Done
+                        </button>
+                      </div>
+                    </form>
+
+                    <form
+                      id="other-form"
+                      class="cnc-ctl-form"
+                      phx-change="other_change"
+                      phx-submit="apply_other"
+                    >
+                      <h3 class="cnc-sub">Any other setting</h3>
+                      <div class="cnc-other-row">
+                        <label class="cnc-ctl-field">
+                          <span>Setting</span>
+                          <input
+                            name="other[path]"
+                            value={@other["path"]}
+                            list="setting-paths"
+                            placeholder="axes/x/homing/seek_mm_per_min"
+                            autocomplete="off"
+                            spellcheck="false"
+                          />
+                        </label>
+                        <label class="cnc-ctl-field">
+                          <span>
+                            Value<span :if={@settings[clean_path(@other["path"])]} class="cnc-now">
+                              (now {shown(@settings[clean_path(@other["path"])])})
+                            </span>
+                          </span>
+                          <input name="other[value]" value={@other["value"]} autocomplete="off" />
+                        </label>
+                      </div>
+                      <datalist id="setting-paths">
+                        <option :for={p <- @paths} value={p} />
+                      </datalist>
+                      <div class="cnc-row">
+                        <button type="submit" class="cnc-btn">Apply</button>
+                      </div>
+                    </form>
+                  <% else %>
+                    <.axes_table values={@check.profile.values} id_prefix="current" />
+                    <div class="cnc-row">
+                      <button
+                        :if={not @check.override?}
+                        type="button"
+                        id="edit-current"
+                        class="cnc-btn cnc-btn--primary"
+                        phx-click="edit_current"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        class="cnc-btn"
+                        id="show-all-current"
+                        phx-click="show_all"
+                        phx-value-profile={@check.profile.id}
+                      >
+                        {if @showing_profile == @check.profile.id, do: "Hide", else: "View"}
+                      </button>
+                      <button
+                        type="button"
+                        class="cnc-btn cnc-btn--quiet"
+                        phx-click="rename"
+                        phx-value-profile={@check.profile.id}
+                      >
+                        Rename
+                      </button>
+                    </div>
+                    <.all_values
+                      :if={@showing_profile == @check.profile.id}
+                      values={@check.profile.values}
+                    />
+                  <% end %>
                 </div>
               </section>
 
-              <section class="cnc-set-group" aria-label="Profiles">
-                <h2 class="cnc-h">Profiles</h2>
+              <section class="cnc-set-group" aria-label="Other profiles">
+                <h2 class="cnc-h">Other profiles</h2>
+                <p :if={others(@profiles, @check) == []} class="cnc-sub" id="no-other-profiles">
+                  None yet. Make one to try a variation: it starts as a copy, and switching to
+                  it writes it to the controller.
+                </p>
                 <ul class="cnc-ctls" id="profiles">
                   <li
-                    :for={p <- @profiles}
+                    :for={p <- others(@profiles, @check)}
                     id={"profile-#{p.id}"}
-                    class={["cnc-ctl-card", selected?(@check, p) && "is-active"]}
+                    class="cnc-ctl-card"
                   >
                     <div class="cnc-ctl-card-head">
                       <h3 :if={@renaming != p.id} class="cnc-ctl-name">{p.name}</h3>
-                      <form
-                        :if={@renaming == p.id}
-                        id={"rename-#{p.id}"}
-                        class="cnc-rename"
-                        phx-submit="save_name"
-                      >
-                        <input type="hidden" name="profile" value={p.id} />
-                        <input
-                          name="name"
-                          value={p.name}
-                          autocomplete="off"
-                          aria-label="Profile name"
-                        />
-                        <button type="submit" class="cnc-btn">Save</button>
-                        <button
-                          type="button"
-                          class="cnc-btn cnc-btn--quiet"
-                          phx-click="cancel_rename"
-                        >
+                      <.rename_form :if={@renaming == p.id} profile={p} />
+                    </div>
+
+                    <form
+                      :if={@editing_profile == p.id}
+                      id={"edit-profile-#{p.id}"}
+                      class="cnc-axes-form"
+                      phx-submit="save_profile"
+                    >
+                      <input type="hidden" name="profile" value={p.id} />
+                      <.axes_table
+                        values={p.values}
+                        editable
+                        id_prefix={"p-#{p.id}"}
+                        errors={@field_errors}
+                      />
+                      <p :for={{path, msg} <- @field_errors} class="cnc-set-error">
+                        {path}: {msg}
+                      </p>
+                      <p class="cnc-sub">
+                        Saved in the profile; the controller gets them when you switch to it.
+                      </p>
+                      <div class="cnc-row">
+                        <button type="submit" class="cnc-btn cnc-btn--primary">Save</button>
+                        <button type="button" class="cnc-btn" phx-click="cancel_edit_profile">
                           Cancel
                         </button>
-                      </form>
-                      <span :if={selected?(@check, p)} class="cnc-ctl-tag">Selected</span>
-                    </div>
-                    <div :if={@renaming != p.id} class="cnc-row">
+                      </div>
+                    </form>
+
+                    <div :if={@editing_profile != p.id and @renaming != p.id} class="cnc-row">
                       <button
-                        :if={not selected?(@check, p)}
                         type="button"
                         class="cnc-btn cnc-btn--primary"
                         phx-click="switch"
                         phx-value-profile={p.id}
                         disabled={@machine.moving?}
-                        data-confirm={"Switch to #{p.name}? The controller restarts with it and comes back locked."}
+                        data-confirm={"Switch to #{p.name}? It's written to the controller, which restarts and comes back locked."}
                       >
                         Switch to this
                       </button>
                       <button
                         type="button"
                         class="cnc-btn"
+                        phx-click="show_all"
+                        phx-value-profile={p.id}
+                      >
+                        {if @showing_profile == p.id, do: "Hide", else: "View"}
+                      </button>
+                      <button
+                        type="button"
+                        class="cnc-btn"
+                        phx-click="edit_profile"
+                        phx-value-profile={p.id}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        class="cnc-btn cnc-btn--quiet"
                         phx-click="rename"
                         phx-value-profile={p.id}
                       >
                         Rename
                       </button>
                       <button
-                        :if={not selected?(@check, p)}
                         type="button"
                         class="cnc-btn cnc-btn--quiet"
                         phx-click="delete_profile"
                         phx-value-profile={p.id}
-                        data-confirm={"Delete the profile #{p.name}? Its file stays on the controller."}
+                        data-confirm={"Delete the profile #{p.name}?"}
                       >
                         Delete
                       </button>
+                    </div>
+                    <div :if={@showing_profile == p.id and @editing_profile != p.id}>
+                      <.axes_table values={p.values} id_prefix={"view-#{p.id}"} />
+                      <.all_values values={p.values} />
                     </div>
                   </li>
                 </ul>
@@ -489,122 +708,6 @@ defmodule CNCWeb.ConfigLive do
               </section>
 
               <section
-                :if={@check && not @check.override?}
-                class="cnc-set-group"
-                aria-label="Settings"
-              >
-                <h2 class="cnc-h">Settings of {@check.profile.name}</h2>
-                <form
-                  :if={axes(@settings) != []}
-                  id="axes-form"
-                  class="cnc-axes-form"
-                  phx-submit="apply_axes"
-                >
-                  <table class="cnc-axes">
-                    <thead>
-                      <tr>
-                        <th></th>
-                        <th :for={a <- axes(@settings)} scope="col">{String.upcase(a)}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr :for={{field, label} <- axis_fields()}>
-                        <th scope="row">{label}</th>
-                        <td :for={a <- axes(@settings)}>
-                          <input
-                            name={"set[axes/#{a}/#{field}]"}
-                            id={"set-#{a}-#{field}"}
-                            value={shown(@settings["axes/#{a}/#{field}"])}
-                            inputmode="decimal"
-                            autocomplete="off"
-                            aria-label={"#{String.upcase(a)} #{label}"}
-                            class={[@field_errors["axes/#{a}/#{field}"] && "is-error"]}
-                            title={@field_errors["axes/#{a}/#{field}"]}
-                          />
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <p :for={{path, msg} <- @field_errors} class="cnc-set-error">{path}: {msg}</p>
-                  <div class="cnc-row">
-                    <button type="submit" class="cnc-btn cnc-btn--primary" id="apply-axes">
-                      Apply
-                    </button>
-                  </div>
-                </form>
-
-                <form
-                  id="other-form"
-                  class="cnc-ctl-form"
-                  phx-change="other_change"
-                  phx-submit="apply_other"
-                >
-                  <h3 class="cnc-sub">Any other setting</h3>
-                  <div class="cnc-other-row">
-                    <label class="cnc-ctl-field">
-                      <span>Setting</span>
-                      <input
-                        name="other[path]"
-                        value={@other["path"]}
-                        list="setting-paths"
-                        placeholder="axes/x/homing/seek_mm_per_min"
-                        autocomplete="off"
-                        spellcheck="false"
-                      />
-                    </label>
-                    <label class="cnc-ctl-field">
-                      <span>
-                        Value<span :if={@settings[clean_path(@other["path"])]} class="cnc-now">
-                          (now {shown(@settings[clean_path(@other["path"])])})
-                        </span>
-                      </span>
-                      <input name="other[value]" value={@other["value"]} autocomplete="off" />
-                    </label>
-                  </div>
-                  <datalist id="setting-paths">
-                    <option :for={p <- @paths} value={p} />
-                  </datalist>
-                  <div class="cnc-row">
-                    <button type="submit" class="cnc-btn">Apply</button>
-                  </div>
-                </form>
-              </section>
-
-              <section
-                :if={@drift != []}
-                class="cnc-set-group"
-                aria-label="Differences"
-                id="config-drift"
-              >
-                <h2 class="cnc-h">Running values that differ from {@check.profile.name}</h2>
-                <p class="cnc-sub">
-                  It's running values the profile doesn't have (changed in the console, say).
-                  Keep them in the profile, or put the profile's back.
-                </p>
-                <ul class="cnc-changes">
-                  <li :for={d <- @drift} id={"drift-#{dom_id(d.path)}"}>
-                    <code>{d.path}</code>
-                    <span class="cnc-change-vals">
-                      profile {shown(d.profile)}, controller <strong>{shown(d.controller)}</strong>
-                    </span>
-                  </li>
-                </ul>
-                <div class="cnc-row">
-                  <button
-                    type="button"
-                    id="keep-drift"
-                    class="cnc-btn cnc-btn--primary"
-                    phx-click="keep_drift"
-                  >
-                    Keep in profile
-                  </button>
-                  <button type="button" id="put-back" class="cnc-btn" phx-click="put_back">
-                    Put back
-                  </button>
-                </div>
-              </section>
-
-              <section
                 :if={@wiring.checked > 0}
                 class="cnc-set-group"
                 aria-label="Wiring"
@@ -633,70 +736,49 @@ defmodule CNCWeb.ConfigLive do
 
               <details class="cnc-set-group cnc-advanced" id="advanced" open={@advanced?}>
                 <summary class="cnc-h" phx-click="toggle_advanced">
-                  Advanced: the files on the controller
+                  Advanced: the controller's config file
                 </summary>
                 <p class="cnc-sub">
-                  The app keeps one file here, config.yaml, written from the selected profile;
-                  its earlier versions are kept in the app. Loading another file directly
-                  overrides the profiles until you switch to one.
+                  The controller loads {Profiles.file()}, written from the selected profile. As
+                  an escape hatch you can upload a config file of your own: it replaces {Profiles.file()} (the one there now is kept below) and the controller restarts
+                  with it. This page then shows how it differs from the profile.
                 </p>
-                <ul class="cnc-ctls" id="config-files">
-                  <li
-                    :for={f <- @files}
-                    id={"config-file-#{dom_id(f.name)}"}
-                    class={["cnc-ctl-card", f.name == active_file(assigns) && "is-active"]}
+                <div class="cnc-row">
+                  <button
+                    type="button"
+                    id="view-file"
+                    class="cnc-btn"
+                    phx-click={if @viewing, do: "close_view", else: "view"}
+                    phx-value-name={active_file(assigns)}
                   >
-                    <div class="cnc-ctl-card-head">
-                      <h3 class="cnc-ctl-name">{f.name}</h3>
-                      <span :if={f.name == active_file(assigns)} class="cnc-ctl-tag">Loaded</span>
-                      <span :if={f.name == Profiles.file()} class="cnc-dim">the app's file</span>
-                      <span class="cnc-ctl-size">{size(f.size)}</span>
-                    </div>
-                    <div class="cnc-row">
-                      <button
-                        type="button"
-                        class="cnc-btn"
-                        phx-click={if @viewing == f.name, do: "close_view", else: "view"}
-                        phx-value-name={f.name}
-                      >
-                        {if @viewing == f.name, do: "Hide", else: "View"}
-                      </button>
-                      <button
-                        :if={f.name == active_file(assigns)}
-                        type="button"
-                        class="cnc-btn"
-                        id="restart-controller"
-                        phx-click="restart"
-                        disabled={@machine.moving?}
-                        data-confirm="Restart the controller? It reloads this file and comes back locked."
-                      >
-                        Restart to reload
-                      </button>
-                      <button
-                        :if={f.name != active_file(assigns)}
-                        type="button"
-                        class="cnc-btn"
-                        phx-click="use_file"
-                        phx-value-name={f.name}
-                        disabled={@machine.moving?}
-                        data-confirm={"Load #{f.name} directly? The controller restarts with it, outside the profiles."}
-                      >
-                        Use this file directly
-                      </button>
-                      <button
-                        :if={f.name != active_file(assigns)}
-                        type="button"
-                        class="cnc-btn cnc-btn--quiet"
-                        phx-click="delete"
-                        phx-value-name={f.name}
-                        data-confirm={"Delete #{f.name} from the controller?"}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                    <pre :if={@viewing == f.name} class="cnc-config-text" id="config-text">{@text}</pre>
-                  </li>
-                </ul>
+                    {if @viewing, do: "Hide #{@viewing}", else: "View #{active_file(assigns)}"}
+                  </button>
+                </div>
+                <pre :if={@viewing} class="cnc-config-text" id="config-text">{@text}</pre>
+
+                <form
+                  id="upload-form"
+                  class="cnc-ctl-form"
+                  phx-change="validate_upload"
+                  phx-submit="upload_file"
+                >
+                  <h3 class="cnc-sub">Upload a config file</h3>
+                  <.live_file_input upload={@uploads.config_file} class="cnc-file-input" />
+                  <p :for={err <- upload_errors(@uploads.config_file)} class="cnc-set-error">
+                    {upload_error(err)}
+                  </p>
+                  <div class="cnc-row">
+                    <button
+                      type="submit"
+                      id="upload-file"
+                      class="cnc-btn"
+                      disabled={@uploads.config_file.entries == [] or @machine.moving?}
+                      data-confirm={"Replace #{Profiles.file()} with this file and restart the controller?"}
+                    >
+                      Upload and restart
+                    </button>
+                  </div>
+                </form>
 
                 <div :if={@history != []} id="config-history-group">
                   <h3 class="cnc-sub">Earlier versions</h3>
@@ -751,12 +833,92 @@ defmodule CNCWeb.ConfigLive do
     case Profiles.set(cnc.machine, cnc.db, c, changes) do
       {:ok, %{errors: errors}} ->
         errors = Map.new(errors, fn {path, reason} -> {path, error_text(reason)} end)
-        {:noreply, socket |> assign(field_errors: errors, error: nil) |> maybe_load()}
+
+        {:noreply,
+         socket
+         |> assign(field_errors: errors, error: nil, editing_current?: errors != %{})
+         |> maybe_load()}
 
       {:error, reason} ->
         {:noreply, socket |> assign(error: error_text(reason)) |> maybe_load()}
     end
   end
+
+  attr :values, :map, required: true
+  attr :id_prefix, :string, required: true
+  attr :editable, :boolean, default: false
+  attr :errors, :map, default: %{}
+
+  # The usual per-axis settings, read-only or as inputs named set[path].
+  defp axes_table(assigns) do
+    ~H"""
+    <table :if={axes(@values) != []} class="cnc-axes" id={"#{@id_prefix}-axes"}>
+      <thead>
+        <tr>
+          <th></th>
+          <th :for={a <- axes(@values)} scope="col">{String.upcase(a)}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr :for={{field, label} <- axis_fields()}>
+          <th scope="row">{label}</th>
+          <td :for={a <- axes(@values)} class={[not @editable && "cnc-axes-value"]}>
+            <%= if @editable do %>
+              <input
+                name={"set[axes/#{a}/#{field}]"}
+                id={"#{@id_prefix}-#{a}-#{field}"}
+                value={shown(@values["axes/#{a}/#{field}"])}
+                inputmode="decimal"
+                autocomplete="off"
+                aria-label={"#{String.upcase(a)} #{label}"}
+                class={[@errors["axes/#{a}/#{field}"] && "is-error"]}
+                title={@errors["axes/#{a}/#{field}"]}
+              />
+            <% else %>
+              <span id={"#{@id_prefix}-#{a}-#{field}"}>{shown(@values["axes/#{a}/#{field}"])}</span>
+            <% end %>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    """
+  end
+
+  attr :values, :map, required: true
+
+  # Every setting in a profile, read-only.
+  defp all_values(assigns) do
+    ~H"""
+    <dl class="cnc-all-values">
+      <%= for {path, value} <- Enum.sort(@values) do %>
+        <dt>{path}</dt>
+        <dd>{shown(value)}</dd>
+      <% end %>
+    </dl>
+    """
+  end
+
+  attr :profile, :map, required: true
+
+  defp rename_form(assigns) do
+    ~H"""
+    <form id={"rename-#{@profile.id}"} class="cnc-rename" phx-submit="save_name">
+      <input type="hidden" name="profile" value={@profile.id} />
+      <input name="name" value={@profile.name} autocomplete="off" aria-label="Profile name" />
+      <button type="submit" class="cnc-btn">Save</button>
+      <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="cancel_rename">
+        Cancel
+      </button>
+    </form>
+    """
+  end
+
+  # Differences where the file has a value; the rest it leaves out.
+  defp conflicts(check), do: Enum.reject(check.differences, &is_nil(&1.controller))
+  defp left_out(check), do: Enum.count(check.differences, &is_nil(&1.controller))
+
+  defp others(profiles, %{profile: %{id: id}}), do: Enum.reject(profiles, &(&1.id == id))
+  defp others(profiles, _), do: profiles
 
   defp machine(socket), do: socket.assigns.cnc.machine
 
@@ -837,6 +999,10 @@ defmodule CNCWeb.ConfigLive do
   defp same_value?(nil, _), do: false
   defp same_value?(a, b), do: Config.same?(a, String.trim(b))
 
+  defp upload_error(:too_large), do: "That file is over 256 KB: not a config file?"
+  defp upload_error(:too_many_files), do: "One file at a time."
+  defp upload_error(err), do: "Upload failed (#{inspect(err)})."
+
   defp waiting_text(:disconnected), do: "Not connected yet: waiting for the controller."
   defp waiting_text(:connecting), do: "Connecting…"
   defp waiting_text(:uploading), do: "Sending a file to the controller…"
@@ -844,13 +1010,14 @@ defmodule CNCWeb.ConfigLive do
 
   defp dom_id(name), do: String.replace(name, ~r/[^A-Za-z0-9_-]/, "-")
 
-  defp size(bytes) when bytes < 1024, do: "#{bytes} B"
-  defp size(bytes), do: "#{Float.round(bytes / 1024, 1)} KB"
-
   defp error_text(:name_required), do: "Give the profile a name."
   defp error_text(:exists), do: "There's already one with that name."
   defp error_text(:in_use), do: "That's the selected profile: switch to another first."
   defp error_text(:no_profile), do: "No profile is selected."
+  defp error_text(:not_yaml), do: "Choose a FluidNC config file (.yaml or .yml)."
+  defp error_text(:not_a_config), do: "That file doesn't look like a FluidNC config."
+  defp error_text(:selected), do: "That's the current profile: edit it above."
+  defp error_text(:not_a_number), do: "That needs a number."
 
   defp error_text(:override),
     do: "The controller loaded a file directly: switch to a profile to change settings."

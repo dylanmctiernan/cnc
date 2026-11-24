@@ -79,21 +79,24 @@ defmodule CNC.Controllers.Profiles do
 
   @doc """
   The controller's file against the selected profile: which file it loaded,
-  whether it's the app's file holding exactly that profile, and the values
-  that differ (`[%{path, profile, controller}]`, `nil` where one side has
-  no value).
+  whether it's the app's file holding exactly what the profile writes, and
+  the values that differ (`[%{path, profile, controller}]`; `controller` is
+  `nil` for a setting the file leaves out, where FluidNC uses its default).
   """
   @spec check(GenServer.server(), GenServer.server(), map) :: {:ok, map} | {:error, term}
   def check(machine, db, controller) do
     with {:ok, %{active: loaded}} <- Config.files(machine),
          %{} = profile <- selected(db, controller.id) || {:error, :no_profile},
          {:ok, text} <- Config.show(machine, loaded || @config_file) do
-      in_file = for {p, v} <- Config.parse(text), editable?(p), into: %{}, do: {p, v}
+      in_file = editable(text)
+      # What the profile writes: the board's defaults plus its values.
+      expected = editable(render(controller.board, profile))
 
+      # (A tuple, not two bindings: in a comprehension a binding to nil
+      # filters the element out, and a value missing on one side counts.)
       differences =
-        for path <- Enum.sort(Enum.uniq(Map.keys(profile.values) ++ Map.keys(in_file))),
-            want = profile.values[path],
-            have = in_file[path],
+        for path <- Enum.sort(Enum.uniq(Map.keys(expected) ++ Map.keys(in_file))),
+            {want, have} = {expected[path], in_file[path]},
             want == nil or have == nil or not Config.same?(want, have),
             do: %{path: path, profile: want, controller: have}
 
@@ -187,17 +190,18 @@ defmodule CNC.Controllers.Profiles do
   end
 
   @doc """
-  Take the controller's file's values into the selected profile (the file
-  was changed elsewhere, or an earlier version restored, and that's the one
-  to keep). Then the file is written from the profile.
+  Keep what the controller runs in the selected profile (its file was
+  changed elsewhere, an earlier version restored, a file uploaded, and
+  that's the one to keep): the running values, which include FluidNC's
+  defaults for whatever the file leaves out, become the profile's; then the
+  profile is written and the controller restarts, so file and profile agree.
   """
   def take_file(machine, db, controller) do
-    with {:ok, %{active: loaded}} <- Config.files(machine),
-         {:ok, text} <- Config.show(machine, loaded || @config_file),
-         %{} = profile <- selected(db, controller.id) || {:error, :no_profile} do
-      profile = %{profile | values: editable(text)}
+    with %{} = profile <- selected(db, controller.id) || {:error, :no_profile},
+         {:ok, running} <- Config.running(machine) do
+      profile = %{profile | values: editable(running)}
       update(db, controller.id, profile.id, fn _ -> profile end)
-      :ok
+      switch(machine, db, controller, profile.id)
     end
   end
 
@@ -214,12 +218,7 @@ defmodule CNC.Controllers.Profiles do
          %{} = profile <- selected(db, controller.id) || {:error, :no_profile} do
       {applied, errors} =
         Enum.reduce(changes, {%{}, %{}}, fn {path, value}, {ok, bad} ->
-          path =
-            path
-            |> String.trim()
-            |> String.trim_leading("$/")
-            |> String.trim("/")
-            |> String.downcase()
+          path = clean(path)
 
           with true <- editable?(path) || {:error, :wiring},
                {:ok, now} <- Config.set(machine, path, value) do
@@ -247,6 +246,47 @@ defmodule CNC.Controllers.Profiles do
       other -> other
     end
   end
+
+  @doc """
+  Change values in a profile that isn't running: stored only (they reach
+  the controller when it's switched to). Checked here, since the
+  controller can't: editable settings only, and a number stays a number.
+  The selected profile is changed with `set/4` (live).
+  """
+  @spec edit(GenServer.server(), String.t(), String.t(), [{String.t(), String.t()}]) ::
+          {:ok, %{applied: map, errors: map}} | {:error, term}
+  def edit(db, id, pid, changes) do
+    s = stored(db, id)
+
+    with %{} = profile <- find(db, id, pid) || {:error, :not_found},
+         false <- s.selected == pid && {:error, :selected} do
+      {applied, errors} =
+        Enum.reduce(changes, {%{}, %{}}, fn {path, value}, {ok, bad} ->
+          path = clean(path)
+          value = String.trim(value)
+          old = profile.values[path]
+
+          cond do
+            not editable?(path) -> {ok, Map.put(bad, path, :wiring)}
+            not Config.valid_value?(value) -> {ok, Map.put(bad, path, :invalid_value)}
+            number?(old) and not number?(value) -> {ok, Map.put(bad, path, :not_a_number)}
+            true -> {Map.put(ok, path, value), bad}
+          end
+        end)
+
+      if applied != %{},
+        do: update(db, id, pid, &%{&1 | values: Map.merge(&1.values, applied)})
+
+      {:ok, %{applied: applied, errors: errors}}
+    end
+  end
+
+  defp number?(nil), do: false
+  defp number?(v), do: match?({_, ""}, Float.parse(v))
+
+  defp clean(path),
+    do:
+      path |> String.trim() |> String.trim_leading("$/") |> String.trim("/") |> String.downcase()
 
   @doc """
   Live values the selected profile doesn't have (changed in the console,
@@ -287,8 +327,19 @@ defmodule CNC.Controllers.Profiles do
     end
   end
 
-  @doc "Override: load another file directly (restarts the controller)."
-  def use_file(machine, file), do: Config.activate(machine, file)
+  @doc """
+  The escape hatch: a config file of your own replaces the controller's
+  (its current text goes into the history) and the controller restarts with
+  it. `check/3` then shows how it differs from the selected profile.
+  """
+  @spec replace_file(GenServer.server(), GenServer.server(), map, String.t()) ::
+          :ok | {:error, term}
+  def replace_file(machine, db, controller, text) do
+    with true <- Config.parse(text) != [] || {:error, :not_a_config},
+         {:ok, _} <- Config.upload(machine, @config_file, text, {db, controller.id}) do
+      Config.activate(machine, @config_file)
+    end
+  end
 
   @doc "The file a profile makes for a board: the board's default config with the profile's values."
   @spec render(atom, profile) :: String.t()
