@@ -10,7 +10,6 @@ config :cnc, CNCWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],
-  check_origin: false,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "lWjBNFqjXtFphEsDndF83uBwpnU1T7tDLzan81Oi5PAAAQof4dV1pDLW6v707M25",
@@ -45,7 +44,6 @@ config :cnc, CNCWeb.Endpoint,
 # Reload browser tabs when matching files change.
 config :cnc, CNCWeb.Endpoint,
   live_reload: [
-    web_console_logger: true,
     patterns: [
       # Static assets, except user uploads
       ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$"E,

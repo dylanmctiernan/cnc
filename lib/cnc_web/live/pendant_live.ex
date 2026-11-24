@@ -159,15 +159,6 @@ defmodule CNCWeb.PendantLive do
           <.link navigate={~p"/"} class="ui-pendant-back" id="pendant-workstation">
             Open the workstation
           </.link>
-          <.link
-            :if={CNCWeb.Pin.configured()}
-            href={~p"/pin"}
-            method="delete"
-            class="ui-pendant-back"
-            id="pendant-lock"
-          >
-            Lock screen
-          </.link>
         </footer>
       </div>
     </Layouts.pendant>

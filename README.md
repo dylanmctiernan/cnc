@@ -68,11 +68,15 @@ CNC_LINK=tcp CNC_TCP=fluidnc.local mix phx.server  # or <ip>:<port>
 ### From another device on your network
 
 ```sh
-CNC_LAN=1 CNC_PIN=1234 mix phx.server     # 4 digits; then open http://<this-mac's-ip>:4000
+CNC_LAN=1 mix phx.server     # then open http://<this-mac's-ip>:4000
 ```
 
-Dev only. `CNC_LAN=1` refuses to start without a PIN; each browser enters it
-once.
+Dev only. There's no login: the app is for one person on a home network, and
+anyone on that network can drive the machine. What it does guard against is a
+website in your browser reaching it: only local names and addresses are
+served (`localhost`, `*.local`, private IPs; more with
+`config :cnc, :allowed_hosts`), and only the app's own pages may open its
+socket. Never port-forward it, and keep guests on a separate Wi-Fi.
 
 For a name instead of an IP address, announce one over mDNS (Bonjour) in a
 second terminal (macOS; Ctrl-C withdraws it):
@@ -84,6 +88,5 @@ mix cnc.mdns.announce --name shop   # or a name you choose: shop.local
 
 XXXX is a short random id made once and kept in `.cnc/device-id`, so the name
 is stable and two machines never share one. It's its own site to browsers,
-so other apps on `localhost:4000` don't share its favicon, cookies or PIN
-session. Stop using it once the Pi announces its own name. Changing the PIN logs every device out. `CNC_PIN` alone (without
-`CNC_LAN`) protects a local-only server too.
+so other apps on `localhost:4000` don't share its favicon or cookies. Stop
+using it once the Pi announces its own name.

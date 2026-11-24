@@ -20,7 +20,11 @@ config :cnc, CNCWeb.Endpoint,
     layout: false
   ],
   pubsub_server: CNC.PubSub,
-  live_view: [signing_salt: "resrjewd"]
+  live_view: [signing_salt: "resrjewd"],
+  # Sockets (LiveView, live reload) only from the app's own pages: the
+  # Origin must be the address the browser used. With no fixed host name
+  # (localhost, <name>.local, an IP), that's the request's own.
+  check_origin: :conn
 
 # The app's own data: controller profiles (CNC.Controllers), their config
 # history, each FluidNC sim's folder. Git-ignored in dev; /data on the Pi.

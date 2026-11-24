@@ -19,7 +19,7 @@ defmodule CNC.Link.FluidNCSim do
   Stock FluidNC, set up from outside rather than patched:
 
     * Its telnet and HTTP servers would listen on every network interface
-      with no authentication, bypassing the app's PIN. They're switched off
+      with no authentication, bypassing the app's checks. They're switched off
       in its settings store before it starts, so it never opens them.
     * It runs under a small `sh` watchdog: closing the link stops it, and if
       this app dies without closing, the watchdog notices within a second

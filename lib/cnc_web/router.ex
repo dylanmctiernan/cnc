@@ -8,7 +8,6 @@ defmodule CNCWeb.Router do
     plug :put_root_layout, html: {CNCWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
-    plug CNCWeb.Pin
   end
 
   pipeline :api do
@@ -18,12 +17,8 @@ defmodule CNCWeb.Router do
   scope "/", CNCWeb do
     pipe_through :browser
 
-    get "/pin", PinController, :new
-    post "/pin", PinController, :create
-    delete "/pin", PinController, :delete
-
     # The workstation: pages in the console shell
-    live_session :machine, on_mount: [CNCWeb.Pin, CNCWeb.Shell] do
+    live_session :machine, on_mount: [CNCWeb.Shell] do
       live "/", MachineLive
       live "/controllers", ControllersLive
       live "/configuration", ConfigLive, :profiles
@@ -34,7 +29,7 @@ defmodule CNCWeb.Router do
     end
 
     # The pendant: a phone or tablet as a jog controller, no rail
-    live_session :pendant, on_mount: [CNCWeb.Pin, CNCWeb.Shell] do
+    live_session :pendant, on_mount: [CNCWeb.Shell] do
       live "/pendant", PendantLive
     end
   end

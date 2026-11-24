@@ -6,8 +6,6 @@ defmodule CNCWeb.ControllersLive do
   """
   use CNCWeb, :live_view
 
-  on_mount CNCWeb.Pin
-
   alias CNC.{Boards, Controllers, Machine}
   alias CNC.Configuration
   alias CNC.Controllers.Controller

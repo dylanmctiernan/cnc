@@ -69,19 +69,6 @@ defmodule CNCWeb.Layouts do
             <.icon name="hero-device-phone-mobile" class="ui-nav-icon" />
             <span class="ui-nav-label">Pendant</span>
           </.link>
-          <%!-- The app's lock (back to the PIN), not the machine's: only when
-               a PIN is set --%>
-          <.link
-            :if={CNCWeb.Pin.configured()}
-            href="/pin"
-            method="delete"
-            id="nav-lock"
-            class="ui-nav-item"
-            title="Lock screen: back to the PIN"
-          >
-            <.icon name="hero-lock-closed" class="ui-nav-icon" />
-            <span class="ui-nav-label">Lock screen</span>
-          </.link>
           <div :if={@machine} class="ui-rail-machine">
             <CNCWeb.UI.machine_state machine={@machine} id="rail-state" />
             <CNCWeb.UI.hold_button id="rail-hold" />

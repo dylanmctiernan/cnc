@@ -30,7 +30,6 @@ import ConsoleScroll from "./hooks/console_scroll"
 import ConsoleInput from "./hooks/console_input"
 import Viewport from "./hooks/viewport"
 import Joystick from "./hooks/joystick"
-import {mountPinPad} from "./pin_pad"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
@@ -46,7 +45,6 @@ window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()
-mountPinPad()
 
 // expose liveSocket on window for web console debug logs and latency simulation:
 // >> liveSocket.enableDebug()
@@ -57,15 +55,10 @@ window.liveSocket = liveSocket
 // The lines below enable quality of life phoenix_live_reload
 // development features:
 //
-//     1. stream server logs to the browser console
-//     2. click on elements to jump to their definitions in your code editor
+//     1. click on elements to jump to their definitions in your code editor
 //
 if (process.env.NODE_ENV === "development") {
   window.addEventListener("phx:live_reload:attached", ({detail: reloader}) => {
-    // Enable server log streaming to client.
-    // Disable with reloader.disableServerLogs()
-    reloader.enableServerLogs()
-
     // Open configured PLUG_EDITOR at file:line of the clicked element's HEEx component
     //
     //   * click with "c" key pressed to open at caller location

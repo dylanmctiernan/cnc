@@ -11,6 +11,16 @@ defmodule CNCWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # Only requests for a local name or address (CNCWeb.AllowedHost), checked
+  # before anything else: Phoenix dispatches sockets (/live, live reload)
+  # ahead of the plugs below, so a plug there wouldn't see them.
+  def call(conn, opts) do
+    case CNCWeb.AllowedHost.call(conn, []) do
+      %{halted: true} = conn -> conn
+      conn -> super(conn, opts)
+    end
+  end
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]

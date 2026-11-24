@@ -21,6 +21,9 @@ config :phoenix_live_view,
 config :phoenix,
   sort_verified_routes_query_params: true
 
+# Phoenix.ConnTest's default host (CNCWeb.AllowedHost)
+config :cnc, :allowed_hosts, ["www.example.com"]
+
 # Screen tests run their own machine and program store (CNCWeb.Instance).
 config :cnc, instance_from_session: true
 

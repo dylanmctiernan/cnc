@@ -22,20 +22,12 @@ end
 
 config :cnc, CNCWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
-# CNC_PIN=<pin> requires that PIN in every browser (once per device).
-# CNC_LAN=1 serves the UI to other devices on the local network (dev only),
-# and refuses to start without a PIN: anyone who can reach the page can
-# drive the machine.
-if pin = System.get_env("CNC_PIN") do
-  unless pin =~ ~r/\A\d{4}\z/, do: raise("CNC_PIN must be exactly 4 digits")
-  config :cnc, :access_pin, pin
-end
-
+# CNC_LAN=1 serves the UI to other devices on the local network (dev only).
+# There's no login: anyone on the network can drive the machine. Only local
+# names and addresses are served (CNCWeb.AllowedHost) and only the app's own
+# pages may connect (check_origin), so a website can't reach it through a
+# browser; keep the network itself private (no port forwarding).
 if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
-  unless System.get_env("CNC_PIN") do
-    raise "CNC_LAN=1 needs CNC_PIN=<pin>: anyone on the network could drive the machine"
-  end
-
   config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
 end
 

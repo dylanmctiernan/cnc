@@ -18,12 +18,12 @@ defmodule Mix.Tasks.Cnc.Mdns.Announce do
   Runs until Ctrl-C, which withdraws the name. If the task is killed
   instead, a small watchdog stops dns-sd within a second, so nothing stale
   is left announced. Run it in its own terminal next to
-  `CNC_LAN=1 CNC_PIN=… mix phx.server` (the server must listen on the
+  `CNC_LAN=1 mix phx.server` (the server must listen on the
   network for other devices to reach it).
 
   A browser treats these names as their own sites, separate from
   `localhost:4000`, so other apps you run on localhost don't share their
-  favicon, cookies or PIN session.
+  favicon or cookies.
 
   Stop it once the Raspberry Pi is set up: the Pi announces its own name
   (Nerves, mdns_lite). Uses macOS's `dns-sd`; if this Mac's network address

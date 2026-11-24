@@ -8,13 +8,12 @@
 //   mix e2e.layout   (runs this against the dev server)
 //
 // Needs the dev server running with a controller connected (a sim is fine):
-//   BASE_URL (default http://localhost:4000), CNC_PIN (if the server has one).
+//   BASE_URL (default http://localhost:4000).
 import {chromium} from "playwright"
 import {fileURLToPath} from "node:url"
 import path from "node:path"
 
 const BASE = process.env.BASE_URL || "http://localhost:4000"
-const PIN = process.env.CNC_PIN
 const SAMPLE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../test/fixtures/sample.nc")
 const SIZES = [[1440, 900], [1024, 768]]
 const TOLERANCE = 0.5 // px
@@ -65,11 +64,6 @@ for (const [w, h] of SIZES) {
   const page = await (await browser.newContext({viewport: {width: w, height: h}})).newPage()
 
   await page.goto(BASE + "/")
-  if (page.url().includes("/pin")) {
-    if (!PIN) throw new Error("The server asks for a PIN: set CNC_PIN")
-    await page.locator("#pin").fill(PIN)
-    await page.waitForURL(BASE + "/")
-  }
   await page.waitForSelector(".phx-connected")
   await page.waitForTimeout(800)
 

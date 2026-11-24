@@ -7,10 +7,6 @@ defmodule CNCWeb.MachineLive do
   """
   use CNCWeb, :live_view
 
-  # Also enforced by the router's live_session; here so the view is
-  # protected however it's mounted.
-  on_mount CNCWeb.Pin
-
   alias CNC.{Machine, Program}
   alias CNC.Machine.State
 

@@ -14,8 +14,6 @@ defmodule CNCWeb.ConfigLive do
   """
   use CNCWeb, :live_view
 
-  on_mount CNCWeb.Pin
-
   import CNCWeb.YamlView, only: [yaml_view: 1]
 
   alias CNC.{Controllers, Machine}
