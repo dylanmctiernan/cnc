@@ -85,6 +85,8 @@ defmodule CNC.Machine.Server do
     # While stopping, any sign of one (a jog ack, a Jog report) cancels again.
     stopping?: false,
     pending: :queue.new(),
+    # Lines collected for a request/3 while it's first in line for an ack
+    request_lines: [],
     console: Console.new(),
     settings: %{},
     travel_source: :config,
@@ -161,7 +163,8 @@ defmodule CNC.Machine.Server do
         connected?: false,
         status: nil,
         alarm: nil,
-        pending: :queue.new(),
+        pending: fail_requests(d.pending),
+        request_lines: [],
         in_flight: 0,
         settings: %{},
         settings_wanted?: false,
@@ -232,13 +235,19 @@ defmodule CNC.Machine.Server do
     parsed = Response.parse(line)
     status? = match?({:status, _}, parsed)
 
-    {next, d, actions} =
-      response(parsed, s, log(d, :in, if(status?, do: :poll, else: :line), line))
+    # Output is ordered: while a request is next in line for an ack, what
+    # the controller prints (other than reports, acks, alarms, a reboot) is
+    # its answer.
+    collect? =
+      match?({:value, {:request, _}}, :queue.peek(d.pending)) and
+        not (status? or parsed == :ok or
+               match?({tag, _} when tag in [:error, :alarm, :banner], parsed))
 
-    # Every status report proves the link is alive.
-    if status? and next not in [:disconnected, :homing],
-      do: {next, d, [watchdog(d, next) | actions]},
-      else: {next, d, actions}
+    if collect? do
+      {s, %{log(d, :in, :line, line) | request_lines: [line | d.request_lines]}, []}
+    else
+      line_response(parsed, status?, line, s, d)
+    end
   end
 
   ## Timers
@@ -415,8 +424,22 @@ defmodule CNC.Machine.Server do
     {next, d, [{:reply, from, :ok}]}
   end
 
+  # A command whose reply we want whole: answered when its ok/error arrives.
+  defp event({:call, from}, {:request, line}, s, d) when s in [:alarm, :idle],
+    do: {s, send_line(d, line, {:request, from}), []}
+
   defp event({:call, from}, _request, s, d),
     do: {s, d, [{:reply, from, {:error, {:invalid_state, s}}}]}
+
+  defp line_response(parsed, status?, line, s, d) do
+    {next, d, actions} =
+      response(parsed, s, log(d, :in, if(status?, do: :poll, else: :line), line))
+
+    # Every status report proves the link is alive.
+    if status? and next not in [:disconnected, :homing],
+      do: {next, d, [watchdog(d, next) | actions]},
+      else: {next, d, actions}
+  end
 
   ## Controller responses
 
@@ -514,6 +537,12 @@ defmodule CNC.Machine.Server do
         d = if tag == :jog and d.stopping?, do: realtime(d, Realtime.jog_cancel()), else: d
         on_ack(tag, result, s, d)
     end
+  end
+
+  defp on_ack({:request, from}, result, s, d) do
+    lines = Enum.reverse(d.request_lines)
+    reply = if result == :ok, do: {:ok, lines}, else: result
+    {s, %{d | request_lines: []}, [{:reply, from, reply}]}
   end
 
   defp on_ack(:settings, :ok, s, d),
@@ -775,8 +804,21 @@ defmodule CNC.Machine.Server do
     %{d | console: Console.push(d.console, entry)}
   end
 
-  defp flush_pending(d),
-    do: %{end_session(d) | pending: :queue.new(), in_flight: 0, stopping?: false}
+  defp flush_pending(d) do
+    %{
+      end_session(d)
+      | pending: fail_requests(d.pending),
+        request_lines: [],
+        in_flight: 0,
+        stopping?: false
+    }
+  end
+
+  # Requests whose acks will never come (reset, lost link) are answered now.
+  defp fail_requests(pending) do
+    for {:request, from} <- :queue.to_list(pending), do: :gen_statem.reply(from, {:error, :reset})
+    :queue.new()
+  end
 
   ## Publishing (≤ 1 per @publish_ms; the latest snapshot always goes out)
 

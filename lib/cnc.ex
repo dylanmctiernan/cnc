@@ -27,6 +27,7 @@ defmodule CNC do
       GCode.Program,
       Controllers,
       Controllers.Controller,
+      Controllers.Config,
       Boards
     ]
 end

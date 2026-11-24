@@ -20,6 +20,12 @@ defmodule CNC.Link.FakeSim.Model do
       reads as the given values; `WCO` is reported every 10th status and in
       the first status after a change
 
+  FluidNC config files (enough to test config work without a board): a
+  local filesystem of `.yaml` files, `$Config/Filename` (which one loads at
+  boot; not checked, like FluidNC), `$LocalFS/List|Show|Delete`, `$CD`
+  (the running config), `$CD=<file>` (save it as a file) and `$Bye`
+  (restart: the chosen file becomes the running config).
+
   Travel convention: X/Y run `0..length`, Z runs `-length..0` (origin
   front-left, Z zero at the top after homing).
   """
@@ -53,11 +59,23 @@ defmodule CNC.Link.FakeSim.Model do
             homing_ms: 1000,
             homing_left: 0,
             wco: {0.0, 0.0, 0.0},
-            wco_in: 0
+            wco_in: 0,
+            files: %{"config.yaml" => "name: Fake sim\nboard: Fake sim (built in)\n"},
+            config_file: "config.yaml",
+            running: "name: Fake sim\nboard: Fake sim (built in)\n"
 
-  @doc "Options: `:travel`, `:max_feed` (mm/min), `:homing_ms`, `:pos`."
-  def new(opts \\ []),
-    do: struct!(__MODULE__, Keyword.take(opts, [:travel, :max_feed, :homing_ms, :pos]))
+  @doc """
+  Options: `:travel`, `:max_feed` (mm/min), `:homing_ms`, `:pos`, and
+  `:config` (the text of `config.yaml`, also what's running at power-up).
+  """
+  def new(opts \\ []) do
+    m = struct!(__MODULE__, Keyword.take(opts, [:travel, :max_feed, :homing_ms, :pos]))
+
+    case Keyword.get(opts, :config) do
+      nil -> m
+      text -> %{m | files: %{"config.yaml" => text}, running: text}
+    end
+  end
 
   @doc "Lines a controller prints on power-up."
   def boot(m), do: {m, [@banner, @locked]}
@@ -106,6 +124,35 @@ defmodule CNC.Link.FakeSim.Model do
   end
 
   def line(m, "$J=" <> _), do: {m, ["error:8"]}
+
+  ## FluidNC config files
+
+  def line(m, "$LocalFS/List") do
+    files = for {name, text} <- Enum.sort(m.files), do: "[FILE: #{name}|SIZE:#{byte_size(text)}]"
+    {m, files ++ ["[localfs Free:1.00 MB Used:0.01 MB Total:1.01 MB]", "ok"]}
+  end
+
+  def line(m, "$LocalFS/Show=" <> name) do
+    case Map.fetch(m.files, name) do
+      {:ok, text} -> {m, text_lines(text) ++ ["ok"]}
+      :error -> {m, ["[MSG:ERR: File operation failed]", "error:66"]}
+    end
+  end
+
+  def line(m, "$LocalFS/Delete=" <> name),
+    do: {%{m | files: Map.delete(m.files, name)}, ["[MSG:Files changed]", "ok"]}
+
+  def line(m, "$Config/Filename"), do: {m, ["$Config/Filename=#{m.config_file}", "ok"]}
+  def line(m, "$Config/Filename=" <> name), do: {%{m | config_file: name}, ["ok"]}
+  def line(m, "$CD"), do: {m, text_lines(m.running) ++ ["ok"]}
+  def line(m, "$CD=" <> name), do: {%{m | files: Map.put(m.files, name, m.running)}, ["ok"]}
+
+  # Restart: boots the chosen file (nothing if it's missing), locked.
+  def line(m, "$Bye") do
+    running = Map.get(m.files, m.config_file, "")
+    m = %{stop(m, :alarm) | running: running, wco: {0.0, 0.0, 0.0}}
+    {m, ["[MSG:INFO: Restarting]", "ok", @banner, @locked]}
+  end
 
   # G54 work offset: the current position becomes the given work position.
   def line(%{state: s} = m, "G10 L20 P1" <> words) when s in [:idle, :alarm] do
@@ -248,6 +295,8 @@ defmodule CNC.Link.FakeSim.Model do
     locked = if m.state == :alarm, do: [@locked], else: []
     {m, alarm ++ [@banner] ++ locked}
   end
+
+  defp text_lines(text), do: String.split(String.trim_trailing(text, "\n"), "\n")
 
   defp stop(m, state), do: %{m | state: state, queue: :queue.new(), feed: 0.0, homing_left: 0}
 

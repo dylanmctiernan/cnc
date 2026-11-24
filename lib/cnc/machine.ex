@@ -201,5 +201,18 @@ defmodule CNC.Machine do
       else: call(server, {:raw, line})
   end
 
+  @doc """
+  Send one command and collect its reply: every line the controller prints
+  before its `ok` (or `error:N`). For commands with multi-line answers, like
+  FluidNC's `$CD` (the running config) or `$LocalFS/List`.
+
+  Only when `:idle` or `:alarm` (`{:error, {:invalid_state, s}}` otherwise).
+  A reset or lost link while waiting gives `{:error, :reset}`.
+  """
+  @spec request(server, String.t(), timeout) ::
+          {:ok, [String.t()]} | {:error, non_neg_integer | :reset | term}
+  def request(server \\ __MODULE__, line, timeout \\ 10_000) when is_binary(line),
+    do: :gen_statem.call(server, {:request, line}, timeout)
+
   defp call(server, request), do: :gen_statem.call(server, request)
 end

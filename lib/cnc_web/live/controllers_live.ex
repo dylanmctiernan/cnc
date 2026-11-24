@@ -200,6 +200,13 @@ defmodule CNCWeb.ControllersLive do
                   >
                     Disconnect
                   </button>
+                  <.link
+                    navigate={~p"/controllers/#{p.id}/configuration"}
+                    class="cnc-btn"
+                    id={"configure-#{p.id}"}
+                  >
+                    Configuration
+                  </.link>
                   <button
                     :if={length(Boards.links(p.board)) > 1 or p.link.type in [:serial, :tcp]}
                     type="button"

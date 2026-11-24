@@ -19,7 +19,7 @@ defmodule CNC.Controllers do
   Each FluidNC sim runs in its own folder under the data dir, so its
   config and settings persist across restarts, like a board's flash.
   """
-  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Controller]
+  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Controller, Config]
   use GenServer
   require Logger
 
@@ -211,6 +211,7 @@ defmodule CNC.Controllers do
   def handle_call({:add, attrs}, _from, s) do
     case build(attrs) do
       {:ok, ctl} ->
+        ctl = %{ctl | id: unique_id(s)}
         s = save(%{s | controllers: s.controllers ++ [ctl]})
         {:reply, {:ok, ctl}, s}
 
@@ -222,7 +223,7 @@ defmodule CNC.Controllers do
   defp build(%{name: name, board: board} = attrs) when is_binary(name) and name != "" do
     with true <- board in Board.ids() || {:error, :unknown_board},
          {:ok, link} <- link_for(board, Map.get(attrs, :link)) do
-      {:ok, %Controller{id: Controller.new_id(), name: name, board: board, link: link}}
+      {:ok, %Controller{id: nil, name: name, board: board, link: link}}
     end
   end
 
@@ -245,6 +246,12 @@ defmodule CNC.Controllers do
   defp link_for(_board, _), do: {:error, :invalid_link}
 
   defp find(s, id), do: Enum.find(s.controllers, &(&1.id == id))
+
+  # Short ids (readable in URLs); a clash with one in use just draws again.
+  defp unique_id(s) do
+    id = Controller.new_id()
+    if find(s, id), do: unique_id(s), else: id
+  end
 
   defp moving?(s) do
     status = Machine.status(s.machine)

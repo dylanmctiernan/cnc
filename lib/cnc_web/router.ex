@@ -25,6 +25,7 @@ defmodule CNCWeb.Router do
       live "/", MachineLive
       live "/settings", SettingsLive
       live "/controllers", ControllersLive
+      live "/controllers/:id/configuration", ConfigLive
     end
   end
 
