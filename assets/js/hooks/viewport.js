@@ -40,6 +40,8 @@ export default {
     this.controls.enableDamping = false
     this.controls.screenSpacePanning = true
     this.controls.addEventListener("change", () => this.render())
+    // Orbiting, panning or zooming by hand: keep that camera
+    this.controls.addEventListener("start", () => (this.userMoved = true))
 
     this.colors = {
       bed: new THREE.Color(token("--bed", "#2a2f33")),
@@ -75,19 +77,20 @@ export default {
       if (wco && (wco[0] !== this.wco[0] || wco[1] !== this.wco[1] || wco[2] !== this.wco[2])) {
         this.setWork(wco)
         this.buildShadow()
+        return this.reframe()
       }
       this.render()
     })
     this.handleEvent("program", ({path}) => {
       this.pathData = path ? decode(path) : null
       this.buildPath()
-      this.view(this.lastView || "iso")
+      this.reframe()
     })
     this.handleEvent("travel", ({travel}) => {
       this.travel = travel
       this.buildMachine()
       this.buildShadow()
-      this.render()
+      this.reframe()
     })
 
     // Iso / Top / Front buttons (JS.dispatch from the component)
@@ -150,26 +153,7 @@ export default {
       ]
     }
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2
-    const pad = part ? 1.3 : 1.08
     const aspect = this.aspect || 1
-    let d
-    if (name === "top" || name === "front") {
-      // Orthographic: the frame is exactly the extent (plus padding), fitted
-      // to the view's shape. Front sees X across and Z up.
-      const w = Math.max(x1 - x0, 10) / 2
-      const h = Math.max(name === "top" ? y1 - y0 : z1 - z0, 10) / 2
-      this.orthoHalf = Math.max(h, w / aspect) * pad
-      this.ortho.zoom = 1
-      this.setOrthoFrustum()
-      this.useCamera(this.ortho)
-      d = 5000
-    } else {
-      // Far enough that it all fits, whatever the view's shape
-      const half = (Math.max(x1 - x0, y1 - y0, 10) / 2) * (part ? 1.3 : 1)
-      const fit = half / Math.tan((this.persp.fov * Math.PI) / 360)
-      d = (fit * 2.1) / Math.min(1, aspect)
-      this.useCamera(this.persp)
-    }
     const dirs = {
       iso: [0.75, -1.1, 0.9],
       machine: [0.75, -1.1, 0.9],
@@ -178,11 +162,56 @@ export default {
     }
     const [dx, dy, dz] = dirs[name] || dirs.iso
     const len = Math.hypot(dx, dy, dz)
+    const place = (dist) => {
+      this.camera.position.set(cx + (dx / len) * dist, cy + (dy / len) * dist, cz + (dz / len) * dist)
+      this.camera.lookAt(cx, cy, cz)
+      this.camera.updateMatrixWorld()
+    }
+
+    if (name === "top" || name === "front") {
+      // Orthographic: the frame is exactly the extent (plus padding), fitted
+      // to the view's shape. Front sees X across and Z up.
+      const pad = part ? 1.3 : 1.08
+      const w = Math.max(x1 - x0, 10) / 2
+      const h = Math.max(name === "top" ? y1 - y0 : z1 - z0, 10) / 2
+      this.orthoHalf = Math.max(h, w / aspect) * pad
+      this.ortho.zoom = 1
+      this.setOrthoFrustum()
+      this.useCamera(this.ortho)
+      place(5000)
+    } else {
+      // Zoom to fit: project the box's corners and move in until the
+      // farthest one sits at the edge, less padding (a part gets more room)
+      this.useCamera(this.persp)
+      const fill = part ? 0.75 : 0.94
+      const corners = []
+      for (const x of [x0, x1]) for (const y of [y0, y1]) for (const z of [z0, z1])
+        corners.push(new THREE.Vector3(x, y, z))
+      let d = Math.max(x1 - x0, y1 - y0, z1 - z0, 10) * 2
+      for (let i = 0; i < 8; i++) {
+        place(d)
+        let m = 0
+        for (const c of corners) {
+          const p = c.clone().project(this.camera)
+          m = Math.max(m, Math.abs(p.x), Math.abs(p.y))
+        }
+        d *= 1 + (m / fill - 1) * 0.9
+      }
+      place(d)
+    }
     this.controls.target.set(cx, cy, cz)
-    this.camera.position.set(cx + (dx / len) * d, cy + (dy / len) * d, cz + (dz / len) * d)
     this.controls.update()
     this.lastView = name
+    this.userMoved = false
     this.render()
+  },
+
+  // The scene changed under a standard view (the work offset arrived, a
+  // file loaded, the travel changed): frame it again, unless the camera was
+  // moved by hand
+  reframe() {
+    if (this.userMoved) this.render()
+    else this.view(this.lastView || "iso")
   },
 
   // The bed (at the bottom of Z travel), its grid, and the travel envelope.
