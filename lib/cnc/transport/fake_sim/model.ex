@@ -15,6 +15,7 @@ defmodule CNC.Transport.FakeSim.Model do
     * `$H` acks `ok` only when the cycle completes
     * soft reset while moving → `ALARM:3` (jog) / `ALARM:6` (homing)
     * `$$` lists max travel `$130`–`$132`; `$13x=<mm>` sets it (Idle/Alarm only)
+    * `G10 L2 P1 X.. Y.. Z..` puts the G54 work zero at machine coordinates;
     * `G10 L20 P1 X.. Y.. Z..` sets the G54 work offset so the current position
       reads as the given values; `WCO` is reported every 10th status and in
       the first status after a change
@@ -118,6 +119,21 @@ defmodule CNC.Transport.FakeSim.Model do
             put_elem(wco, i, elem(m.pos, i) - value)
           end)
 
+        {%{m | wco: wco, wco_in: 0}, ["ok"]}
+
+      :error ->
+        {m, ["error:2"]}
+    end
+  end
+
+  # G10 L2: the work zero at absolute machine coordinates.
+  def line(%{state: s} = m, "G10 L2 P1" <> words) when s in [:idle, :alarm] do
+    case parse_axes(words) do
+      {:ok, []} ->
+        {m, ["error:26"]}
+
+      {:ok, axes} ->
+        wco = Enum.reduce(axes, m.wco, fn {i, value}, wco -> put_elem(wco, i, value) end)
         {%{m | wco: wco, wco_in: 0}, ["ok"]}
 
       :error ->

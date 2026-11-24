@@ -121,6 +121,24 @@ defmodule CNCWeb.MachineLiveTest do
     assert has_element?(view, "#work-dialog .cnc-set-error", "Type a number")
   end
 
+  test "on the machine tab, the dialog sets the work zero on the bed", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> Machine.status().state == :idle and Machine.status().wpos end)
+
+    view |> element(".cnc-dro-head button[phx-value-frame=machine]") |> render_click()
+    view |> element(~s|.cnc-num--edit[phx-value-axis="x"]|) |> render_click()
+    assert has_element?(view, "#work-dialog", "Set X work zero")
+    assert has_element?(view, "#work-dialog", "Work zero at machine X =")
+
+    html = view |> form("#work-form", %{value: "2000"}) |> render_change()
+    assert html =~ "off the machine"
+
+    view |> form("#work-form", %{value: "300"}) |> render_submit()
+    refute has_element?(view, "#work-dialog")
+    assert eventually(fn -> match?({x, _, _} when abs(x - 300) < 0.001, Machine.status().wco) end)
+  end
+
   test "work coordinates: zero X/Y, move, go back", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
@@ -147,7 +165,7 @@ defmodule CNCWeb.MachineLiveTest do
              3000
            )
 
-    assert eventually(fn -> render(view) =~ "10.000" end)
+    assert eventually(fn -> render(view) =~ "10.00" end)
 
     # Enabled once the step has finished and the view has caught up.
     assert eventually(fn -> not Machine.status().moving? end, 3000)

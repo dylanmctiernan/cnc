@@ -151,6 +151,21 @@ defmodule CNC.Machine do
   end
 
   @doc """
+  Put the work zero (G54) at absolute machine coordinates, without moving:
+  `[x: 300.0]` makes machine X 300 the work X0. Only when `:idle`; the zero
+  must be inside the travel.
+  """
+  @spec set_work_offset(server, [{:x | :y | :z, number}]) ::
+          reply | {:error, :invalid_value | :outside_travel}
+  def set_work_offset(server \\ __MODULE__, values) when is_list(values) and values != [] do
+    if Enum.all?(values, fn {axis, v} ->
+         axis in [:x, :y, :z] and is_number(v) and abs(v) <= 100_000
+       end),
+       do: call(server, {:work_offset, values}),
+       else: {:error, :invalid_value}
+  end
+
+  @doc """
   Move to the work origin in X/Y: first lift Z to near the top of travel
   (never lowers it), then a rapid X/Y move. Both are jogs, so Esc/`jog_stop/1`
   cancels them. Only when `:idle`, the work offset is known, and the machine

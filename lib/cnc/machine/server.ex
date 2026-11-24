@@ -355,6 +355,17 @@ defmodule CNC.Machine.Server do
     {:idle, d, [{:reply, from, reply}]}
   end
 
+  # G10 L2: the zero is given in machine coordinates, so the tool's position
+  # doesn't matter; it only has to be on the machine.
+  defp event({:call, from}, {:work_offset, values}, :idle, d) do
+    origin = {0.0, 0.0, 0.0}
+    as_positions = for {axis, v} <- values, do: {axis, -v}
+
+    if work_zero_in_travel?(as_positions, origin, d.travel),
+      do: {:idle, send_line(d, Command.set_work_offset(values), :work), [{:reply, from, :ok}]},
+      else: {:idle, d, [{:reply, from, {:error, :outside_travel}}]}
+  end
+
   # Lift Z to near the top of travel (never lower it), then move X/Y to the
   # work origin. Both are bounded jogs: Esc / jog cancel stops them.
   defp event({:call, from}, :go_to_work_zero, :idle, d) do
@@ -398,6 +409,14 @@ defmodule CNC.Machine.Server do
   defp response({:status, status}, s, d) do
     status = Status.with_wco(status, d.status && d.status.wco)
     prev_mpos = d.status && d.status.mpos
+
+    # A work-position report before any offset is known can't be placed on
+    # the machine: keep the last known machine position rather than none.
+    status =
+      if status.mpos == nil and prev_mpos,
+        do: %{status | mpos: prev_mpos},
+        else: status
+
     # Output is ordered: a report after every ack reflects all sent motion.
     settled = if :queue.is_empty(d.pending), do: false, else: d.motion_unsettled?
     d = %{d | status: status, motion_unsettled?: settled, status_at: now()}
@@ -495,7 +514,14 @@ defmodule CNC.Machine.Server do
     do: {s, send_line(%{d | settings: %{}}, Command.settings(), :settings), []}
 
   # Not every controller knows $I; identification then relies on the banner.
-  defp on_ack(:info, :ok, s, d), do: {s, %{d | info: d.info_partial}, []}
+  defp on_ack(:info, :ok, s, d) do
+    d = %{d | info: d.info_partial}
+    {s, maybe_report_work_position(d), []}
+  end
+
+  defp on_ack(:report_mask, :ok, s, d),
+    do: {s, %{d | settings: Map.put(d.settings, 10, "2")}, []}
+
   defp on_ack(:info, _error, s, d), do: {s, d, []}
 
   # Busy (still moving): ask again once it reports Idle/Alarm.
@@ -562,6 +588,17 @@ defmodule CNC.Machine.Server do
   end
 
   defp maybe_read_settings(d, _reported), do: d
+
+  # FluidNC: report work positions ($10=2: WPos plus the buffer state). The
+  # controller then rounds the work position once from its own full-precision
+  # values; deriving it as MPos - WCO from two rounded numbers could be off by
+  # 0.001 (setting X to -40 read back -40.001). Stored on the controller, so
+  # only sent when it isn't 2 already.
+  defp maybe_report_work_position(d) do
+    if identify(d).firmware == "FluidNC" and d.settings[10] not in [nil, "2"],
+      do: send_line(d, "$10=2", :report_mask),
+      else: d
+  end
 
   # "$130=500" writes a setting; "$130" or "$G" just read.
   defp raw_tag(upper), do: if(String.contains?(upper, "="), do: :raw_setting, else: :raw)

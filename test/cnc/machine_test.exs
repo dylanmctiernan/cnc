@@ -49,6 +49,34 @@ defmodule CNC.MachineTest do
       assert Machine.jog(m, {1, 0}, :normal) == {:error, {:invalid_state, :alarm}}
     end
 
+    test "FluidNC is asked to report work positions ($10=2), once", %{m: m} do
+      connect(m, "Alarm", {0, 0}, ["$10=1"], ["[VER:4.1 FluidNC v4.1.1:]"])
+      assert_receive {:line, "$10=2"}
+      ok(m)
+      assert Machine.settings(m)[10] == "2"
+    end
+
+    test "already reporting work positions, or not FluidNC: $10 left alone", %{m: m} do
+      connect(m, "Alarm", {0, 0}, ["$10=2"], ["[VER:4.1 FluidNC v4.1.1:]"])
+      refute_receive {:line, "$10=" <> _}, 100
+    end
+
+    test "work position reports: machine position from WPos + WCO", %{m: m} do
+      idle(m)
+
+      send(
+        m,
+        {:transport, :line, "<Idle|WPos:-40.000,1.000,0.000|FS:0,0|WCO:48.562,0.000,0.000>"}
+      )
+
+      assert %{wpos: {-40.0, 1.0, +0.0}, mpos: {mx, 1.0, +0.0}} = Machine.status(m)
+      assert_in_delta mx, 8.562, 1.0e-9
+
+      # A later report without WCO reuses the known offset.
+      send(m, {:transport, :line, "<Idle|WPos:-39.000,1.000,0.000|FS:0,0>"})
+      assert_in_delta elem(Machine.status(m).mpos, 0), 9.562, 1.0e-9
+    end
+
     test "reads travel from the controller's $130-$132", %{m: m} do
       assert Machine.status(m).travel_source == :config
       connect(m, "Alarm", {0, 0}, ["$0=10", "$130=500.000", "$131=300.000", "$132=80.000"])
@@ -410,6 +438,15 @@ defmodule CNC.MachineTest do
       assert Machine.set_work_position(m, x: 200_000) == {:error, :invalid_value}
       assert Machine.set_work_position(m, a: 1) == {:error, :invalid_value}
       assert Machine.set_work_position(m, x: "1") == {:error, :invalid_value}
+    end
+
+    test "set_work_offset puts the zero at machine coordinates (G10 L2)", %{m: m} do
+      idle(m)
+      :ok = Machine.set_work_offset(m, x: 300, z: -42.5)
+      assert_receive {:line, "G10 L2 P1 X300.000 Z-42.500"}
+      assert Machine.set_work_offset(m, x: 2000) == {:error, :outside_travel}
+      assert Machine.set_work_offset(m, z: 5) == {:error, :outside_travel}
+      refute_received {:line, "G10" <> _}
     end
 
     test "set_work_zero is refused unless idle", %{m: m} do

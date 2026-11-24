@@ -34,6 +34,22 @@ defmodule CNC.Grbl.Command do
   end
 
   @doc """
+  Set the G54 work zero at absolute machine coordinates:
+  `G10 L2 P1 X.. Y.. Z..`. Independent of where the tool is.
+
+      iex> CNC.Grbl.Command.set_work_offset(x: 300, z: -42.5)
+      "G10 L2 P1 X300.000 Z-42.500"
+  """
+  def set_work_offset(axes) when axes != [] do
+    words =
+      for axis <- [:x, :y, :z],
+          Keyword.has_key?(axes, axis),
+          do: String.upcase(to_string(axis)) <> fmt(Keyword.fetch!(axes, axis), 3)
+
+    "G10 L2 P1 " <> Enum.join(words, " ")
+  end
+
+  @doc """
   Relative, metric jog: `$J=G91 G21 X.. Y.. Z.. F..`.
 
   Axes that round to zero at 3 decimals are omitted. At least one axis must

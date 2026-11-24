@@ -134,8 +134,21 @@ defmodule CNCWeb.MachineLive do
   def handle_event("edit_work", %{"axis" => axis}, socket) when axis in ~w(x y z) do
     axis = String.to_existing_atom(axis)
     i = Enum.find_index([:x, :y, :z], &(&1 == axis))
-    current = socket.assigns.machine.wpos |> elem(i) |> fmt()
-    {:noreply, assign(socket, work_edit: %{axis: axis, value: "", current: current, error: nil})}
+    m = socket.assigns.machine
+    # Work tab: where the tool is, relative to the work zero. Machine tab:
+    # where the work zero is, as an absolute spot on the bed.
+    edit_frame = frame(m, socket.assigns.frame)
+
+    current =
+      case edit_frame do
+        :machine -> m.wco |> elem(i) |> fmt()
+        :work -> m.wpos |> elem(i) |> fmt()
+      end
+
+    {:noreply,
+     assign(socket,
+       work_edit: %{axis: axis, frame: edit_frame, value: "", current: current, error: nil}
+     )}
   end
 
   def handle_event("work_negate", _, socket) do
@@ -157,8 +170,13 @@ defmodule CNCWeb.MachineLive do
   def handle_event("set_work", %{"value" => value}, socket) do
     %{axis: axis} = socket.assigns.work_edit
 
+    set =
+      if socket.assigns.work_edit.frame == :machine,
+        do: &Machine.set_work_offset/1,
+        else: &Machine.set_work_position/1
+
     with {:ok, v} <- parse_mm(value),
-         :ok <- Machine.set_work_position([{axis, v}]) do
+         :ok <- set.([{axis, v}]) do
       {:noreply, assign(socket, work_edit: nil)}
     else
       :error ->
@@ -782,10 +800,16 @@ defmodule CNCWeb.MachineLive do
             phx-click-away="cancel_work"
           >
             <h2 id="work-title" class="cnc-page-title">
-              Set {String.upcase(to_string(@work_edit.axis))} position
+              {if @work_edit.frame == :machine,
+                do: "Set #{String.upcase(to_string(@work_edit.axis))} work zero",
+                else: "Set #{String.upcase(to_string(@work_edit.axis))} position"}
             </h2>
             <div class="cnc-work-field">
-              <label for="work-value">Tool is at {String.upcase(to_string(@work_edit.axis))} =</label>
+              <label for="work-value">
+                {if @work_edit.frame == :machine,
+                  do: "Work zero at machine #{String.upcase(to_string(@work_edit.axis))} =",
+                  else: "Tool is at #{String.upcase(to_string(@work_edit.axis))} ="}
+              </label>
               <input
                 id="work-value"
                 name="value"
@@ -1129,14 +1153,15 @@ defmodule CNCWeb.MachineLive do
 
   # Where a typed work position puts the work zero, in machine coordinates,
   # and whether that's inside the travel (Machine refuses it otherwise).
-  defp work_check(%{axis: axis, value: value}, %State{mpos: mpos, travel: travel})
+  defp work_check(%{axis: axis, value: value} = edit, %State{mpos: mpos, travel: travel})
        when mpos != nil do
     i = Enum.find_index([:x, :y, :z], &(&1 == axis))
     {lo, hi} = elem(travel, i)
 
     case parse_mm(value) do
       {:ok, v} ->
-        zero = elem(mpos, i) - v
+        # Typed on the machine tab, the value is the zero itself.
+        zero = if Map.get(edit, :frame) == :machine, do: v, else: elem(mpos, i) - v
 
         if zero >= lo - 0.001 and zero <= hi + 0.001,
           do: {:ok, zero},
@@ -1153,8 +1178,16 @@ defmodule CNCWeb.MachineLive do
   # front-left, Z up): a positive X means the zero is to the tool's left.
   defp work_preview(%{axis: axis, value: value} = edit, machine) do
     name = String.upcase(to_string(axis))
+    i = Enum.find_index([:x, :y, :z], &(&1 == axis))
 
-    case {work_check(edit, machine), parse_mm(value)} do
+    # Either way, say it relative to the tool: v is the tool's work position.
+    tool_at =
+      case {Map.get(edit, :frame), parse_mm(value), machine.mpos} do
+        {:machine, {:ok, zero}, {_, _, _} = mpos} -> {:ok, elem(mpos, i) - zero}
+        {_, parsed, _} -> parsed
+      end
+
+    case {work_check(edit, machine), tool_at} do
       {{:ok, _}, {:ok, v}} when abs(v) < 0.0005 ->
         "#{name}0 will be right here, at the tool. Nothing moves."
 
@@ -1163,6 +1196,9 @@ defmodule CNCWeb.MachineLive do
 
       {{:outside, _, {lo, hi}}, _} ->
         "That puts #{name}0 off the machine (#{name} runs #{mm(lo)} to #{mm(hi)})."
+
+      _ when edit.frame == :machine ->
+        "Type where the work zero is on the bed, in machine coordinates. Nothing moves."
 
       _ ->
         "Type where the tool is, measured from the zero you want. Nothing moves."
@@ -1405,8 +1441,10 @@ defmodule CNCWeb.MachineLive do
   defp axis_value(nil, _i), do: nil
   defp axis_value(xyz, i), do: elem(xyz, i)
 
+  # Positions to 0.01 mm: finer than a router cuts, and it hides the
+  # controller's step and rounding noise (299.988 for 300).
   defp fmt(nil), do: "—"
-  defp fmt(mm), do: :erlang.float_to_binary(mm / 1, decimals: 3)
+  defp fmt(mm), do: :erlang.float_to_binary(Float.round(mm / 1, 2) + 0.0, decimals: 2)
 
   defp travel_json(travel), do: Jason.encode!(travel_list(travel))
 
