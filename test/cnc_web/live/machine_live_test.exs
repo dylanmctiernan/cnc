@@ -332,9 +332,9 @@ defmodule CNCWeb.MachineLiveTest do
     {:ok, view, _} = live(conn, ~p"/")
 
     assert eventually(fn -> Machine.status().wco != nil end)
-    assert eventually(fn -> render(view) =~ "leaves the travel" end)
-    assert render(view) =~ "X by"
-    assert render(view) =~ "Y by"
+    assert eventually(fn -> render(view) =~ "won&#39;t fit" end)
+    assert render(view) =~ "past the right edge (X)"
+    assert render(view) =~ "past the front edge (Y)"
     CNC.Program.clear()
   end
 

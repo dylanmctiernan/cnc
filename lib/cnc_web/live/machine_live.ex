@@ -1081,9 +1081,12 @@ defmodule CNCWeb.MachineLive do
         The controller hasn't reported a work zero yet, so the fit can't be checked.
       </p>
       <p :if={@fit == []} class="cnc-file-ok">Fits the travel from the current work zero.</p>
-      <p :if={is_list(@fit) and @fit != []} class="cnc-note cnc-note--warn">
-        From the current work zero it leaves the travel: {fit_label(@fit)}.
-      </p>
+      <div :if={is_list(@fit) and @fit != []} class="cnc-note cnc-note--warn">
+        <p>From the current work zero it won't fit:</p>
+        <ul class="cnc-fit-issues">
+          <li :for={issue <- @fit}>{fit_issue(issue)}</li>
+        </ul>
+      </div>
       <ul :if={@program.gcode.warnings != []} class="cnc-file-warnings">
         <li :for={w <- @program.gcode.warnings}>{warning_label(w)}</li>
       </ul>
@@ -1162,11 +1165,32 @@ defmodule CNCWeb.MachineLive do
   defp mm(v),
     do: v |> Float.round(1) |> :erlang.float_to_binary(decimals: 1) |> String.trim_trailing(".0")
 
-  defp fit_label(issues) do
-    Enum.map_join(issues, ", ", fn {axis, side, out} ->
-      "#{axis |> to_string() |> String.upcase()} by #{mm(out)} mm #{if side == :low, do: "below", else: "above"}"
-    end)
+  # Machine origin is front-left, Z at the top: say which edge, and what to do.
+  defp fit_issue({:z, :high, out}),
+    do:
+      "It lifts Z #{mm(out)} mm above the top of travel. Zero Z on the stock's surface " <>
+        "(at least #{mm(out)} mm below the top)."
+
+  defp fit_issue({:z, :low, out}),
+    do: "It cuts #{mm(out)} mm deeper than Z can reach. Raise the stock, or zero Z higher."
+
+  defp fit_issue({axis, side, out}) do
+    edge =
+      case {axis, side} do
+        {:x, :low} -> "left"
+        {:x, :high} -> "right"
+        {:y, :low} -> "front"
+        {:y, :high} -> "back"
+      end
+
+    "It goes #{mm(out)} mm past the #{edge} edge (#{axis |> to_string() |> String.upcase()}). " <>
+      "Move the work zero #{mm(out)} mm #{opposite(edge)}."
   end
+
+  defp opposite("left"), do: "right"
+  defp opposite("right"), do: "left"
+  defp opposite("front"), do: "back"
+  defp opposite("back"), do: "front"
 
   defp warning_label(%{kind: kind, line: line, count: count}) do
     where =

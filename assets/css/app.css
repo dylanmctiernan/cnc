@@ -1732,3 +1732,7 @@ body {
     display: none;
   }
 }
+.cnc-fit-issues {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+}
