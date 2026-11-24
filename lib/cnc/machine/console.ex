@@ -56,6 +56,11 @@ defmodule CNC.Machine.Console do
       byte == Realtime.resume() -> "~ resume"
       byte == Realtime.reset() -> "0x18 soft reset"
       byte == Realtime.jog_cancel() -> "0x85 jog cancel"
+      byte == 0x90 -> "0x90 feed 100%"
+      byte == 0x91 -> "0x91 feed +10%"
+      byte == 0x92 -> "0x92 feed -10%"
+      byte == 0x93 -> "0x93 feed +1%"
+      byte == 0x94 -> "0x94 feed -1%"
       true -> "0x" <> Integer.to_string(byte, 16)
     end
   end

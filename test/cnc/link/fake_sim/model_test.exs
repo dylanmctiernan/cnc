@@ -126,6 +126,70 @@ defmodule CNC.Link.FakeSim.ModelTest do
     assert m3.state == :idle
   end
 
+  describe "G-code (jobs)" do
+    test "moves run at their feed, in work coordinates, and end Idle" do
+      m = idle()
+      {m, ["ok"]} = line(m, "G10 L2 P1 X100 Y50 Z-20")
+      {m, ["ok"]} = line(m, "G21 G90")
+      {m, ["ok"]} = line(m, "G0 X10 Y0")
+      {m, ["ok"]} = line(m, "G1 Z-5 F600")
+      assert m.state == :run
+      assert status(m).state == :run
+
+      {m, []} = Model.advance(m, 60_000)
+      assert m.state == :idle
+      # work (10, 0, -5) at the offset (100, 50, -20)
+      assert_pos(m, {110.0, 50.0, -25.0})
+    end
+
+    test "relative moves, inches, and an arc that ends where it says" do
+      m = idle(pos: {100.0, 100.0, 0.0})
+      {m, ["ok"]} = line(m, "G91 G1 X10 F1000")
+      {m, ["ok"]} = line(m, "G20 X1")
+      {m, ["ok"]} = line(m, "G90 G21 G2 X130 Y100 I10 J0")
+      {m, []} = Model.advance(m, 600_000)
+      assert_pos(m, {130.0, 100.0, 0.0})
+    end
+
+    test "a line is acked only once its moves fit in the planner" do
+      m = idle()
+      m = Enum.reduce(1..15, m, fn i, m -> elem(line(m, "G1 X#{i} F600"), 0) end)
+      assert {m, []} = line(m, "G1 X20 F600")
+      assert {m, []} = line(m, "G1 X21 F600")
+      # A move finishes: one waiting line goes in, with its ok
+      {m, oks} = Model.advance(m, 150)
+      assert "ok" in oks
+      assert :queue.len(m.waiting) <= 1
+    end
+
+    test "hold stops motion and keeps the rest; resume carries on; reset while running locks" do
+      m = idle()
+      {m, ["ok"]} = line(m, "G1 X100 F600")
+      {m, []} = Model.advance(m, 1000)
+      {m, []} = rt(m, Realtime.feed_hold())
+      assert status(m).state == :hold
+      {held, []} = Model.advance(m, 1000)
+      assert held.pos == m.pos
+
+      {m, []} = rt(held, Realtime.resume())
+      assert m.state == :run
+      {m, lines} = rt(m, Realtime.reset())
+      assert "ALARM:3" in lines
+      assert m.state == :alarm
+    end
+
+    test "errors like Grbl: locked, no feed, outside the travel; feed override" do
+      assert {_, ["error:9"]} = line(Model.new(), "G1 X1 F100")
+      assert {_, ["error:22"]} = line(idle(), "G1 X1")
+      assert {m, ["ALARM:2"]} = line(idle(), "G0 X5000")
+      assert m.state == :alarm
+
+      m = idle()
+      {m, []} = rt(m, 0x91)
+      assert status(m).overrides == {110, 100, 100}
+    end
+  end
+
   test "homing acks only when complete, at the origin" do
     m = idle(pos: {100.0, 100.0, 0.0}, homing_ms: 300)
     {m, []} = line(m, "$H")
@@ -228,7 +292,7 @@ defmodule CNC.Link.FakeSim.ModelTest do
 
   test "malformed or unsupported lines" do
     m = idle()
-    assert {_, ["error:20"]} = line(m, "G0 X10")
+    assert {_, ["error:20"]} = line(m, "G28")
     assert {_, ["error:20"]} = line(m, "$J=G90 G21 X1 F100")
     assert {_, ["error:22"]} = line(m, "$J=G91 G21 X1")
     assert {_, ["error:2"]} = line(m, "$J=G91 G21 Xabc F100")

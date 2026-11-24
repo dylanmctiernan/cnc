@@ -18,4 +18,14 @@ defmodule CNC.Grbl.Realtime do
 
   @doc "Cancel the active jog and flush queued jog lines."
   def jog_cancel, do: 0x85
+
+  @doc """
+  Feed override: back to 100%, ±10%, ±1% (the controller keeps it within
+  10–200%). Takes effect immediately, mid-move.
+  """
+  def feed_override(:reset), do: 0x90
+  def feed_override(:plus10), do: 0x91
+  def feed_override(:minus10), do: 0x92
+  def feed_override(:plus1), do: 0x93
+  def feed_override(:minus1), do: 0x94
 end

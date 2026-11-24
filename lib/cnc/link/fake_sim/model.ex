@@ -16,6 +16,15 @@ defmodule CNC.Link.FakeSim.Model do
       start (`~`) resumes to `Idle`. Commands that need `Idle` get `error:8`
       while held
     * `$H` acks `ok` only when the cycle completes
+    * G-code (a job): `G0`–`G3` (arcs as chords, `I`/`J` centres),
+      `G90`/`G91`, `G20`/`G21`, `F`; spindle, coolant, tool and other modal
+      words are accepted and ignored. Positions are work coordinates (at
+      the G54 offset). A line is acked once its moves fit in the planner
+      (#{15} blocks), like Grbl, so a streaming host is paced by it. `!`
+      during Run holds (`Hold:0`), `~` resumes; a reset while running is
+      `ALARM:3`. A move outside the travel is a soft limit, `ALARM:2`; a
+      feed move with no `F` yet is `error:22`. Feed override (`0x90`–`0x94`)
+      scales feed moves and is reported as `Ov:`.
     * soft reset while moving → `ALARM:3` (jog) / `ALARM:6` (homing)
     * `$$` lists max travel `$130`–`$132`; `$13x=<mm>` sets it (Idle/Alarm only)
     * `G10 L2 P1 X.. Y.. Z..` puts the G54 work zero at machine coordinates;
@@ -67,7 +76,7 @@ defmodule CNC.Link.FakeSim.Model do
 
   @type xyz :: {float, float, float}
   @type t :: %__MODULE__{
-          state: :alarm | :idle | :jog | :home | :hold,
+          state: :alarm | :idle | :jog | :home | :hold | :run,
           pos: xyz,
           queue: :queue.queue({xyz, float}),
           feed: float,
@@ -89,6 +98,10 @@ defmodule CNC.Link.FakeSim.Model do
             homing_left: 0,
             wco: {0.0, 0.0, 0.0},
             wco_in: 0,
+            # G-code modal state, lines waiting for planner room, feed override %
+            gcode: %{absolute?: true, units: 1.0, motion: nil, feed: nil},
+            waiting: :queue.new(),
+            feed_ov: 100,
             files: %{"config.yaml" => @config},
             config_file: "config.yaml",
             running: @config
@@ -148,7 +161,7 @@ defmodule CNC.Link.FakeSim.Model do
   def boot(m), do: {m, [@banner, @locked]}
 
   @doc "True while time matters (motion or homing in progress)."
-  def busy?(%__MODULE__{state: s}), do: s in [:jog, :home]
+  def busy?(%__MODULE__{state: s}), do: s in [:jog, :home, :run]
 
   ## Line commands
 
@@ -281,19 +294,171 @@ defmodule CNC.Link.FakeSim.Model do
   end
 
   def line(m, "G10" <> _), do: {m, ["error:8"]}
-  def line(m, _), do: {m, ["error:20"]}
+
+  def line(m, text) do
+    if gcode?(text), do: gcode(m, text), else: {m, ["error:20"]}
+  end
+
+  ## G-code (jobs)
+
+  defp gcode?(text), do: Regex.match?(~r/\A\s*[GMFSTXYZgmfstxyz]/, text)
+
+  defp gcode(%{state: :alarm} = m, _text), do: {m, ["error:9"]}
+  defp gcode(%{state: s} = m, _text) when s in [:jog, :home], do: {m, ["error:8"]}
+
+  # No planner room (or lines already waiting): the ok comes later.
+  defp gcode(m, text) do
+    if :queue.len(m.queue) >= @planner_blocks or not :queue.is_empty(m.waiting),
+      do: {%{m | waiting: :queue.in(text, m.waiting)}, []},
+      else: execute(m, text)
+  end
+
+  defp execute(m, text) do
+    clean =
+      text
+      |> String.replace(~r/\(.*?\)|;.*$/, "")
+      |> String.replace(~r/\s+/, "")
+      |> String.upcase()
+
+    words =
+      for [_, letter, value] <- Regex.scan(~r/([A-Z])([-+]?[0-9]*\.?[0-9]+)/, clean),
+          do: {letter, elem(Float.parse(normalize(value)), 0)}
+
+    with {:ok, g} <- modal(m.gcode, words) do
+      m = %{m | gcode: g}
+      axes = for {l, v} <- words, l in ~w(X Y Z), do: {l, v}
+
+      if axes == [] or g.motion == nil,
+        do: {m, ["ok"]},
+        else: motion(m, g, Map.new(axes), Map.new(words))
+    else
+      {:error, code} -> {m, ["error:#{code}"]}
+    end
+  end
+
+  defp normalize("." <> _ = v), do: "0" <> v
+  defp normalize("-." <> rest), do: "-0." <> rest
+  defp normalize("+" <> rest), do: normalize(rest)
+  defp normalize(v), do: v
+
+  defp modal(g, words) do
+    Enum.reduce_while(words, {:ok, g}, fn
+      {"G", v}, {:ok, g} ->
+        case round(v * 10) do
+          code when code in [0, 10, 20, 30] -> {:cont, {:ok, %{g | motion: div(code, 10)}}}
+          900 -> {:cont, {:ok, %{g | absolute?: true}}}
+          910 -> {:cont, {:ok, %{g | absolute?: false}}}
+          200 -> {:cont, {:ok, %{g | units: 25.4}}}
+          210 -> {:cont, {:ok, %{g | units: 1.0}}}
+          code when code in [40, 170, 400, 490, 540, 800, 940, 911, 901] -> {:cont, {:ok, g}}
+          _ -> {:halt, {:error, 20}}
+        end
+
+      {"F", v}, {:ok, g} ->
+        {:cont, {:ok, %{g | feed: v * g.units}}}
+
+      _other, acc ->
+        {:cont, acc}
+    end)
+  end
+
+  defp motion(m, g, axes, words) do
+    {wx, wy, wz} = m.wco
+    {cx, cy, cz} = sub(tail(m), m.wco)
+
+    coord = fn letter, current ->
+      case Map.fetch(axes, letter) do
+        {:ok, v} -> if g.absolute?, do: v * g.units, else: current + v * g.units
+        :error -> current
+      end
+    end
+
+    work_target = {coord.("X", cx), coord.("Y", cy), coord.("Z", cz)}
+    target = {elem(work_target, 0) + wx, elem(work_target, 1) + wy, elem(work_target, 2) + wz}
+
+    cond do
+      g.motion != 0 and g.feed == nil ->
+        {m, ["error:22"]}
+
+      within_travel(target, m.travel) != :ok ->
+        {stop(m, :alarm), ["ALARM:2"]}
+
+      true ->
+        feed = if g.motion == 0, do: m.max_feed, else: min(g.feed, m.max_feed)
+        points = if g.motion in [2, 3], do: arc(tail(m), target, words, g, m.wco), else: [target]
+        queue = Enum.reduce(points, m.queue, &:queue.in({&1, feed}, &2))
+        state = if m.state == :hold, do: :hold, else: :run
+        {%{m | queue: queue, state: state}, ["ok"]}
+    end
+  end
+
+  # An arc as 16 chords: centre from I/J (relative to the start), G2 clockwise.
+  defp arc({sx, sy, sz} = _start, {ex, ey, ez}, words, g, _wco) do
+    i = Map.get(words, "I", 0.0) * g.units
+    j = Map.get(words, "J", 0.0) * g.units
+    {ox, oy} = {sx + i, sy + j}
+    r = :math.sqrt(i * i + j * j)
+    a0 = :math.atan2(sy - oy, sx - ox)
+    a1 = :math.atan2(ey - oy, ex - ox)
+
+    sweep =
+      case g.motion do
+        2 -> if a1 >= a0, do: a1 - a0 - 2 * :math.pi(), else: a1 - a0
+        3 -> if a1 <= a0, do: a1 - a0 + 2 * :math.pi(), else: a1 - a0
+      end
+
+    n = 16
+
+    for k <- 1..n do
+      a = a0 + sweep * k / n
+      z = sz + (ez - sz) * k / n
+      if k == n, do: {ex, ey, ez}, else: {ox + r * :math.cos(a), oy + r * :math.sin(a), z}
+    end
+  end
+
+  defp sub({a, b, c}, {x, y, z}), do: {a - x, b - y, c - z}
+
+  # Lines waiting for planner room go in as moves finish; each gets its ok.
+  defp drain(m, out \\ []) do
+    if :queue.len(m.queue) < @planner_blocks and not :queue.is_empty(m.waiting) do
+      {{:value, text}, waiting} = :queue.out(m.waiting)
+      {m, lines} = execute(%{m | waiting: waiting}, text)
+      if m.state == :alarm, do: {m, out ++ lines}, else: drain(m, out ++ lines)
+    else
+      {m, out}
+    end
+  end
 
   ## Real-time bytes
 
   def realtime(m, byte) do
     cond do
-      byte == Realtime.status() -> status_report(m)
-      byte == Realtime.feed_hold() and m.state == :idle -> {%{m | state: :hold}, []}
-      byte in [Realtime.jog_cancel(), Realtime.feed_hold()] -> {cancel_jog(m), []}
-      byte == Realtime.resume() and m.state == :hold -> {%{m | state: :idle}, []}
-      byte == Realtime.resume() -> {m, []}
-      byte == Realtime.reset() -> reset(m)
-      true -> {m, []}
+      byte == Realtime.status() ->
+        status_report(m)
+
+      byte == Realtime.feed_hold() and m.state in [:idle, :run] ->
+        {%{m | state: :hold}, []}
+
+      byte == Realtime.resume() and m.state == :hold and not :queue.is_empty(m.queue) ->
+        {%{m | state: :run}, []}
+
+      byte in 0x90..0x94 ->
+        {%{m | feed_ov: feed_override(m.feed_ov, byte)}, []}
+
+      byte in [Realtime.jog_cancel(), Realtime.feed_hold()] ->
+        {cancel_jog(m), []}
+
+      byte == Realtime.resume() and m.state == :hold ->
+        {%{m | state: :idle}, []}
+
+      byte == Realtime.resume() ->
+        {m, []}
+
+      byte == Realtime.reset() ->
+        reset(m)
+
+      true ->
+        {m, []}
     end
   end
 
@@ -312,6 +477,14 @@ defmodule CNC.Link.FakeSim.Model do
   end
 
   def advance(%{state: :jog} = m, dt), do: {move(m, dt), []}
+
+  def advance(%{state: :run} = m, dt) do
+    m = move(m, dt)
+    {m, oks} = drain(m)
+    m = if m.state == :idle and not :queue.is_empty(m.queue), do: %{m | state: :run}, else: m
+    {m, oks}
+  end
+
   def advance(m, _dt), do: {m, []}
 
   defp move(m, dt) do
@@ -320,6 +493,7 @@ defmodule CNC.Link.FakeSim.Model do
         stop(m, :idle)
 
       {:value, {target, feed}} ->
+        feed = if m.state == :run and feed < m.max_feed, do: feed * m.feed_ov / 100, else: feed
         mm_per_ms = feed / 60_000
         dist = distance(m.pos, target)
         step = mm_per_ms * dt
@@ -355,6 +529,7 @@ defmodule CNC.Link.FakeSim.Model do
         feed: m.feed,
         spindle: 0.0,
         buffer: {planner_free, 128},
+        overrides: {m.feed_ov, 100, 100},
         wco: if(m.wco_in == 0, do: m.wco)
       })
 
@@ -383,8 +558,9 @@ defmodule CNC.Link.FakeSim.Model do
     {m, alarm} =
       case m.state do
         :jog -> {stop(m, :alarm), ["ALARM:3"]}
+        :run -> {stop(m, :alarm), ["ALARM:3"]}
         :home -> {stop(m, :alarm), ["ALARM:6"]}
-        :hold -> {%{m | state: :idle}, []}
+        :hold -> {stop(m, :idle), []}
         _ -> {m, []}
       end
 
@@ -445,7 +621,14 @@ defmodule CNC.Link.FakeSim.Model do
 
   defp text_lines(text), do: String.split(String.trim_trailing(text, "\n"), "\n")
 
-  defp stop(m, state), do: %{m | state: state, queue: :queue.new(), feed: 0.0, homing_left: 0}
+  defp stop(m, state),
+    do: %{m | state: state, queue: :queue.new(), waiting: :queue.new(), feed: 0.0, homing_left: 0}
+
+  defp feed_override(_ov, 0x90), do: 100
+  defp feed_override(ov, 0x91), do: min(ov + 10, 200)
+  defp feed_override(ov, 0x92), do: max(ov - 10, 10)
+  defp feed_override(ov, 0x93), do: min(ov + 1, 200)
+  defp feed_override(ov, 0x94), do: max(ov - 1, 10)
 
   defp tail(m) do
     case :queue.peek_r(m.queue) do

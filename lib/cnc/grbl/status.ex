@@ -30,7 +30,8 @@ defmodule CNC.Grbl.Status do
           wco: xyz | nil,
           feed: float | nil,
           spindle: float | nil,
-          buffer: {planner_free :: non_neg_integer, rx_free :: non_neg_integer} | nil
+          buffer: {planner_free :: non_neg_integer, rx_free :: non_neg_integer} | nil,
+          overrides: {feed :: number, rapid :: number, spindle :: number} | nil
         }
 
   defstruct state: :unknown,
@@ -40,7 +41,8 @@ defmodule CNC.Grbl.Status do
             wco: nil,
             feed: nil,
             spindle: nil,
-            buffer: nil
+            buffer: nil,
+            overrides: nil
 
   @states %{
     "Idle" => :idle,
@@ -85,7 +87,9 @@ defmodule CNC.Grbl.Status do
         "MPos:" <> xyz(s.mpos || {0, 0, 0}),
         "FS:#{num(s.feed || 0, 0)},#{num(s.spindle || 0, 0)}",
         s.wco && "WCO:" <> xyz(s.wco),
-        s.buffer && "Bf:#{elem(s.buffer, 0)},#{elem(s.buffer, 1)}"
+        s.buffer && "Bf:#{elem(s.buffer, 0)},#{elem(s.buffer, 1)}",
+        s.overrides &&
+          "Ov:#{elem(s.overrides, 0)},#{elem(s.overrides, 1)},#{elem(s.overrides, 2)}"
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -147,6 +151,14 @@ defmodule CNC.Grbl.Status do
   defp parse_field(["Bf", v], s) do
     case String.split(v, ",") |> Enum.map(&Integer.parse/1) do
       [{p, ""}, {r, ""}] -> {:ok, %{s | buffer: {p, r}}}
+      _ -> :error
+    end
+  end
+
+  # Overrides, in percent: feed, rapid, spindle (sent only now and then)
+  defp parse_field(["Ov", v], s) do
+    case String.split(v, ",") |> Enum.map(&Integer.parse/1) do
+      [{f, ""}, {r, ""}, {sp, ""}] -> {:ok, %{s | overrides: {f, r, sp}}}
       _ -> :error
     end
   end

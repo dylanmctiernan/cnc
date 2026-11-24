@@ -73,7 +73,8 @@ defmodule CNC.Grbl.ResponseTest do
        substate: 1,
        mpos: {10.0, 20.0, -1.0},
        feed: 0.0,
-       spindle: 0.0
+       spindle: 0.0,
+       overrides: {100, 100, 100}
      }},
     # WPos reporting ($10=0) with WCO -> derive MPos
     {"<Run|WPos:1.000,2.000,3.000|FS:500,12000|WCO:100.000,200.000,-50.000>",
