@@ -264,9 +264,14 @@ button {
 }
 
 /* Messages: lock banner and notes, full width */
+/* Over the top of the map, so a note coming or going never moves the
+   controls */
 .cnc-messages {
-  grid-area: msgs;
+  grid-area: view;
+  align-self: start;
+  z-index: 5;
   display: grid;
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 0.4);
 }
 .cnc-messages:empty {
   display: none;
@@ -291,8 +296,9 @@ button {
 .cnc-note {
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--line);
-  border-left: 4px solid var(--line);
-  color: var(--text-dim);
+  border-left: 4px solid var(--edge);
+  background: var(--raised);
+  color: var(--text);
 }
 .cnc-note--warn {
   border-left-color: var(--yellow);
@@ -410,8 +416,8 @@ button {
 .cnc-joy {
   /* Explicit sizes: everything inside the pad is absolutely positioned, so
      it has no intrinsic size, and iOS Safari collapsed a minmax(0, ...)
-     column (and the slider, which takes the pad's height) to nothing. */
-  --joy: 13rem;
+     column (and the slider, which takes the pad's height) to nothing.
+     --joy is set on .cnc-ctl, which sizes itself from it. */
   display: grid;
   grid-template-columns: var(--joy) 4rem;
   grid-template-rows: var(--joy);
@@ -1141,7 +1147,7 @@ body {
 .cnc-ctl {
   grid-area: ctl;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 0.5rem;
   padding: 0.5rem max(0.5rem, env(safe-area-inset-right)) 0.5rem
@@ -1149,17 +1155,29 @@ body {
   border-top: 1px solid var(--line);
   background: var(--panel);
 }
-.cnc-ctl > :not(.cnc-tabs, .cnc-speed),
-.cnc[data-mode="step"] .cnc-tabs,
-.cnc[data-mode="zero"] .cnc-tabs {
-  grid-column: 1 / -1;
+.cnc-ctl {
+  /* joystick size; also sets the controller's height in every mode */
+  --joy: min(calc(100vw - 7rem), clamp(8.5rem, calc(100dvh - 30rem), 13rem));
+}
+.cnc-ctl-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: calc(var(--joy) + 3.25rem);
+  overflow: hidden;
+}
+.cnc-ctl-body > :not(.cnc-speed) {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.cnc-ctl-body > .cnc-joy {
+  align-content: end;
 }
 .cnc-tabs .cnc-btn,
 .cnc-speed .cnc-btn {
   padding-inline: 0.25rem;
 }
 .cnc-joy {
-  --joy: min(13rem, calc(100vw - 7rem), calc(100dvh - 24rem));
   grid-template-columns: var(--joy) 4.25rem;
 }
 
@@ -1168,6 +1186,13 @@ body {
 .cnc-zero {
   display: grid;
   gap: 0.5rem;
+  min-height: 0;
+}
+.cnc-pendant {
+  grid-template-rows: auto auto minmax(3rem, 1fr);
+}
+.cnc-zero {
+  grid-template-rows: auto minmax(2.75rem, 1fr) minmax(2.75rem, 1fr) auto;
 }
 .cnc-pendant-go,
 .cnc-zero-axes {
@@ -1179,16 +1204,12 @@ body {
 .cnc-pendant-btn {
   display: grid;
   place-content: center;
-  min-height: clamp(4rem, 15dvh, 7rem);
   font-size: 1.75rem;
   font-weight: 700;
   line-height: 1.1;
 }
 .cnc-pendant-btn .cnc-unit {
   font-size: 0.75rem;
-}
-.cnc-zero-axes .cnc-btn {
-  min-height: 3.25rem;
 }
 .cnc-frame {
   justify-self: start;
@@ -1248,7 +1269,7 @@ body {
     display: inline;
     margin-left: 0.375rem;
   }
-  .cnc-joy {
+  .cnc-ctl {
     --joy: min(15rem, calc(100dvh - 30rem));
   }
 }
@@ -1283,18 +1304,14 @@ body {
     border-left: 1px solid var(--line);
     overflow-y: auto;
   }
-  .cnc-ctl > * {
-    grid-column: 1 / -1;
-  }
   .cnc-num {
     font-size: 1.25rem;
   }
-  .cnc-joy {
+  .cnc-ctl {
     --joy: min(18rem, calc(100dvh - 11.5rem), calc(clamp(18rem, 34vw, 26rem) - 6.5rem));
-    grid-template-columns: var(--joy) 3.75rem;
   }
-  .cnc-pendant-btn {
-    min-height: clamp(3rem, 18dvh, 7rem);
+  .cnc-joy {
+    grid-template-columns: var(--joy) 3.75rem;
   }
   .cnc-console {
     bottom: 0;
@@ -1406,29 +1423,20 @@ body {
     display: flex;
   }
   .cnc-ctl {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    --joy: min(13rem, calc(100dvh - 30rem));
     border-top: 1px solid var(--line);
-  }
-  .cnc-ctl > :not(.cnc-tabs, .cnc-speed) {
-    grid-column: 1 / -1;
-  }
-  .cnc-tabs,
-  .cnc-speed,
-  .cnc[data-mode="step"] .cnc-tabs {
-    grid-column: auto;
   }
   .cnc-speed .cnc-unit {
     display: none;
   }
   .cnc-joy {
-    --joy: min(13rem, calc(100dvh - 30rem));
     grid-template-columns: var(--joy) 4rem;
   }
   .cnc-pendant-btn {
-    min-height: 4rem;
     font-size: 1.375rem;
   }
   .cnc-side {
+    grid-area: side;
     display: flex;
     flex-direction: column;
     gap: 1rem;

@@ -445,140 +445,143 @@ defmodule CNCWeb.MachineLive do
             </button>
           </div>
 
-          <div
-            :if={@control_mode != :zero}
-            class="cnc-seg cnc-speed"
-            role="group"
-            aria-label="Jog speed"
-          >
-            <button
-              :for={{tier, {xy, z}} <- @tiers}
-              type="button"
-              class="cnc-btn"
-              aria-pressed={to_string(@tier == tier)}
-              phx-click="tier"
-              phx-value-tier={tier}
-              title={"#{xy} mm/s X/Y, #{z} mm/s Z at full push"}
-            >
-              {tier}<span class="cnc-unit">{xy}/{z}</span>
-            </button>
-          </div>
-
-          <div
-            :if={@control_mode == :joystick}
-            id="joystick"
-            class="cnc-joy"
-            phx-hook="Joystick"
-            phx-update="ignore"
-            data-tier={@tier}
-            data-enabled={to_string(@machine.state in [:idle, :jogging])}
-          >
+          <%!-- Same height in every mode, so switching never moves the map --%>
+          <div class="cnc-ctl-body">
             <div
-              class="cnc-joy-pad"
-              role="application"
-              aria-label="X/Y joystick: drag to jog, release to stop"
+              :if={@control_mode != :zero}
+              class="cnc-seg cnc-speed"
+              role="group"
+              aria-label="Jog speed"
             >
-              <span class="cnc-joy-label is-y" style="top: 0.25rem; left: 50%">Y+</span>
-              <span class="cnc-joy-label is-y" style="bottom: 0.25rem; left: 50%">Y−</span>
-              <span class="cnc-joy-label is-x" style="left: 0.5rem; top: 50%">X−</span>
-              <span class="cnc-joy-label is-x" style="right: 0.5rem; top: 50%">X+</span>
-              <span class="cnc-joy-knob"></span>
+              <button
+                :for={{tier, {xy, z}} <- @tiers}
+                type="button"
+                class="cnc-btn"
+                aria-pressed={to_string(@tier == tier)}
+                phx-click="tier"
+                phx-value-tier={tier}
+                title={"#{xy} mm/s X/Y, #{z} mm/s Z at full push"}
+              >
+                {tier}<span class="cnc-unit">{xy}/{z}</span>
+              </button>
             </div>
+
             <div
-              class="cnc-joy-z"
-              role="application"
-              aria-label="Z slider: drag up or down to jog, release to stop"
+              :if={@control_mode == :joystick}
+              id="joystick"
+              class="cnc-joy"
+              phx-hook="Joystick"
+              phx-update="ignore"
+              data-tier={@tier}
+              data-enabled={to_string(@machine.state in [:idle, :jogging])}
             >
-              <span class="cnc-joy-label is-z" style="top: 0.25rem; left: 50%">Z+</span>
-              <span class="cnc-joy-label is-z" style="bottom: 0.25rem; left: 50%">Z−</span>
-              <span class="cnc-joy-knob"></span>
+              <div
+                class="cnc-joy-pad"
+                role="application"
+                aria-label="X/Y joystick: drag to jog, release to stop"
+              >
+                <span class="cnc-joy-label is-y" style="top: 0.25rem; left: 50%">Y+</span>
+                <span class="cnc-joy-label is-y" style="bottom: 0.25rem; left: 50%">Y−</span>
+                <span class="cnc-joy-label is-x" style="left: 0.5rem; top: 50%">X−</span>
+                <span class="cnc-joy-label is-x" style="right: 0.5rem; top: 50%">X+</span>
+                <span class="cnc-joy-knob"></span>
+              </div>
+              <div
+                class="cnc-joy-z"
+                role="application"
+                aria-label="Z slider: drag up or down to jog, release to stop"
+              >
+                <span class="cnc-joy-label is-z" style="top: 0.25rem; left: 50%">Z+</span>
+                <span class="cnc-joy-label is-z" style="bottom: 0.25rem; left: 50%">Z−</span>
+                <span class="cnc-joy-knob"></span>
+              </div>
             </div>
-          </div>
 
-          <%!-- Step: like a handwheel pendant. Pick the axis, pick the size,
-               then − and +. --%>
-          <div :if={@control_mode == :step} class="cnc-pendant">
-            <div class="cnc-seg" role="group" aria-label="Axis">
-              <button
-                :for={axis <- [:x, :y, :z]}
-                type="button"
-                class={["cnc-btn", "is-#{axis}"]}
-                aria-pressed={to_string(@step_axis == axis)}
-                phx-click="step_axis"
-                phx-value-axis={axis}
-              >
-                {axis |> to_string() |> String.upcase()}
-              </button>
+            <%!-- Step: like a handwheel pendant. Pick the axis, pick the size,
+                 then − and +. --%>
+            <div :if={@control_mode == :step} class="cnc-pendant">
+              <div class="cnc-seg" role="group" aria-label="Axis">
+                <button
+                  :for={axis <- [:x, :y, :z]}
+                  type="button"
+                  class={["cnc-btn", "is-#{axis}"]}
+                  aria-pressed={to_string(@step_axis == axis)}
+                  phx-click="step_axis"
+                  phx-value-axis={axis}
+                >
+                  {axis |> to_string() |> String.upcase()}
+                </button>
+              </div>
+              <div class="cnc-seg" role="group" aria-label="Step size in mm">
+                <button
+                  :for={mm <- @steps}
+                  type="button"
+                  class="cnc-btn"
+                  aria-pressed={to_string(@step == mm)}
+                  phx-click="step_size"
+                  phx-value-mm={mm}
+                >
+                  {mm}
+                </button>
+              </div>
+              <div class="cnc-pendant-go">
+                <button
+                  :for={dir <- [-1, 1]}
+                  type="button"
+                  class={["cnc-btn", "cnc-pendant-btn", "is-#{@step_axis}"]}
+                  phx-click="step"
+                  phx-value-x={if @step_axis == :x, do: dir, else: 0}
+                  phx-value-y={if @step_axis == :y, do: dir, else: 0}
+                  phx-value-z={if @step_axis == :z, do: dir, else: 0}
+                  disabled={@machine.state != :idle}
+                  aria-label={"Move #{String.upcase(to_string(@step_axis))} #{if dir < 0, do: "minus", else: "plus"} #{@step} mm"}
+                >
+                  {String.upcase(to_string(@step_axis))}{if dir < 0, do: "−", else: "+"}
+                  <span class="cnc-unit">{@step} mm</span>
+                </button>
+              </div>
             </div>
-            <div class="cnc-seg" role="group" aria-label="Step size in mm">
-              <button
-                :for={mm <- @steps}
-                type="button"
-                class="cnc-btn"
-                aria-pressed={to_string(@step == mm)}
-                phx-click="step_size"
-                phx-value-mm={mm}
-              >
-                {mm}
-              </button>
-            </div>
-            <div class="cnc-pendant-go">
-              <button
-                :for={dir <- [-1, 1]}
-                type="button"
-                class={["cnc-btn", "cnc-pendant-btn", "is-#{@step_axis}"]}
-                phx-click="step"
-                phx-value-x={if @step_axis == :x, do: dir, else: 0}
-                phx-value-y={if @step_axis == :y, do: dir, else: 0}
-                phx-value-z={if @step_axis == :z, do: dir, else: 0}
-                disabled={@machine.state != :idle}
-                aria-label={"Move #{String.upcase(to_string(@step_axis))} #{if dir < 0, do: "minus", else: "plus"} #{@step} mm"}
-              >
-                {String.upcase(to_string(@step_axis))}{if dir < 0, do: "−", else: "+"}
-                <span class="cnc-unit">{@step} mm</span>
-              </button>
-            </div>
-          </div>
 
-          <%!-- Zero: set where the work is (controller layouts; the workstation
-               has these next to the readout) --%>
-          <div :if={@control_mode == :zero} class="cnc-zero">
-            <.frame_switch machine={@machine} frame={@frame} />
-            <div class="cnc-zero-axes">
-              <button
-                :for={axis <- ~w(X Y Z)}
-                type="button"
-                class={["cnc-btn", "is-#{String.downcase(axis)}"]}
-                phx-click="zero"
-                phx-value-axes={String.downcase(axis)}
-                disabled={@machine.state != :idle}
-              >
-                Zero {axis}
-              </button>
+            <%!-- Zero: set where the work is (controller layouts; the workstation
+                 has these next to the readout) --%>
+            <div :if={@control_mode == :zero} class="cnc-zero">
+              <.frame_switch machine={@machine} frame={@frame} />
+              <div class="cnc-zero-axes">
+                <button
+                  :for={axis <- ~w(X Y Z)}
+                  type="button"
+                  class={["cnc-btn", "is-#{String.downcase(axis)}"]}
+                  phx-click="zero"
+                  phx-value-axes={String.downcase(axis)}
+                  disabled={@machine.state != :idle}
+                >
+                  Zero {axis}
+                </button>
+              </div>
+              <div class="cnc-zero-axes">
+                <button
+                  type="button"
+                  class="cnc-btn"
+                  phx-click="zero"
+                  phx-value-axes="xy"
+                  disabled={@machine.state != :idle}
+                >
+                  Zero X and Y
+                </button>
+                <button
+                  type="button"
+                  class="cnc-btn"
+                  phx-click="go_to_zero"
+                  disabled={not can_go_to_zero?(@machine)}
+                >
+                  Go to work zero
+                </button>
+              </div>
+              <p class="cnc-sub">
+                Zero sets the work position to 0 where the tool is now. Go to work zero
+                lifts Z, then moves to X0 Y0.
+              </p>
             </div>
-            <div class="cnc-zero-axes">
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click="zero"
-                phx-value-axes="xy"
-                disabled={@machine.state != :idle}
-              >
-                Zero X and Y
-              </button>
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click="go_to_zero"
-                disabled={not can_go_to_zero?(@machine)}
-              >
-                Go to work zero
-              </button>
-            </div>
-            <p class="cnc-sub">
-              Zero sets the work position to 0 where the tool is now. Go to work zero
-              lifts Z, then moves to X0 Y0.
-            </p>
           </div>
         </section>
 
