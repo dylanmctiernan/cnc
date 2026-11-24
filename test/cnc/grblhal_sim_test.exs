@@ -30,11 +30,14 @@ defmodule CNC.GrblhalSimTest do
   end
 
   test "connects locked, reads travel from $130-$132, unlocks", %{m: m} do
+    assert eventually(fn -> Machine.status(m).controller_info.firmware == "grblHAL" end)
+
     assert %State{
              state: :alarm,
              alarm: :connect,
              travel: {{+0.0, 1250.0}, {+0.0, 1250.0}, _},
-             homing_enabled?: false
+             homing_enabled?: false,
+             controller_info: %{firmware: "grblHAL", simulated?: true}
            } = Machine.status(m)
 
     :ok = Machine.unlock(m)

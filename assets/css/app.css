@@ -234,6 +234,15 @@ button {
   border-style: dashed;
   color: var(--text-dim);
 }
+.cnc-sim {
+  align-self: center;
+  padding: 0.125rem 0.5rem;
+  border: 1px dashed var(--cyan);
+  border-radius: 3px;
+  color: var(--cyan);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
 .cnc-meta {
   display: flex;
   flex-wrap: wrap;

@@ -190,6 +190,13 @@ defmodule CNCWeb.MachineLive do
           <div class={"cnc-state cnc-state--#{@machine.state}"} role="status">
             {state_label(@machine)}
           </div>
+          <span
+            :if={@machine.controller_info.simulated?}
+            class="cnc-sim"
+            title="Connected to a simulator, not a real machine"
+          >
+            Simulator
+          </span>
           <dl class="cnc-meta">
             <div>
               <dt>link</dt>
@@ -200,7 +207,11 @@ defmodule CNCWeb.MachineLive do
               </dd>
             </div>
             <div>
-              <dt>controller</dt>
+              <dt>firmware</dt>
+              <dd>{firmware_label(@machine.controller_info)}</dd>
+            </div>
+            <div>
+              <dt>reports</dt>
               <dd>{controller_label(@machine)}</dd>
             </div>
             <div>
@@ -262,7 +273,15 @@ defmodule CNCWeb.MachineLive do
               </button>
             </div>
           </div>
-          <p :if={note = error_text(@machine.last_error)} class="cnc-note">{note}</p>
+          <p :if={note = error_text(@machine.last_error)} class="cnc-note">
+            {note}
+            <span :if={
+              @machine.last_error == {:link, :no_response} and
+                @machine.controller_info.firmware == "grblHAL" and @machine.controller_info.simulated?
+            }>
+              The grblHAL simulator is known to stall now and then; it recovers on its own.
+            </span>
+          </p>
           <p :if={@action_error} class="cnc-note">{@action_error}</p>
           <p :for={{axis, got, max} <- @machine.travel_issues} class="cnc-note cnc-note--warn">
             The controller reports {axis_name(axis)} travel of {round(got)} mm, more than this
@@ -740,6 +759,10 @@ defmodule CNCWeb.MachineLive do
   defp alarm_cause(3), do: "The controller was reset while moving, so the position may be off."
   defp alarm_cause(code) when code in 6..9, do: "Homing didn't complete."
   defp alarm_cause(code), do: "The controller raised alarm #{code}."
+
+  defp firmware_label(%{firmware: nil}), do: "—"
+  defp firmware_label(%{firmware: fw, version: nil}), do: fw
+  defp firmware_label(%{firmware: fw, version: v}), do: "#{fw} #{v}"
 
   defp controller_label(%State{controller: nil}), do: "—"
 

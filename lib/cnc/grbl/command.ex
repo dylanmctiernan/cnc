@@ -14,6 +14,9 @@ defmodule CNC.Grbl.Command do
   @doc "Print all settings (`$$`): one `$N=value` line each, then `ok`."
   def settings, do: "$$"
 
+  @doc "Print build info (`$I`): `[VER:...]`, `[OPT:...]`, and on grblHAL `[FIRMWARE:...]`, `[DRIVER:...]`."
+  def build_info, do: "$I"
+
   @doc """
   Set the G54 work offset so the current position reads as the given work
   coordinates (usually zero): `G10 L20 P1 X.. Y.. Z..`.

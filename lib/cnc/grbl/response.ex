@@ -13,6 +13,7 @@ defmodule CNC.Grbl.Response do
           | {:msg, binary}
           | {:banner, binary}
           | {:setting, non_neg_integer, binary}
+          | {:info, binary, binary}
           | {:unknown, binary}
 
   @doc """
@@ -29,6 +30,18 @@ defmodule CNC.Grbl.Response do
   defp classify("error:" <> code), do: code_of(code, :error)
   defp classify("ALARM:" <> code), do: code_of(code, :alarm)
   defp classify("[MSG:" <> rest), do: bracketed(rest, &{:msg, &1})
+
+  # Other bracketed reports: build info ($I: VER, OPT, FIRMWARE, DRIVER, ...),
+  # parser state (GC), offsets ($#: G54, ...), help (HLP).
+  defp classify("[" <> rest) do
+    with {:ok, body} <- strip_suffix(rest, "]"),
+         [key, value] when key != "" <- String.split(body, ":", parts: 2) do
+      {:info, key, value}
+    else
+      _ -> nil
+    end
+  end
+
   defp classify("Grbl" <> _ = line), do: {:banner, line}
   defp classify("$" <> setting), do: setting(setting)
 

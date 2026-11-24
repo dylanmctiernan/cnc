@@ -21,7 +21,11 @@ defmodule CNC.Grbl.ResponseTest do
      {:banner, "Grbl 3.7.8 [FluidNC v3.7.8 (wifi) '$' for help]"}},
     # Not (yet) interpreted
     {"[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]",
-     {:unknown, "[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]"}},
+     {:info, "GC", "G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0"}},
+    {"[VER:1.1f.20261123:]", {:info, "VER", "1.1f.20261123:"}},
+    {"[DRIVER:Simulator]", {:info, "DRIVER", "Simulator"}},
+    {"[G54:0.000,0.000,0.000]", {:info, "G54", "0.000,0.000,0.000"}},
+    {"[no colon]", {:unknown, "[no colon]"}},
     {"$130=1250.000", {:setting, 130, "1250.000"}},
     {"$10=511", {:setting, 10, "511"}},
     {"$N0=", {:unknown, "$N0="}},

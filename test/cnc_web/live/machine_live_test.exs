@@ -125,6 +125,12 @@ defmodule CNCWeb.MachineLiveTest do
     assert render(view) =~ "Machine position"
   end
 
+  test "shows that it's a simulator, and which firmware", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, ".cnc-sim", "Simulator") end)
+    assert eventually(fn -> render(view) =~ "CNC Sim 1.1h.cnc-sim" end)
+  end
+
   test "rejects malformed jog input", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()

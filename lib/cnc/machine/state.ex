@@ -27,6 +27,10 @@ defmodule CNC.Machine.State do
       clamps jogs to (the controller's soft limits remain authoritative)
     * `travel_source` — `:controller` once read from `$130`–`$132` after
       connecting, otherwise `:config` (the fallback)
+    * `controller_info` — `%{firmware: "grblHAL" | "FluidNC" | "Grbl" | ...,
+      version: binary | nil, simulated?: boolean}` from `$I` and the boot
+      banner; `simulated?` is true for the built-in Sim and for controllers
+      reporting `[DRIVER:Simulator]` (the grblHAL simulator)
     * `homing_enabled?` — from the controller's `$22`: `false` means `$H`
       will be refused (`error:5`); `nil` if it doesn't report `$22`
     * `travel_issues` — `[{axis, reported_mm, max_mm}]` for axes where the
@@ -54,5 +58,6 @@ defmodule CNC.Machine.State do
             travel: nil,
             travel_source: :config,
             travel_issues: [],
-            homing_enabled?: nil
+            homing_enabled?: nil,
+            controller_info: %{firmware: nil, version: nil, simulated?: false}
 end

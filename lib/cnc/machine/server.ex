@@ -62,6 +62,12 @@ defmodule CNC.Machine.Server do
     # $$ is only accepted when the controller is Idle or in Alarm: ask once
     # it is (and again if it said error:8, busy).
     settings_wanted?: false,
+    # Build info ($I) and the boot banner: what's on the other end. Info
+    # lines collect in info_partial and become info when $I is acked, so a
+    # half-received reply is never published.
+    info: %{},
+    info_partial: %{},
+    banner: nil,
     tier: :normal,
     vector: {0, 0, 0},
     in_flight: 0,
@@ -139,6 +145,9 @@ defmodule CNC.Machine.Server do
         in_flight: 0,
         settings: %{},
         settings_wanted?: false,
+        info: %{},
+        info_partial: %{},
+        banner: nil,
         travel: d.config_travel,
         travel_source: :config,
         travel_issues: [],
@@ -348,11 +357,15 @@ defmodule CNC.Machine.Server do
   defp response({:setting, n, value}, s, d),
     do: {s, %{d | settings: Map.put(d.settings, n, value)}, []}
 
-  defp response({:banner, _}, s, d) when s in [:disconnected, :connecting], do: {s, d, []}
+  defp response({:info, key, value}, s, d),
+    do: {s, %{d | info_partial: Map.put(d.info_partial, key, value)}, []}
+
+  defp response({:banner, banner}, s, d) when s in [:disconnected, :connecting],
+    do: {s, %{d | banner: banner}, []}
 
   defp response({:banner, banner}, _s, d) do
     Logger.info("controller reset: #{banner}")
-    {:connecting, %{flush_pending(d) | alarm: :reset, status: nil}, []}
+    {:connecting, %{flush_pending(d) | alarm: :reset, status: nil, banner: banner}, []}
   end
 
   defp response(other, s, d) do
@@ -401,6 +414,10 @@ defmodule CNC.Machine.Server do
   defp on_ack(:raw_setting, :ok, s, d),
     do: {s, send_line(%{d | settings: %{}}, Command.settings(), :settings), []}
 
+  # Not every controller knows $I; identification then relies on the banner.
+  defp on_ack(:info, :ok, s, d), do: {s, %{d | info: d.info_partial}, []}
+  defp on_ack(:info, _error, s, d), do: {s, d, []}
+
   # Busy (still moving): ask again once it reports Idle/Alarm.
   defp on_ack(:settings, {:error, 8}, s, d), do: {s, %{d | settings_wanted?: true}, []}
 
@@ -421,6 +438,31 @@ defmodule CNC.Machine.Server do
 
   ## Settings
 
+  # What's on the other end, from $I (VER/FIRMWARE/DRIVER), the boot banner,
+  # and the transport (the built-in Sim is always simulated).
+  defp identify(%{info: info, banner: banner, adapter: adapter}) do
+    ver = info["VER"] || ""
+    text = ver <> " " <> (banner || "")
+
+    firmware =
+      cond do
+        info["FIRMWARE"] -> info["FIRMWARE"]
+        text =~ ~r/FluidNC/i -> "FluidNC"
+        text =~ ~r/grblHAL/i -> "grblHAL"
+        ver != "" or banner -> "Grbl"
+        true -> nil
+      end
+
+    %{
+      firmware: firmware,
+      version: ver |> String.split(":") |> hd() |> blank_to_nil(),
+      simulated?: adapter == CNC.Transport.Sim or info["DRIVER"] == "Simulator"
+    }
+  end
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(s), do: s
+
   # $22 is a bitmask in grblHAL (bit 0 = homing on); plain 0/1 in Grbl.
   # nil when the controller doesn't report it (e.g. FluidNC may not).
   defp homing_enabled?(%{22 => value}) do
@@ -434,7 +476,9 @@ defmodule CNC.Machine.Server do
 
   defp maybe_read_settings(%{settings_wanted?: true} = d, reported)
        when reported in [:idle, :alarm] do
-    send_line(%{d | settings_wanted?: false, settings: %{}}, Command.settings(), :settings)
+    %{d | settings_wanted?: false, settings: %{}, info_partial: %{}}
+    |> send_line(Command.settings(), :settings)
+    |> send_line(Command.build_info(), :info)
   end
 
   defp maybe_read_settings(d, _reported), do: d
@@ -618,7 +662,8 @@ defmodule CNC.Machine.Server do
       travel: d.travel,
       travel_source: d.travel_source,
       travel_issues: d.travel_issues,
-      homing_enabled?: homing_enabled?(d.settings)
+      homing_enabled?: homing_enabled?(d.settings),
+      controller_info: identify(d)
     }
   end
 

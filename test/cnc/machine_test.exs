@@ -55,6 +55,9 @@ defmodule CNC.MachineTest do
     test "settings answered with error:8 (busy) are asked for again", %{m: m} do
       report(m, "Alarm", {0, 0})
       assert_receive {:line, "$$"}
+      assert_receive {:line, "$I"}
+      # Busy: both are refused.
+      send(m, {:transport, :line, "error:8"})
       send(m, {:transport, :line, "error:8"})
       report(m, "Alarm", {0, 0})
       assert_receive {:line, "$$"}
@@ -63,6 +66,27 @@ defmodule CNC.MachineTest do
           do: send(m, {:transport, :line, l})
 
       assert Machine.status(m).travel_source == :controller
+    end
+
+    test "identifies the controller from $I and the banner", %{m: m} do
+      send(m, {:transport, :line, "GrblHAL 1.1f ['$' or '$HELP' for help]"})
+
+      connect(m, "Alarm", {0, 0}, [], [
+        "[VER:1.1f.20261123:]",
+        "[FIRMWARE:grblHAL]",
+        "[DRIVER:Simulator]"
+      ])
+
+      assert Machine.status(m).controller_info == %{
+               firmware: "grblHAL",
+               version: "1.1f.20261123",
+               simulated?: true
+             }
+    end
+
+    test "FluidNC from its VER line; a real board isn't simulated", %{m: m} do
+      connect(m, "Alarm", {0, 0}, [], ["[VER:3.9.1 FluidNC v3.9.1:]"])
+      assert %{firmware: "FluidNC", simulated?: false} = Machine.status(m).controller_info
     end
 
     test "homing enabled comes from $22 (a bitmask in grblHAL)", %{m: m} do
@@ -617,10 +641,13 @@ defmodule CNC.MachineTest do
 
   # First status after (re)connect: Machine then asks for settings ($$).
   # Play the controller: send the given setting lines, then ok.
-  defp connect(m, state, pos, settings \\ []) do
+  defp connect(m, state, pos, settings \\ [], info \\ []) do
     report(m, state, pos)
     assert_receive {:line, "$$"}
+    assert_receive {:line, "$I"}
     for line <- settings, do: send(m, {:transport, :line, line})
+    ok(m)
+    for line <- info, do: send(m, {:transport, :line, line})
     ok(m)
   end
 
