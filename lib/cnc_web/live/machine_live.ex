@@ -371,12 +371,6 @@ defmodule CNCWeb.MachineLive do
             key="error"
           >
             {note}
-            <span :if={
-              @machine.last_error == {:link, :no_response} and
-                @machine.controller_info.firmware == "grblHAL" and @machine.controller_info.simulated?
-            }>
-              The grblHAL simulator is known to stall now and then; it recovers on its own.
-            </span>
           </.note>
           <.note :if={@action_error} id="note-action" key="action">{@action_error}</.note>
           <.note
@@ -694,7 +688,7 @@ defmodule CNCWeb.MachineLive do
             </p>
             <p :if={@machine.adapter == "Sim"} class="cnc-help-note">
               The built-in simulator understands $, $$, $X, $H, $J=, $130–$132, ?, ! and ~.
-              Connect the grblHAL simulator to try the rest.
+              A real controller answers the rest.
             </p>
             <section :for={section <- @command_help} class="cnc-help-section">
               <h3 class="cnc-help-title">{section.title}</h3>

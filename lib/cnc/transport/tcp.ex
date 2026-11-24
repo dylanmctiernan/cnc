@@ -1,14 +1,14 @@
 defmodule CNC.Transport.TCP do
   @moduledoc """
-  Raw TCP link to a Grbl-speaking controller: the grblHAL simulator
-  (`grblHAL_sim -p 2323`), or later FluidNC's telnet port.
+  Raw TCP link to a Grbl-speaking controller, e.g. FluidNC's Wi-Fi telnet
+  port (23).
 
   Connects after `start_link/2` returns (so a dead host doesn't block the
   owner), then sends the owner `{:transport, :connected}`. Lines arrive as
   `{:transport, :line, line}` without their line ending. On close or error it
   sends `{:transport, :disconnected}` and exits; the owner reconnects.
 
-  Options: `:host` (default `"localhost"`), `:port` (default 2323),
+  Options: `:host` (default `"localhost"`), `:port` (default 23, telnet),
   `:connect_timeout` ms (default 2000).
   """
   @behaviour CNC.Transport
@@ -34,7 +34,7 @@ defmodule CNC.Transport.TCP do
   @impl GenServer
   def handle_continue(:connect, %{opts: opts} = s) do
     host = opts |> Keyword.get(:host, "localhost") |> to_charlist()
-    port = Keyword.get(opts, :port, 2323)
+    port = Keyword.get(opts, :port, 23)
     timeout = Keyword.get(opts, :connect_timeout, 2000)
 
     # packet: :line frames for us; nodelay because '?' polls are single bytes.

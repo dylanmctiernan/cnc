@@ -61,7 +61,6 @@ cnc/                      # mix phx.new cnc --no-ecto --no-mailer --no-gettext
 ├── lib/cnc_app.ex        # boundary CNCApp        — supervision + config wiring only
 ├── lib/cnc_web/          # boundary CNCWeb       — LiveView UI + JS hooks
 ├── assets/js/hooks/      # JogKeys, BedView
-├── docker/grblhal-sim/   # Dockerfile running grblHAL_sim -p 2323
 └── test/
 ```
 
@@ -109,6 +108,8 @@ Two layers, different jobs.
 | `CNC.Transport.Sim` (Elixir) | Small in-process fake. Not a faithful firmware | Unit tests of `CNC.Machine`; fault injection; default `mix phx.server` with zero setup |
 | grblHAL simulator via `CNC.Transport.TCP` | Real grblHAL core compiled for Linux/Windows; `grblHAL_sim -p 2323` exposes a raw TCP (telnet) port | Integration tests and dev UI against real Grbl behaviour: planner, acceleration, jog cancel, status reports, alarms, soft limits |
 
+**Dropped 2026-11-24:** the grblHAL simulator served M5, then went: it leaked a socket per reconnect, served one client at a time and stalled intermittently under our traffic. Real-firmware checks move to an ESP32 dev board flashed with FluidNC (no motors needed; see Phase 2). Kept for the record:
+
 **Notes on grblHAL sim:**
 - Build from the grblHAL Web Builder (Driver: Simulator, Board: Linux) or from `github.com/grblHAL/Simulator`.
 - Upstream marks it proof-of-concept: pin a known-good build in the Dockerfile.
@@ -148,7 +149,7 @@ end
 ```
 - `CNC.Transport.Sim` — see §5.
 - `CNC.Transport.TCP` — `:gen_tcp`, `packet: :line`, `active: :once`. Exits on socket close; supervisor restarts with backoff. Also usable later for FluidNC's Wi-Fi telnet channel.
-- Config: `config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []` (dev default); `adapter: CNC.Transport.TCP, opts: [host: ~c"localhost", port: 2323]` via env `CNC_TRANSPORT=grblhal_sim`.
+- Config: `config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []` (dev default); `adapter: CNC.Transport.TCP` via `CNC_TRANSPORT=tcp CNC_TCP=<host>[:port]` (FluidNC Wi-Fi telnet, port 23); `CNC.Transport.UART` via `CNC_TRANSPORT=uart CNC_UART=<device>`.
 
 ### CNC.Machine (state + jogging)
 `gen_statem`, single owner of the Transport process.
@@ -218,8 +219,6 @@ Hook rules:
 
 - **mise** pins Erlang and Elixir (`.mise.toml`).
 - All checks run locally: `mix precommit` = `compile --warnings-as-errors` (Boundary), `deps.unlock --unused`, `format`, `test`.
-- `ExUnit.configure(exclude: [:grblhal_sim])`. Run with `GRBLHAL_SIM=localhost:2323 mix test --only grblhal_sim`.
-- `docker/grblhal-sim/Dockerfile` builds/pins grblHAL_sim and applies `$` settings on start; `docker compose up grblhal-sim`.
 - `docs/bench-log.md` for manual checks.
 
 ---
@@ -238,7 +237,7 @@ Hook rules:
 **Phase 1 ends at M5.** Status (2026-11-23): M0–M4 done. M5 done except `$H` and the soft-limit error, which the grblHAL simulator can't do (no limit-switch simulation, so no homing, so no soft limits); those move to Phase 2 on the real board. Travel limits against grblHAL are enforced by the host clamp. See §11.
 
 ### Next phases (not planned in detail)
-- **Phase 2 — real board:** `CNC.Transport.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view). Carries over from M5: homing and soft-limit tests. See §11 for what to verify on FluidNC. **Settings from the app:** a `CNC.Settings` boundary to read the controller's configuration (grblHAL `$$`; FluidNC `$CD` / `config.yaml`) and edit it with names, units and ranges, showing a diff and confirming before writing, only when Idle/Locked, then re-reading to verify.
+- **Phase 2 — real board:** First a bare ESP32 dev board flashed with FluidNC, no motors: real firmware, planner and USB serial on the desk. Then `CNC.Transport.UART`, bench motor on the 6x board from the Mac, Z axis (Page Up/Down + side view). Carries over from M5: homing and soft-limit tests. See §11 for what to verify on FluidNC. **Settings from the app:** a `CNC.Settings` boundary to read the controller's configuration (grblHAL `$$`; FluidNC `$CD` / `config.yaml`) and edit it with names, units and ranges, showing a diff and confirming before writing, only when Idle/Locked, then re-reading to verify.
 - **Phase 3 — Pi:** `cnc_firmware` Nerves project, `http://cnc.local`, phone jog pad.
 - Later: job streaming, toolpath preview + progress, storage, conversational ops, kiosk + HDMI touch, config sync, probing.
 
@@ -286,4 +285,4 @@ Open for Phase 2 (verify on the board, don't assume):
 - **Controller details and console:** raw traffic both ways (status polls opt-in), controller facts, a terminal (`Machine.send_raw/2`) and a command reference.
 - **LAN access with a PIN** (`CNC_LAN=1 CNC_PIN=…`).
 - **No CI:** all checks run locally via `mix precommit`.
-
+- **grblHAL simulator dropped (2026-11-24).** Dev and tests use the built-in Sim; real-firmware checks use an ESP32 dev board running FluidNC. `CNC.Transport.TCP` stays for FluidNC over Wi-Fi.

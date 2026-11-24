@@ -41,8 +41,7 @@ end
 
 # Controller link. Dev and tests default to the built-in Sim (config.exs).
 #   CNC_TRANSPORT=sim mix phx.server             # built-in simulator
-#   CNC_TRANSPORT=grblhal_sim mix phx.server     # docker compose up grblhal-sim
-#   CNC_GRBLHAL=host:port                        # default localhost:2323
+#   CNC_TRANSPORT=tcp CNC_TCP=fluidnc.local:23 mix phx.server   # FluidNC over Wi-Fi (telnet)
 #   CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
 #   CNC_UART_SPEED=115200                        # default; see `mix cnc.ports`
 case System.get_env("CNC_TRANSPORT") do
@@ -52,8 +51,10 @@ case System.get_env("CNC_TRANSPORT") do
   "sim" ->
     config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []
 
-  "grblhal_sim" ->
-    [host, port] = String.split(System.get_env("CNC_GRBLHAL", "localhost:2323"), ":")
+  "tcp" ->
+    target = System.get_env("CNC_TCP") || raise "CNC_TRANSPORT=tcp needs CNC_TCP=<host>[:port]"
+    [host | port] = String.split(target, ":")
+    port = List.first(port, "23")
 
     config :cnc, :transport,
       adapter: CNC.Transport.TCP,
@@ -69,7 +70,7 @@ case System.get_env("CNC_TRANSPORT") do
       opts: [port: port, speed: String.to_integer(System.get_env("CNC_UART_SPEED", "115200"))]
 
   other ->
-    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected sim, grblhal_sim or uart)"
+    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected sim, tcp or uart)"
 end
 
 if config_env() == :prod do

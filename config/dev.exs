@@ -58,8 +58,8 @@ config :cnc, CNCWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :cnc, dev_routes: true
 
-# Dev uses the built-in simulator (config.exs), like the tests.
-# CNC_TRANSPORT=grblhal_sim for the grblHAL one (docker compose up -d grblhal-sim).
+# Dev uses the built-in simulator (config.exs), like the tests. See
+# runtime.exs for connecting a real board.
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

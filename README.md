@@ -25,23 +25,8 @@ The web layer can only reach `CNC.Machine`; protocol and transport stay private 
 mise install        # Erlang/Elixir from .mise.toml
 mix setup
 mix phx.server      # http://localhost:4000, built-in simulator
-mix test            # excludes the grblHAL simulator tests
+mix test
 ```
-
-### Against the grblHAL simulator
-
-The real grblHAL firmware core, compiled for Linux, in Docker, preconfigured
-for this machine (1250 × 1250 mm, 50 mm/s). It can't home (no simulated limit
-switches) and so has no soft limits; the host's travel clamp still applies.
-
-```sh
-docker compose up -d grblhal-sim
-CNC_TRANSPORT=grblhal_sim mix phx.server
-GRBLHAL_SIM=localhost:2323 mix test --only grblhal_sim
-```
-
-It serves one TCP client at a time (the newest wins), so don't run the tests
-while the dev server is connected to it.
 
 ### Against the real board (FluidNC over USB)
 
@@ -53,6 +38,12 @@ CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
 Opening the port may reset the board; the machine then shows Locked as after
 any controller restart. The serial adapter is tested against a virtual serial
 port (`test/support/pty_bridge.py`), not yet against hardware.
+
+FluidNC can also be reached over Wi-Fi (telnet, port 23):
+
+```sh
+CNC_TRANSPORT=tcp CNC_TCP=fluidnc.local mix phx.server  # or <ip>:<port>
+```
 
 ### From another device on your network
 
