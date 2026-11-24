@@ -905,6 +905,7 @@ defmodule CNCWeb.MachineLive do
   defp travel_list(_), do: [[0, 1250], [0, 1250], [-100, 0]]
 
   defp adapter_label("Sim"), do: "Simulator"
+  defp adapter_label("NativeFluidNC"), do: "FluidNC on this computer"
   defp adapter_label(nil), do: ""
   defp adapter_label(name), do: name
 

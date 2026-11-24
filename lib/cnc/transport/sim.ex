@@ -31,6 +31,9 @@ defmodule CNC.Transport.Sim do
   @impl CNC.Transport
   def close(pid), do: GenServer.cast(pid, :close)
 
+  @impl CNC.Transport
+  def simulated?, do: true
+
   ## Test hooks
 
   @doc "Change `:latency` / `:drop_acks` at runtime."

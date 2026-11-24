@@ -35,3 +35,6 @@ cnc-*.tar
 npm-debug.log
 /assets/node_modules/
 
+
+# Native FluidNC build (fluidnc/build.sh)
+/.fluidnc/

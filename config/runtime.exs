@@ -39,14 +39,33 @@ if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
   config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
 end
 
-# Controller link. Dev and tests default to the built-in Sim (config.exs).
+# Controller link. Dev uses native FluidNC once built (fluidnc/build.sh),
+# else the built-in Sim; tests always use the Sim (config.exs).
+#   CNC_TRANSPORT=fluidnc mix phx.server         # native FluidNC, fluidnc/native.yaml
 #   CNC_TRANSPORT=sim mix phx.server             # built-in simulator
 #   CNC_TRANSPORT=tcp CNC_TCP=fluidnc.local:23 mix phx.server   # FluidNC over Wi-Fi (telnet)
 #   CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
 #   CNC_UART_SPEED=115200                        # default; see `mix cnc.ports`
-case System.get_env("CNC_TRANSPORT") do
+fluidnc_built? = File.exists?(Path.expand("../.fluidnc/bin/fluidnc", __DIR__))
+
+transport =
+  System.get_env("CNC_TRANSPORT") ||
+    if(config_env() == :dev and fluidnc_built?, do: "fluidnc")
+
+case transport do
   nil ->
     :ok
+
+  "fluidnc" ->
+    root = Path.expand("..", __DIR__)
+
+    config :cnc, :transport,
+      adapter: CNC.Transport.NativeFluidNC,
+      opts: [
+        executable: Path.join(root, ".fluidnc/bin/fluidnc"),
+        config: Path.join(root, "fluidnc/native.yaml"),
+        run_dir: Path.join(root, ".fluidnc/run")
+      ]
 
   "sim" ->
     config :cnc, :transport, adapter: CNC.Transport.Sim, opts: []
@@ -70,7 +89,7 @@ case System.get_env("CNC_TRANSPORT") do
       opts: [port: port, speed: String.to_integer(System.get_env("CNC_UART_SPEED", "115200"))]
 
   other ->
-    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected sim, tcp or uart)"
+    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected fluidnc, sim, tcp or uart)"
 end
 
 if config_env() == :prod do

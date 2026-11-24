@@ -485,7 +485,7 @@ defmodule CNC.Machine.Server do
     %{
       firmware: firmware,
       version: ver |> String.split(":") |> hd() |> blank_to_nil(),
-      simulated?: adapter == CNC.Transport.Sim or info["DRIVER"] == "Simulator"
+      simulated?: CNC.Transport.simulated?(adapter) or info["DRIVER"] == "Simulator"
     }
   end
 

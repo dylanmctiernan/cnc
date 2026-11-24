@@ -1,0 +1,86 @@
+# FluidNC configuration: native build on this computer (fluidnc/build.sh),
+# the dev controller. Runs automatically with `mix phx.server`.
+#
+# Same axes as esp32_bench.yaml: travel, speeds, acceleration and homing
+# direction (which sets the soft-limit ranges X/Y 0..1250, Z -100..0).
+# Differences, because nothing is wired up:
+#   * engine: timed (moves in real time; the native default finishes
+#     them almost instantly)
+#   * no limit switches or probe: homing fails (ALARM:9), so Unlock instead
+#   * step/dir pins are placeholders the native build accepts
+#
+# Edits apply when the controller restarts (Reset in the UI).
+
+name: "DHM CNC router"
+board: "Native (this computer)"
+
+stepping:
+  engine: timed
+  idle_ms: 255
+  pulse_us: 4
+  dir_delay_us: 1
+  disable_delay_us: 0
+
+axes:
+  x:
+    steps_per_mm: 80
+    max_rate_mm_per_min: 3000
+    acceleration_mm_per_sec2: 500
+    max_travel_mm: 1250
+    soft_limits: true
+    homing:
+      cycle: 2
+      positive_direction: false
+      mpos_mm: 0
+      feed_mm_per_min: 100
+      seek_mm_per_min: 2000
+      settle_ms: 250
+    motor0:
+      hard_limits: false
+      pulloff_mm: 2
+      standard_stepper:
+        step_pin: gpio.1
+        direction_pin: gpio.2
+
+  y:
+    steps_per_mm: 80
+    max_rate_mm_per_min: 3000
+    acceleration_mm_per_sec2: 500
+    max_travel_mm: 1250
+    soft_limits: true
+    homing:
+      cycle: 2
+      positive_direction: false
+      mpos_mm: 0
+      feed_mm_per_min: 100
+      seek_mm_per_min: 2000
+      settle_ms: 250
+    motor0:
+      hard_limits: false
+      pulloff_mm: 2
+      standard_stepper:
+        step_pin: gpio.3
+        direction_pin: gpio.4
+
+  z:
+    steps_per_mm: 400
+    max_rate_mm_per_min: 1200
+    acceleration_mm_per_sec2: 200
+    max_travel_mm: 100
+    soft_limits: true
+    homing:
+      cycle: 1
+      positive_direction: true
+      mpos_mm: 0
+      feed_mm_per_min: 100
+      seek_mm_per_min: 600
+      settle_ms: 250
+    motor0:
+      hard_limits: false
+      pulloff_mm: 2
+      standard_stepper:
+        step_pin: gpio.5
+        direction_pin: gpio.6
+
+start:
+  must_home: false

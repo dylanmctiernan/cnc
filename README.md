@@ -24,11 +24,23 @@ The web layer can only reach `CNC.Machine`; protocol and transport stay private 
 ```sh
 mise install        # Erlang/Elixir from .mise.toml
 mix setup
-mix phx.server      # http://localhost:4000, built-in simulator
+fluidnc/build.sh    # once: real FluidNC firmware, built to run on this Mac
+mix phx.server      # http://localhost:4000
 mix test
 ```
 
+`mix phx.server` drives FluidNC running natively on this computer (the real
+firmware with `fluidnc/native.yaml`; nothing physical moves). Without the
+build it falls back to the built-in simulator; `CNC_TRANSPORT=sim` forces
+that. Tests use the built-in simulator; `test/cnc/native_fluidnc_test.exs`
+runs against native FluidNC when it's built.
+
+Native FluidNC can't home (there are no switches), so Unlock instead. Its
+config applies on each controller restart (Reset in the UI).
+
 ### Against the real board (FluidNC over USB)
+
+Upload `fluidnc/esp32_bench.yaml` to the bench ESP32 as `config.yaml`.
 
 ```sh
 mix cnc.ports                                          # find the board, e.g. /dev/cu.usbserial-0001
