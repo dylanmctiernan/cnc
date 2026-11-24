@@ -29,7 +29,7 @@ mix cnc.fluidnc.flash /dev/cu.usbserial-0001
 
 This builds FluidNC from the same pinned commit as the FluidNC sim (the
 `noradio` build: serial only, no Wi-Fi access point), writes it, then writes
-`fluidnc/esp32_bench.yaml` to the board as `config.yaml`. The first run
+`priv/fluidnc/esp32_bench.yaml` to the board as `config.yaml`. The first run
 downloads the ESP32 toolchain (a few minutes).
 
 If it stops at `Connecting....`, hold the board's **BOOT** button until the

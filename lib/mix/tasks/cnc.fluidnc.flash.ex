@@ -6,10 +6,10 @@ defmodule Mix.Tasks.Cnc.Fluidnc.Flash do
   holding the config as `config.yaml`.
 
       mix cnc.fluidnc.flash /dev/cu.usbserial-0001
-      mix cnc.fluidnc.flash /dev/cu.usbserial-0001 --config fluidnc/other.yaml
+      mix cnc.fluidnc.flash /dev/cu.usbserial-0001 --config priv/fluidnc/other.yaml
       mix cnc.fluidnc.flash --build-only            # no board needed
 
-  The default config is `fluidnc/esp32_bench.yaml`. It's FluidNC's
+  The default config is `priv/fluidnc/esp32_bench.yaml`. It's FluidNC's
   `noradio` build: serial only, so the board never starts a Wi-Fi access
   point. Find the port with `mix cnc.ports`, and close anything holding it
   (the dev server on `uart`) first. If the upload stops at "Connecting...",
@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Cnc.Fluidnc.Flash do
   @impl Mix.Task
   def run(args) do
     {opts, rest} = OptionParser.parse!(args, strict: [config: :string, build_only: :boolean])
-    config = Path.expand(opts[:config] || "fluidnc/esp32_bench.yaml")
+    config = Path.expand(opts[:config] || "priv/fluidnc/esp32_bench.yaml")
     File.exists?(config) || Mix.raise("no such config: #{config}")
 
     port =

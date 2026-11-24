@@ -30,18 +30,18 @@ mix test
 ```
 
 `mix phx.server` drives FluidNC running natively on this computer (the real
-firmware with `fluidnc/sim.yaml`; nothing physical moves). Without the
+firmware with `priv/fluidnc/sim.yaml`; nothing physical moves). Without the
 build it falls back to the fake sim (a simple imitation built into the app);
 `CNC_TRANSPORT=fake` forces that. Tests use the fake sim; `test/cnc/fluidnc_sim_test.exs`
 runs against native FluidNC when it's built.
 
 The FluidNC sim has no switches, so homing is off (`$22=0`): Unlock instead. Edits to
-`fluidnc/sim.yaml` apply when the app restarts (FluidNC reads it at start).
+`priv/fluidnc/sim.yaml` apply when the app restarts (FluidNC reads it at start).
 
 ### Against the real board (FluidNC over USB)
 
 Flash the bench ESP32 with FluidNC (same pinned commit as the sim) and
-`fluidnc/esp32_bench.yaml`: `mix cnc.fluidnc.flash /dev/cu.usbserial-0001`. The
+`priv/fluidnc/esp32_bench.yaml`: `mix cnc.fluidnc.flash /dev/cu.usbserial-0001`. The
 first session is in `docs/bench-esp32.md`.
 
 ```sh

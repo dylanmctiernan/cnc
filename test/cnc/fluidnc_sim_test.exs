@@ -1,7 +1,7 @@
 defmodule CNC.FluidNCSimTest do
   @moduledoc """
   CNC.Machine against real FluidNC firmware running natively
-  (`CNC.Transport.FluidNCSim`), with this machine's `fluidnc/sim.yaml`.
+  (`CNC.Transport.FluidNCSim`), with this machine's `priv/fluidnc/sim.yaml`.
 
   Runs when FluidNC has been built (`mix cnc.fluidnc.build`); skipped otherwise
   (see test_helper.exs). Each test starts its own FluidNC in a temporary
@@ -18,7 +18,7 @@ defmodule CNC.FluidNCSimTest do
     transport =
       {CNC.Transport.FluidNCSim,
        executable: Path.expand(".fluidnc/bin/fluidnc"),
-       config: Path.expand("fluidnc/sim.yaml"),
+       config: Path.expand("priv/fluidnc/sim.yaml"),
        run_dir: dir}
 
     topic = "fluidnc-#{System.unique_integer([:positive])}"

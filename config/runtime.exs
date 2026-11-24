@@ -41,7 +41,7 @@ end
 
 # Controller link. Dev uses native FluidNC once built (mix cnc.fluidnc.build),
 # else the fake sim; tests always use the fake sim (config.exs).
-#   CNC_TRANSPORT=fluidnc mix phx.server         # native FluidNC, fluidnc/sim.yaml
+#   CNC_TRANSPORT=fluidnc mix phx.server         # native FluidNC, priv/fluidnc/sim.yaml
 #   CNC_TRANSPORT=fake mix phx.server            # fake sim (built in)
 #   CNC_TRANSPORT=tcp CNC_TCP=fluidnc.local:23 mix phx.server   # FluidNC over Wi-Fi (telnet)
 #   CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
@@ -63,7 +63,7 @@ case transport do
       adapter: CNC.Transport.FluidNCSim,
       opts: [
         executable: Path.join(root, ".fluidnc/bin/fluidnc"),
-        config: Path.join(root, "fluidnc/sim.yaml"),
+        config: Path.join(root, "priv/fluidnc/sim.yaml"),
         run_dir: Path.join(root, ".fluidnc/run")
       ]
 
