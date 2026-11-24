@@ -284,11 +284,22 @@ export default {
     const dim = ["disconnected", "connecting"].includes(this.state)
     ctx.globalAlpha = dim ? 0.4 : 1
 
-    // Commanded X/Y jog direction (asked for, not where it is)
+    // Commanded X/Y jog (asked for, not where it is): direction, and length
+    // for how far the stick is pushed, like the Z line on the gauge. It
+    // always clears the marker; a faint circle marks full deflection.
     const [jx, jy] = this.jog || [0, 0, 0]
     if (jx || jy) {
       const n = Math.hypot(jx, jy)
-      const len = this.mini ? 14 : 34
+      const ring = this.mini ? 4 : 7
+      const full = this.mini ? 14 : 34
+      const len = ring + 3 + (full - ring - 3) * Math.min(n, 1)
+      if (!this.mini) {
+        ctx.strokeStyle = c.gridMajor
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.arc(px, py, full, 0, Math.PI * 2)
+        ctx.stroke()
+      }
       const ex = px + (jx / n) * len, ey = py - (jy / n) * len
       ctx.strokeStyle = c.bg
       ctx.lineWidth = 5
