@@ -217,7 +217,7 @@ defmodule CNC.Machine.Server do
   end
 
   defp event({:timeout, :jog_tick}, :tick, :jogging, d),
-    do: {:jogging, maybe_increment(d), [{{:timeout, :jog_tick}, Jog.dt_ms(), :tick}]}
+    do: {:jogging, top_up(d), [{{:timeout, :jog_tick}, Jog.dt_ms(), :tick}]}
 
   defp event({:timeout, :deadman}, :expired, :jogging, d) do
     d = realtime(d, Realtime.jog_cancel())
@@ -598,6 +598,17 @@ defmodule CNC.Machine.Server do
   end
 
   ## Jogging
+
+  # Each tick tops the controller up to the run-ahead bound. Sending just one
+  # increment per tick matched the controller's consumption exactly, so any
+  # timer lateness let it run dry: it dropped to Idle and braked between
+  # increments (the UI showed Jog/Idle flicker; a real machine would stutter).
+  defp top_up(d) do
+    case maybe_increment(d) do
+      ^d -> d
+      d -> top_up(d)
+    end
+  end
 
   # Holding a key into a limit clamps the increment, so the tool slides up to
   # the edge (and along it on diagonals) and then just stops sending.

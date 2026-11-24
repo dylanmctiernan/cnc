@@ -609,6 +609,25 @@ defmodule CNC.MachineTest do
       assert_in_delta x, y, 0.01
     end
 
+    # Sending one increment per tick let the controller run dry between
+    # increments: it flickered Jog/Idle and a real machine would stutter.
+    test "a held jog keeps the controller jogging without gaps", %{m: m} do
+      :ok = Machine.unlock(m)
+      assert eventually(fn -> Machine.status(m).state == :idle end)
+      :ok = Machine.jog(m, {1, 0}, :normal)
+      assert eventually(fn -> Machine.status(m).controller == :jog end)
+
+      samples =
+        for _ <- 1..40 do
+          Process.sleep(25)
+          :ok = Machine.jog_heartbeat(m)
+          Machine.status(m).controller
+        end
+
+      :ok = Machine.jog_stop(m)
+      assert Enum.uniq(samples) == [:jog]
+    end
+
     test "holding a key into a limit slides up to it without errors" do
       m = start_machine({CNC.Transport.Sim, pos: {1249.0, 600.0, 0.0}}, "sim-limit")
       assert eventually(fn -> Machine.status(m).state == :alarm end)
