@@ -20,3 +20,6 @@ config :phoenix_live_view,
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix,
   sort_verified_routes_query_params: true
+
+# Screen tests run their own machine and program store (CNCWeb.Instance).
+config :cnc, instance_from_session: true

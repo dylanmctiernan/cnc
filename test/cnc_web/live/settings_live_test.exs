@@ -1,15 +1,16 @@
 defmodule CNCWeb.SettingsLiveTest do
-  use CNCWeb.ConnCase, async: false
+  use CNCWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
   alias CNC.Machine
 
-  setup do
-    Machine.jog_stop()
-    assert eventually(fn -> Machine.settings()[130] != nil end)
-    on_exit(fn -> Machine.write_settings([{130, "1250"}]) end)
-    :ok
+  # A fresh machine per test (CNCWeb.ConnCase.with_instance/1), so writes
+  # don't leak between tests and they run in parallel.
+  setup %{conn: conn} do
+    {conn, m, _program} = with_instance(conn)
+    assert eventually(fn -> Machine.settings(m)[130] != nil end)
+    %{conn: conn, m: m}
   end
 
   test "lists settings by group with names and units", %{conn: conn} do
@@ -19,7 +20,7 @@ defmodule CNCWeb.SettingsLiveTest do
     assert has_element?(view, "#set-130")
   end
 
-  test "edit, review the diff, write, see it saved", %{conn: conn} do
+  test "edit, review the diff, write, see it saved", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/settings")
     form = "form[id^=settings-form]"
 
@@ -30,12 +31,12 @@ defmodule CNCWeb.SettingsLiveTest do
 
     view |> element("button", "Write 1 setting") |> render_click()
     assert eventually(fn -> render(view) =~ "saved" end)
-    assert eventually(fn -> Machine.settings()[130] == "900.000" end)
+    assert eventually(fn -> Machine.settings(m)[130] == "900.000" end)
   end
 
-  test "untouched fields aren't validated (the form sends them all)", %{conn: conn} do
+  test "untouched fields aren't validated (the form sends them all)", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/settings")
-    current = Machine.settings()
+    current = Machine.settings(m)
     fields = Map.new(current, fn {n, v} -> {Integer.to_string(n), v} end)
     # LiveView marks untouched fields with "_unused_<name>" keys.
     fields = fields |> Map.put("130", "900") |> Map.put("_unused_131", "")

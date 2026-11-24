@@ -62,6 +62,10 @@ defmodule CNC.Transport.UART do
 
   @impl GenServer
   def handle_cast(:close, s) do
+    # Wait until queued bytes are actually sent: closing a serial port can
+    # discard output still in the OS buffer, and the watchdog's last write
+    # before closing is a jog cancel.
+    _ = Circuits.UART.drain(s.uart)
     Circuits.UART.close(s.uart)
     {:stop, {:shutdown, :closed}, s}
   end

@@ -1,21 +1,17 @@
 defmodule CNCWeb.MachineLiveTest do
-  # Drives the application's Machine (fake-sim-backed), so not async.
-  use CNCWeb.ConnCase, async: false
+  # Each test drives its own machine (fake sim) and program store
+  # (CNCWeb.ConnCase.with_instance/1), so these run in parallel.
+  use CNCWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
   alias CNC.Machine
 
-  # Start each test locked, as after a fresh connect. Poll for :connecting
-  # (it lasts until the next status poll) before waiting for :alarm, or a
-  # test that ended in :alarm would race the controller's reboot banner.
-  # Broadcasts are throttled and may skip it, so poll the state directly.
-  setup do
-    Machine.jog_stop()
-    Machine.reset()
-    assert eventually(fn -> Machine.status().state == :connecting end, 1000, 5)
-    assert eventually(fn -> Machine.status().state == :alarm end)
-    :ok
+  # A fresh machine for each test, locked as after connecting.
+  setup %{conn: conn} do
+    {conn, m, program} = with_instance(conn)
+    assert eventually(fn -> Machine.status(m).state == :alarm end)
+    %{conn: conn, m: m, program: program}
   end
 
   test "shows the lock and unlocks", %{conn: conn} do
@@ -28,13 +24,13 @@ defmodule CNCWeb.MachineLiveTest do
     refute render(view) =~ "cnc-lock"
   end
 
-  test "keyboard jog events drive the machine and stream positions", %{conn: conn} do
+  test "keyboard jog events drive the machine and stream positions", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status().state == :idle end)
+    assert eventually(fn -> Machine.status(m).state == :idle end)
 
     render_hook(view, "jog", %{"x" => 1, "y" => 1, "tier" => "fast"})
-    assert Machine.status().state == :jogging
+    assert Machine.status(m).state == :jogging
     assert_push_event(view, "pos", %{state: :jogging, jog: [1, 1, 0]})
 
     for _ <- 1..4 do
@@ -43,48 +39,48 @@ defmodule CNCWeb.MachineLiveTest do
     end
 
     render_hook(view, "jog_stop", %{})
-    assert Machine.status().state == :idle
-    assert eventually(fn -> elem(Machine.status().mpos, 0) > 0 end)
+    assert Machine.status(m).state == :idle
+    assert eventually(fn -> elem(Machine.status(m).mpos, 0) > 0 end)
   end
 
-  test "Z: Page key jogs and Z steps", %{conn: conn} do
+  test "Z: Page key jogs and Z steps", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
     assert eventually(fn -> render(view) =~ "Ready" end)
-    {_, _, z0} = Machine.status().mpos
+    {_, _, z0} = Machine.status(m).mpos
 
     # At the top of Z travel already: down works, up is clamped.
     view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
-    view |> element("button[phx-value-axis=z]") |> render_click()
+    view |> element("button[phx-click=step_axis][phx-value-axis=z]") |> render_click()
     view |> element(".cnc-pendant-btn", "Z−") |> render_click()
-    assert eventually(fn -> abs(elem(Machine.status().mpos, 2) - (z0 - 1)) < 0.001 end)
+    assert eventually(fn -> abs(elem(Machine.status(m).mpos, 2) - (z0 - 1)) < 0.001 end)
 
     render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => -1, "tier" => "fast"})
-    assert Machine.status().jog == {0, 0, -1}
+    assert Machine.status(m).jog == {0, 0, -1}
     assert_push_event(view, "pos", %{jog: [0, 0, -1]})
     render_hook(view, "jog_stop", %{})
   end
 
-  test "joystick: analog jog events drive the machine proportionally", %{conn: conn} do
+  test "joystick: analog jog events drive the machine proportionally", %{conn: conn, m: m} do
     {:ok, view, html} = live(conn, ~p"/")
     assert html =~ ~s(phx-hook="Joystick")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status().state == :idle end)
+    assert eventually(fn -> Machine.status(m).state == :idle end)
 
     render_hook(view, "jog", %{"x" => 0.5, "y" => -0.24, "z" => 0, "tier" => "normal"})
-    assert Machine.status().jog == {0.5, -0.24, 0}
+    assert Machine.status(m).jog == {0.5, -0.24, 0}
     render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => 0.3, "tier" => "normal"})
-    assert Machine.status().jog == {0, 0, 0.3}
+    assert Machine.status(m).jog == {0, 0, 0.3}
     render_hook(view, "jog_stop", %{})
-    assert Machine.status().state == :idle
+    assert Machine.status(m).state == :idle
   end
 
-  test "type a work position without moving", %{conn: conn} do
+  test "type a work position without moving", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status().state == :idle and Machine.status().wpos end)
-    mpos = Machine.status().mpos
+    assert eventually(fn -> Machine.status(m).state == :idle and Machine.status(m).wpos end)
+    mpos = Machine.status(m).mpos
 
     view |> element(~s|.cnc-num--edit[phx-value-axis="x"]|) |> render_click()
     assert has_element?(view, "#work-dialog", "Set X position")
@@ -110,10 +106,10 @@ defmodule CNCWeb.MachineLiveTest do
     refute has_element?(view, "#work-dialog")
 
     assert eventually(fn ->
-             match?({wx, _, _} when abs(wx + 12.5) < 0.001, Machine.status().wpos)
+             match?({wx, _, _} when abs(wx + 12.5) < 0.001, Machine.status(m).wpos)
            end)
 
-    assert Machine.status().mpos == mpos
+    assert Machine.status(m).mpos == mpos
 
     # Not a number: says so, stays open.
     view |> element(~s|.cnc-num--edit[phx-value-axis="y"]|) |> render_click()
@@ -122,11 +118,12 @@ defmodule CNCWeb.MachineLiveTest do
   end
 
   test "tapping the work zero row sets it on the bed; machine positions aren't editable", %{
-    conn: conn
+    conn: conn,
+    m: m
   } do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status().state == :idle and Machine.status().wpos end)
+    assert eventually(fn -> Machine.status(m).state == :idle and Machine.status(m).wpos end)
 
     view |> element(".cnc-dro-head button[phx-value-frame=machine]") |> render_click()
     # The machine position isn't editable; the work zero row is.
@@ -140,20 +137,23 @@ defmodule CNCWeb.MachineLiveTest do
 
     view |> form("#work-form", %{value: "300"}) |> render_submit()
     refute has_element?(view, "#work-dialog")
-    assert eventually(fn -> match?({x, _, _} when abs(x - 300) < 0.001, Machine.status().wco) end)
+
+    assert eventually(fn ->
+             match?({x, _, _} when abs(x - 300) < 0.001, Machine.status(m).wco)
+           end)
   end
 
-  test "work coordinates: zero X/Y, move, go back", %{conn: conn} do
+  test "work coordinates: zero X/Y, move, go back", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
     assert eventually(fn -> render(view) =~ "Ready" end)
     assert eventually(fn -> render(view) =~ "Work position" end)
-    {x0, y0, _} = Machine.status().mpos
+    {x0, y0, _} = Machine.status(m).mpos
 
     view |> element("button", "Zero X/Y") |> render_click()
 
     assert eventually(fn ->
-             {wx, wy, _} = Machine.status().wpos
+             {wx, wy, _} = Machine.status(m).wpos
              abs(wx) < 1.0e-6 and abs(wy) < 1.0e-6
            end)
 
@@ -163,7 +163,7 @@ defmodule CNCWeb.MachineLiveTest do
     # Work = machine - offset, in floats: compare with a tolerance.
     assert eventually(
              fn ->
-               {wx, wy, _} = Machine.status().wpos
+               {wx, wy, _} = Machine.status(m).wpos
                abs(wx - 10) < 1.0e-6 and abs(wy) < 1.0e-6
              end,
              3000
@@ -172,14 +172,14 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> render(view) =~ "10.00" end)
 
     # Enabled once the step has finished and the view has caught up.
-    assert eventually(fn -> not Machine.status().moving? end, 3000)
+    assert eventually(fn -> not Machine.status(m).moving? end, 3000)
     assert eventually(fn -> not has_element?(view, "button[disabled]", "Go to X0 Y0") end, 3000)
     view |> element("button", "Go to X0 Y0") |> render_click()
     # Z lifts first at 10 mm/s, and earlier tests may have left Z far down.
     # Within the clamp's micron inset when the work zero is on a travel edge.
     assert eventually(
              fn ->
-               {x, y, z} = Machine.status().mpos
+               {x, y, z} = Machine.status(m).mpos
                abs(x - x0) <= 0.01 and abs(y - y0) <= 0.01 and z >= -1.01
              end,
              15_000
@@ -196,16 +196,17 @@ defmodule CNCWeb.MachineLiveTest do
   end
 
   test "touch layouts: the dock's Stop cancels a jog; More holds the secondary actions", %{
-    conn: conn
+    conn: conn,
+    m: m
   } do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status().state == :idle end)
+    assert eventually(fn -> Machine.status(m).state == :idle end)
 
     render_hook(view, "jog", %{"x" => 1, "y" => 0, "tier" => "normal"})
-    assert Machine.status().state == :jogging
+    assert Machine.status(m).state == :jogging
     view |> element(".cnc-dock button", "Stop") |> render_click()
-    assert Machine.status().state == :idle
+    assert Machine.status(m).state == :idle
 
     view |> element(".cnc-more > button", "Menu") |> render_click()
     assert has_element?(view, ".cnc-more a", "Settings")
@@ -214,10 +215,10 @@ defmodule CNCWeb.MachineLiveTest do
     refute has_element?(view, "#more-menu")
   end
 
-  test "controller: Zero mode zeroes axes and switches work/machine", %{conn: conn} do
+  test "controller: Zero mode zeroes axes and switches work/machine", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status().state == :idle end)
+    assert eventually(fn -> Machine.status(m).state == :idle end)
 
     assert eventually(fn -> render(view) =~ "Work position" end)
     view |> element("button[phx-value-mode=zero]") |> render_click()
@@ -229,7 +230,7 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element(".cnc-zero button[phx-value-axes=xy]") |> render_click()
 
     assert eventually(fn ->
-             match?({wx, wy, _} when abs(wx) < 0.001 and abs(wy) < 0.001, Machine.status().wpos)
+             match?({wx, wy, _} when abs(wx) < 0.001 and abs(wy) < 0.001, Machine.status(m).wpos)
            end)
 
     view |> element(".cnc-zero button[phx-value-frame=machine]") |> render_click()
@@ -250,32 +251,32 @@ defmodule CNCWeb.MachineLiveTest do
              ~s("display": "standalone")
   end
 
-  test "rejects malformed jog input", %{conn: conn} do
+  test "rejects malformed jog input", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status().state == :idle end)
+    assert eventually(fn -> Machine.status(m).state == :idle end)
 
     render_hook(view, "jog", %{"x" => 5, "y" => 0, "tier" => "fast"})
     render_hook(view, "jog", %{"x" => 1, "y" => 0, "tier" => "ludicrous"})
     render_hook(view, "jog", %{"x" => 0, "y" => 0, "z" => 2, "tier" => "fast"})
     render_hook(view, "jog", %{"x" => -1.01, "y" => 0, "tier" => "fast"})
     render_hook(view, "jog", %{"x" => "nope", "y" => 0, "tier" => "fast"})
-    assert Machine.status().state == :idle
+    assert Machine.status(m).state == :idle
   end
 
-  test "step pad moves by the chosen step", %{conn: conn} do
+  test "step pad moves by the chosen step", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
     assert eventually(fn -> render(view) =~ "Ready" end)
-    {x0, y0, _} = Machine.status().mpos
+    {x0, y0, _} = Machine.status(m).mpos
 
     view |> element("button[phx-value-mode=step]") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
-    view |> element("button[phx-value-axis=y]") |> render_click()
+    view |> element("button[phx-click=step_axis][phx-value-axis=y]") |> render_click()
     view |> element(".cnc-pendant-btn", "Y+") |> render_click()
 
     assert eventually(fn ->
-             {x, y, _} = Machine.status().mpos
+             {x, y, _} = Machine.status(m).mpos
              x == x0 and abs(y - (y0 + 1)) < 0.001
            end)
   end
@@ -286,13 +287,14 @@ defmodule CNCWeb.MachineLiveTest do
     assert render_hook(view, "stop", %{})
   end
 
-  test "details and console", %{conn: conn} do
+  test "details and console", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     refute has_element?(view, "#console")
 
     view |> element(".cnc-actions button", "Console") |> render_click()
     assert has_element?(view, "#console")
-    assert render(view) =~ "Controller restarted"
+    # A fresh machine: locked because it just connected.
+    assert render(view) =~ "New connection"
 
     view |> element(".cnc-lock button", "Unlock") |> render_click()
     assert eventually(fn -> has_element?(view, "#console-log li", "$X") end)
@@ -304,10 +306,10 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element("#console-input") |> render_submit(%{"line" => "$$"})
     assert eventually(fn -> has_element?(view, "#console-log li", "$130=") end)
 
-    :ok = Machine.jog({1, 0}, :normal)
+    :ok = Machine.jog(m, {1, 0}, :normal)
     view |> element("#console-input") |> render_submit(%{"line" => "$$"})
     assert render(view) =~ "Can&#39;t send while jogging."
-    Machine.jog_stop()
+    Machine.jog_stop(m)
 
     view |> element("button", "Commands") |> render_click()
     assert has_element?(view, "#console-help button", "G10 L20 P1 X0 Y0")
@@ -323,8 +325,11 @@ defmodule CNCWeb.MachineLiveTest do
     refute has_element?(view, "#console")
   end
 
-  test "uploading a G-code file shows its summary, shared with other screens", %{conn: conn} do
-    CNC.Program.clear()
+  test "uploading a G-code file shows its summary, shared with other screens", %{
+    conn: conn,
+    program: program
+  } do
+    CNC.Program.clear(program)
     {:ok, view, _} = live(conn, ~p"/")
     {:ok, other, _} = live(conn, ~p"/")
 
@@ -359,20 +364,24 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> not has_element?(other, ".cnc-file-side") end)
   end
 
-  test "a file that would leave the travel says by how much", %{conn: conn} do
-    {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\nG1 Y-5000")
+  test "a file that would leave the travel says by how much", %{
+    conn: conn,
+    m: m,
+    program: program
+  } do
+    {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\nG1 Y-5000", server: program)
     {:ok, view, _} = live(conn, ~p"/")
 
-    assert eventually(fn -> Machine.status().wco != nil end)
+    assert eventually(fn -> Machine.status(m).wco != nil end)
     assert eventually(fn -> render(view) =~ "won&#39;t fit" end)
     assert render(view) =~ "past the right edge (X)"
     assert render(view) =~ "past the front edge (Y)"
-    CNC.Program.clear()
+    CNC.Program.clear(program)
   end
 
-  test "warns when the controller claims more travel than the machine has", %{conn: conn} do
+  test "warns when the controller claims more travel than the machine has", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
-    :ok = Machine.send_raw("$130=12500")
+    :ok = Machine.send_raw(m, "$130=12500")
     assert eventually(fn -> render(view) =~ "X travel of 12500 mm" end)
 
     # Notes can be closed.
@@ -380,8 +389,8 @@ defmodule CNCWeb.MachineLiveTest do
     refute has_element?(view, "#note-travel")
 
     # Put it back for the other tests.
-    :ok = Machine.send_raw("$130=1250")
-    assert eventually(fn -> Machine.status().travel_issues == [] end)
+    :ok = Machine.send_raw(m, "$130=1250")
+    assert eventually(fn -> Machine.status(m).travel_issues == [] end)
   end
 
   defp eventually(fun, timeout \\ 2000, every \\ 20) do

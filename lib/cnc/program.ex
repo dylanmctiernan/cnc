@@ -62,16 +62,23 @@ defmodule CNC.Program do
   def clear(server \\ __MODULE__), do: GenServer.call(server, {:put, nil})
 
   @doc "Receive `{:program, t | nil}` when the loaded program changes."
-  def subscribe(pubsub \\ CNC.PubSub), do: Phoenix.PubSub.subscribe(pubsub, @topic)
+  def subscribe(topic \\ @topic), do: Phoenix.PubSub.subscribe(CNC.PubSub, topic)
 
   @impl true
-  def init(opts), do: {:ok, %{program: nil, pubsub: Keyword.get(opts, :pubsub, CNC.PubSub)}}
+  def init(opts) do
+    {:ok,
+     %{
+       program: nil,
+       pubsub: Keyword.get(opts, :pubsub, CNC.PubSub),
+       topic: Keyword.get(opts, :topic, @topic)
+     }}
+  end
 
   @impl true
   def handle_call(:current, _from, s), do: {:reply, s.program, s}
 
   def handle_call({:put, program}, _from, s) do
-    Phoenix.PubSub.broadcast(s.pubsub, @topic, {:program, program})
+    Phoenix.PubSub.broadcast(s.pubsub, s.topic, {:program, program})
     {:reply, :ok, %{s | program: program}}
   end
 end

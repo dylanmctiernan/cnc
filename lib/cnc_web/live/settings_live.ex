@@ -12,13 +12,14 @@ defmodule CNCWeb.SettingsLive do
   alias CNC.Machine.State
 
   @impl true
-  def mount(_params, _session, socket) do
-    if connected?(socket), do: Machine.subscribe()
-    machine = Machine.status()
+  def mount(_params, session, socket) do
+    cnc = CNCWeb.Instance.from_session(session)
+    if connected?(socket), do: Machine.subscribe(cnc.topic)
+    machine = Machine.status(cnc.machine)
 
     {:ok,
      socket
-     |> assign(page_title: "Settings", machine: machine, edits: %{}, errors: %{})
+     |> assign(page_title: "Settings", cnc: cnc, machine: machine, edits: %{}, errors: %{})
      |> assign(reviewing?: false, write_error: nil)
      |> load_settings()}
   end
@@ -79,7 +80,7 @@ defmodule CNCWeb.SettingsLive do
   def handle_event("write", _, socket) do
     changes = for {n, _from, to} <- changes(socket.assigns), do: {n, to}
 
-    case Machine.write_settings(changes) do
+    case Machine.write_settings(socket.assigns.cnc.machine, changes) do
       :ok ->
         {:noreply, assign(socket, edits: %{}, reviewing?: false, write_error: nil) |> bump_form()}
 
@@ -218,7 +219,7 @@ defmodule CNCWeb.SettingsLive do
   end
 
   defp load_settings(socket) do
-    settings = Machine.settings()
+    settings = Machine.settings(socket.assigns.cnc.machine)
     assign(socket, settings: settings, grouped: Settings.grouped(settings)) |> bump_form()
   end
 

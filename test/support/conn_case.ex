@@ -34,4 +34,38 @@ defmodule CNCWeb.ConnCase do
   setup _tags do
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Start a private machine (fake sim) and program store for one test and put
+  them in the conn's session, so the screens drive these instead of the
+  app's (see `CNCWeb.Instance`). Screen tests can then run in parallel.
+  Returns `{conn, machine, program}`; the machine boots locked.
+  """
+  def with_instance(conn, sim_opts \\ []) do
+    id = System.unique_integer([:positive])
+    machine = :"machine_test_#{id}"
+    program = :"program_test_#{id}"
+    topic = "machine-test-#{id}"
+    program_topic = "program-test-#{id}"
+
+    ExUnit.Callbacks.start_supervised!(
+      Supervisor.child_spec(
+        {CNC.Machine, name: machine, topic: topic, transport: {CNC.Transport.FakeSim, sim_opts}},
+        id: machine
+      )
+    )
+
+    ExUnit.Callbacks.start_supervised!(
+      Supervisor.child_spec({CNC.Program, name: program, topic: program_topic}, id: program)
+    )
+
+    instance = %CNCWeb.Instance{
+      machine: machine,
+      topic: topic,
+      program: program,
+      program_topic: program_topic
+    }
+
+    {Plug.Test.init_test_session(conn, %{"cnc_instance" => instance}), machine, program}
+  end
 end

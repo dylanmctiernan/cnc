@@ -20,22 +20,25 @@ defmodule CNCWeb.MachineLive do
   @fade_ms 8_000
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    cnc = CNCWeb.Instance.from_session(session)
+
     if connected?(socket) do
-      Machine.subscribe()
-      Program.subscribe()
+      Machine.subscribe(cnc.topic)
+      Program.subscribe(cnc.program_topic)
     end
 
-    machine = Machine.status()
+    machine = Machine.status(cnc.machine)
+    program = Program.current(cnc.program)
 
     {:ok,
      socket
-     |> assign(machine: machine, tier: :normal, step: 10)
+     |> assign(cnc: cnc, machine: machine, tier: :normal, step: 10)
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, step_axis: :x)
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
-     |> assign(file?: false, program: Program.current(), file_error: nil)
+     |> assign(file?: false, program: program, file_error: nil)
      |> assign(work_edit: nil)
-     |> assign(zoom: if(Program.current(), do: :file, else: :bed))
+     |> assign(zoom: if(program, do: :file, else: :bed))
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
        max_entries: 1,
@@ -91,31 +94,31 @@ defmodule CNCWeb.MachineLive do
   @impl true
   def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier} = params, socket) do
     with {:ok, vector} <- analog_vector(x, y, params["z"] || 0), {:ok, tier} <- tier(tier) do
-      Machine.jog(vector, tier)
+      Machine.jog(srv(socket), vector, tier)
     end
 
     {:noreply, socket}
   end
 
-  def handle_event("jog_heartbeat", _, socket), do: tap_noreply(socket, &Machine.jog_heartbeat/0)
-  def handle_event("jog_stop", _, socket), do: tap_noreply(socket, &Machine.jog_stop/0)
+  def handle_event("jog_heartbeat", _, socket), do: tap_noreply(socket, &Machine.jog_heartbeat/1)
+  def handle_event("jog_stop", _, socket), do: tap_noreply(socket, &Machine.jog_stop/1)
 
   # Esc: stop jogging and hold.
   def handle_event("stop", _, socket) do
-    Machine.jog_stop()
-    Machine.feed_hold()
+    Machine.jog_stop(srv(socket))
+    Machine.feed_hold(srv(socket))
     {:noreply, socket}
   end
 
-  def handle_event("unlock", _, socket), do: tap_noreply(socket, &Machine.unlock/0)
-  def handle_event("home", _, socket), do: tap_noreply(socket, &Machine.home/0)
-  def handle_event("feed_hold", _, socket), do: tap_noreply(socket, &Machine.feed_hold/0)
-  def handle_event("resume", _, socket), do: tap_noreply(socket, &Machine.resume/0)
-  def handle_event("reset", _, socket), do: tap_noreply(socket, &Machine.reset/0)
+  def handle_event("unlock", _, socket), do: tap_noreply(socket, &Machine.unlock/1)
+  def handle_event("home", _, socket), do: tap_noreply(socket, &Machine.home/1)
+  def handle_event("feed_hold", _, socket), do: tap_noreply(socket, &Machine.feed_hold/1)
+  def handle_event("resume", _, socket), do: tap_noreply(socket, &Machine.resume/1)
+  def handle_event("reset", _, socket), do: tap_noreply(socket, &Machine.reset/1)
 
   def handle_event("step", %{"x" => x, "y" => y} = params, socket) do
     with {:ok, vector} when vector != {0, 0, 0} <- vector(x, y, params["z"] || 0),
-         do: Machine.jog_step(vector, socket.assigns.step)
+         do: Machine.jog_step(srv(socket), vector, socket.assigns.step)
 
     {:noreply, socket}
   end
@@ -193,11 +196,11 @@ defmodule CNCWeb.MachineLive do
 
     set =
       if socket.assigns.work_edit.frame == :machine,
-        do: &Machine.set_work_offset/1,
-        else: &Machine.set_work_position/1
+        do: &Machine.set_work_offset/2,
+        else: &Machine.set_work_position/2
 
     with {:ok, v} <- parse_mm(value),
-         :ok <- set.([{axis, v}]) do
+         :ok <- set.(srv(socket), [{axis, v}]) do
       {:noreply, assign(socket, work_edit: nil)}
     else
       :error ->
@@ -230,7 +233,7 @@ defmodule CNCWeb.MachineLive do
   def handle_event("upload", _, socket), do: {:noreply, socket}
 
   def handle_event("clear_program", _, socket) do
-    Program.clear()
+    Program.clear(socket.assigns.cnc.program)
     {:noreply, socket}
   end
 
@@ -256,13 +259,13 @@ defmodule CNCWeb.MachineLive do
 
   def handle_event("zero", %{"axes" => axes}, socket) do
     axes = for c <- String.graphemes(axes), c in ~w(x y z), do: String.to_existing_atom(c)
-    if axes != [], do: Machine.set_work_zero(axes)
+    if axes != [], do: Machine.set_work_zero(srv(socket), axes)
     {:noreply, set_action_error(socket, nil)}
   end
 
   def handle_event("go_to_zero", _, socket) do
     error =
-      case Machine.go_to_work_zero() do
+      case Machine.go_to_work_zero(srv(socket)) do
         :ok ->
           nil
 
@@ -285,30 +288,31 @@ defmodule CNCWeb.MachineLive do
   # Console traffic is only subscribed to while the panel is open. Subscribe
   # before loading history; overlapping entries share a DOM id, so no dupes.
   def handle_event("toggle_details", _, %{assigns: %{details?: false}} = socket) do
-    Machine.subscribe_console()
+    Machine.subscribe_console(socket.assigns.cnc.topic)
 
     {:noreply,
      socket
      |> assign(details?: true)
-     |> stream(:console, Machine.console(), reset: true)}
+     |> stream(:console, Machine.console(srv(socket)), reset: true)}
   end
 
   def handle_event("toggle_details", _, socket) do
-    Machine.unsubscribe_console()
-    Machine.unsubscribe_polls()
+    Machine.unsubscribe_console(socket.assigns.cnc.topic)
+    Machine.unsubscribe_polls(socket.assigns.cnc.topic)
 
     {:noreply,
      socket |> assign(details?: false, polls?: false) |> stream(:console, [], reset: true)}
   end
 
   def handle_event("toggle_polls", _, %{assigns: %{polls?: polls?}} = socket) do
-    if polls?, do: Machine.unsubscribe_polls(), else: Machine.subscribe_polls()
+    topic = socket.assigns.cnc.topic
+    if polls?, do: Machine.unsubscribe_polls(topic), else: Machine.subscribe_polls(topic)
     {:noreply, assign(socket, polls?: !polls?)}
   end
 
   def handle_event("send_raw", %{"line" => line}, socket) do
     error =
-      case Machine.send_raw(line) do
+      case Machine.send_raw(srv(socket), line) do
         :ok ->
           nil
 
@@ -1122,9 +1126,12 @@ defmodule CNCWeb.MachineLive do
   defp dismiss(socket, key), do: update(socket, :dismissed, &MapSet.put(&1, key))
 
   defp tap_noreply(socket, fun) do
-    fun.()
+    fun.(srv(socket))
     {:noreply, socket}
   end
+
+  # The machine this screen drives (see CNCWeb.Instance).
+  defp srv(socket), do: socket.assigns.cnc.machine
 
   defp push_pos(socket, %State{mpos: {x, y, z}} = m) do
     {jx, jy, jz} = m.jog
@@ -1371,7 +1378,10 @@ defmodule CNCWeb.MachineLive do
 
       {mx, my, _} = socket.assigns.machine.max_rate || {3000.0, 3000.0, 1200.0}
 
-      case Program.load(entry.client_name, text, rapid_rate: min(mx, my)) do
+      case Program.load(entry.client_name, text,
+             rapid_rate: min(mx, my),
+             server: socket.assigns.cnc.program
+           ) do
         {:ok, _} ->
           {:noreply, socket}
 

@@ -32,7 +32,7 @@ mix test
 `mix phx.server` drives FluidNC running natively on this computer (the real
 firmware with `priv/fluidnc/sim.yaml`; nothing physical moves). Without the
 build it falls back to the fake sim (a simple imitation built into the app);
-`CNC_TRANSPORT=fake` forces that. Tests use the fake sim; `test/cnc/fluidnc_sim_test.exs`
+`CNC_TRANSPORT=fake` forces that. Tests use the fake sim; the `test/cnc/fluidnc_sim_*_test.exs` modules
 runs against native FluidNC when it's built.
 
 The FluidNC sim has no switches, so homing is off (`$22=0`): Unlock instead. Edits to
