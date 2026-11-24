@@ -911,6 +911,11 @@ a.cnc-btn {
   display: grid;
   grid-template-rows: auto 1fr auto;
 }
+/* The status bar's grid-area (from the machine screen) would create
+   implicit columns in this page's grid. */
+.cnc-page > .cnc-bar {
+  grid-area: auto;
+}
 .cnc-page-title {
   font-size: 1rem;
   font-weight: 700;
@@ -1049,6 +1054,35 @@ a.cnc-btn {
 .cnc-review-to {
   color: var(--move);
   font-weight: 700;
+}
+
+/* Settings on narrow screens: one column per setting, input full width */
+@media (max-width: 40rem) {
+  .cnc-settings {
+    padding: 0.75rem 0.5rem 2rem;
+  }
+  .cnc-set-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cnc-set-label {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .cnc-set-input input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+  .cnc-set-input .cnc-unit {
+    min-width: 0;
+  }
+  .cnc-page-title {
+    margin-right: 0;
+    order: -1;
+    width: 100%;
+  }
+  .cnc-review-box {
+    padding: 1rem;
+  }
 }
 
 /* Narrow screens: one column, bed first */
