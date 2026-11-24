@@ -187,6 +187,15 @@ defmodule CNC.MachineTest do
       assert %State{state: :alarm, alarm: :reset} = Machine.status(m)
     end
 
+    test "the work offset carries over reports that omit it", %{m: m} do
+      idle(m)
+      send(m, {:transport, :line, "<Idle|MPos:10.000,20.000,0.000|FS:0,0|WCO:1.000,2.000,0.000>"})
+      report(m, "Idle", {11, 20})
+
+      assert %State{wco: {1.0, 2.0, +0.0}, wpos: {10.0, 18.0, +0.0}, mpos: {11.0, 20.0, +0.0}} =
+               Machine.status(m)
+    end
+
     test "door/hold reports make the machine :busy", %{m: m} do
       idle(m)
       report(m, "Door:1", {0, 0})

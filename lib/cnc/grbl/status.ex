@@ -92,6 +92,15 @@ defmodule CNC.Grbl.Status do
     "<" <> Enum.join(fields, "|") <> ">"
   end
 
+  @doc """
+  Fill in a work coordinate offset the report didn't carry (controllers only
+  include `WCO` every so often) and derive the missing position from it.
+  A report that has its own `WCO` is left alone.
+  """
+  @spec with_wco(t, xyz | nil) :: t
+  def with_wco(%__MODULE__{wco: nil} = s, {_, _, _} = wco), do: derive(%{s | wco: wco})
+  def with_wco(s, _wco), do: s
+
   defp parse_state(""), do: :error
 
   defp parse_state(state) do

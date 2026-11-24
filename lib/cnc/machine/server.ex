@@ -23,7 +23,7 @@ defmodule CNC.Machine.Server do
   @behaviour :gen_statem
   require Logger
 
-  alias CNC.Grbl.{Command, Realtime, Response}
+  alias CNC.Grbl.{Command, Realtime, Response, Status}
   alias CNC.Machine.{Console, Jog, State}
 
   @poll_ms 200
@@ -295,7 +295,14 @@ defmodule CNC.Machine.Server do
 
   ## Controller responses
 
-  defp response({:status, status}, s, d), do: on_status(s, status.state, %{d | status: status})
+  # WCO only comes every few reports: carry the last one forward so work
+  # positions don't flicker. It's dropped with the rest of the status on
+  # reconnect or controller reset.
+  defp response({:status, status}, s, d) do
+    status = Status.with_wco(status, d.status && d.status.wco)
+    on_status(s, status.state, %{d | status: status})
+  end
+
   defp response(:ok, s, d), do: ack(:ok, s, d)
   defp response({:error, _} = err, s, d), do: ack(err, s, d)
 

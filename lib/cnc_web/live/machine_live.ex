@@ -216,29 +216,34 @@ defmodule CNCWeb.MachineLive do
           </p>
         </div>
 
-        <section
-          id="bed"
-          class="cnc-bed"
-          phx-hook="BedView"
-          phx-update="ignore"
-          data-travel={travel_json(@machine.travel)}
-          data-x={pos(@machine, 0)}
-          data-y={pos(@machine, 1)}
-          data-z={pos(@machine, 2)}
-          data-state={@machine.state}
-        >
-          <canvas
-            role="img"
-            aria-label="Top-down view of the bed with the tool position, and Z height"
+        <section class="cnc-view" aria-label="Bed and Z">
+          <div class="cnc-view-bar">
+            <h2 class="cnc-h">Top view and Z</h2>
+            <button
+              type="button"
+              class="cnc-btn cnc-btn--quiet"
+              phx-click={JS.dispatch("bed:clear-trail", to: "#bed")}
+            >
+              Clear trail
+            </button>
+          </div>
+          <div
+            id="bed"
+            class="cnc-bed"
+            phx-hook="BedView"
+            phx-update="ignore"
+            data-travel={travel_json(@machine.travel)}
+            data-x={pos(@machine, 0)}
+            data-y={pos(@machine, 1)}
+            data-z={pos(@machine, 2)}
+            data-state={@machine.state}
           >
-          </canvas>
-          <button
-            type="button"
-            class="cnc-btn cnc-btn--quiet cnc-clear"
-            phx-click={JS.dispatch("bed:clear-trail", to: "#bed")}
-          >
-            Clear trail
-          </button>
+            <canvas
+              role="img"
+              aria-label="Top-down view of the bed with the tool position, and Z height"
+            >
+            </canvas>
+          </div>
         </section>
 
         <aside class="cnc-rail">

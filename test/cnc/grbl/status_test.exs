@@ -10,6 +10,26 @@ defmodule CNC.Grbl.StatusTest do
     assert Status.encode(status) == "<Hold:0|MPos:1.500,-2.000,0.000|FS:300,0|Bf:15,128>"
   end
 
+  describe "with_wco/2" do
+    test "fills a missing offset and derives the work position" do
+      s = %Status{state: :idle, mpos: {10.0, 20.0, -5.0}}
+
+      assert %Status{wco: {1.0, 2.0, -1.0}, wpos: {9.0, 18.0, -4.0}} =
+               Status.with_wco(s, {1.0, 2.0, -1.0})
+    end
+
+    test "derives machine position when the report gave work position" do
+      s = %Status{state: :idle, wpos: {9.0, 18.0, -4.0}}
+      assert %Status{mpos: {10.0, 20.0, -5.0}} = Status.with_wco(s, {1.0, 2.0, -1.0})
+    end
+
+    test "a report with its own offset wins; nothing to carry is a no-op" do
+      s = %Status{state: :idle, mpos: {0.0, 0.0, 0.0}, wco: {5.0, 5.0, 5.0}}
+      assert Status.with_wco(s, {1.0, 1.0, 1.0}) == s
+      assert Status.with_wco(%Status{state: :idle}, nil) == %Status{state: :idle}
+    end
+  end
+
   property "encode then parse round-trips" do
     check all status <- status() do
       assert {:status, parsed} = Response.parse(Status.encode(status))
