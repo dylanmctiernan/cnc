@@ -328,7 +328,7 @@ defmodule CNCWeb.MachineLiveTest do
   end
 
   test "a file that would leave the travel says by how much", %{conn: conn} do
-    {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X2000 F1000\nG1 Y-5")
+    {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\nG1 Y-5000")
     {:ok, view, _} = live(conn, ~p"/")
 
     assert eventually(fn -> Machine.status().wco != nil end)
