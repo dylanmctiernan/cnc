@@ -308,6 +308,81 @@ defmodule CNC.ConfigurationTest do
     assert Enum.any?(diffs, &(&1.path == "axes/y/max_rate_mm_per_min" and &1.controller == nil))
   end
 
+  describe "the staged changeset" do
+    test "staging replaces a staged value; staging it back drops it", %{db: db} do
+      alias CNC.Configuration.Changes
+      c = %{part: :build, target: nil, path: "axes/x/steps_per_mm", from: "80.000", to: "100"}
+      :ok = Changes.stage(db, [c])
+      :ok = Changes.stage(db, [%{c | from: "100", to: "120"}])
+      assert [%{from: "80.000", to: "120"}] = Changes.list(db)
+      :ok = Changes.stage(db, [%{c | from: "120", to: "80"}])
+      assert Changes.list(db) == []
+    end
+
+    test "applied together: the running parts live in one write, another profile stored", %{
+      m: m,
+      db: db,
+      ctl: ctl
+    } do
+      alias CNC.Configuration.Changes
+      [default] = Profiles.list(db)
+      {:ok, slow} = Profiles.create(db, "Slow", :fake_sim, default.id)
+
+      :ok =
+        Changes.stage(db, [
+          %{part: :build, target: nil, path: "axes/x/steps_per_mm", from: "80.000", to: "100"},
+          %{
+            part: :profile,
+            target: default.id,
+            path: "axes/x/max_rate_mm_per_min",
+            from: "3000.000",
+            to: "2500"
+          },
+          %{
+            part: :profile,
+            target: default.id,
+            path: "axes/y/acceleration_mm_per_sec2",
+            from: "500.000",
+            to: "fast"
+          },
+          %{
+            part: :profile,
+            target: slow.id,
+            path: "axes/x/max_rate_mm_per_min",
+            from: "3000.000",
+            to: "1000"
+          }
+        ])
+
+      {:ok, %{applied: applied, errors: errors, restart?: false}} =
+        Configuration.apply(m, db, ctl, Changes.list(db))
+
+      assert length(applied) == 3
+      assert [{_, {:not_applied, _}}] = Map.to_list(errors)
+      # What failed stays staged
+      assert [%{path: "axes/y/acceleration_mm_per_sec2"}] = Changes.list(db)
+
+      assert FluidNC.get(m, "axes/x/steps_per_mm") == {:ok, "100"}
+      assert FluidNC.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "2500"}
+
+      assert Enum.find(Profiles.list(db), &(&1.id == slow.id)).values[
+               "axes/x/max_rate_mm_per_min"
+             ] == "1000"
+
+      # One write to the controller for the running parts
+      assert [%{reason: "Changed 2 values (the build, profile Default)"}] = History.list(db, "c1")
+    end
+
+    test "a staged value that changed since is flagged stale", %{db: db, ctl: ctl} do
+      alias CNC.Configuration.{Build, Changes}
+      c = %{part: :build, target: nil, path: "axes/x/steps_per_mm", from: "80.000", to: "100"}
+      :ok = Changes.stage(db, [c])
+      assert Configuration.stale(db, ctl, Changes.list(db)) == []
+      Build.change(db, %{"axes/x/steps_per_mm" => "90"}, "Elsewhere")
+      assert Configuration.stale(db, ctl, Changes.list(db)) == [Changes.key(c)]
+    end
+  end
+
   defp eventually(fun, timeout \\ 5000) do
     cond do
       fun.() -> true

@@ -27,10 +27,10 @@ defmodule CNC.Configuration do
   """
   use Boundary,
     deps: [CNC.Machine, CNC.Boards],
-    exports: [Build, FluidNC, History, Profiles, Values, Wiring, Yaml]
+    exports: [Build, Changes, FluidNC, History, Profiles, Values, Wiring, Yaml]
 
   alias CNC.Boards
-  alias CNC.Configuration.{Build, FluidNC, History, Profiles, Values, Wiring, Yaml}
+  alias CNC.Configuration.{Build, Changes, FluidNC, History, Profiles, Values, Wiring, Yaml}
 
   # The one file on a controller
   @config_file "config.yaml"
@@ -193,6 +193,97 @@ defmodule CNC.Configuration do
     Build.change(db, Map.new(by_part[:build] || []), why)
     Profiles.change(db, profile.id, Map.new(by_part[:profile] || []), why)
   end
+
+  @doc """
+  Apply staged changes (`CNC.Configuration.Changes`) together. Those to the
+  running configuration (the build, this controller's wiring, the selected
+  profile) go through `set/4`: one file write, a restart only if wiring
+  changed, one version in the controller's history. Those to another
+  profile are stored in it, and another controller's wiring in its record.
+  Applied changes leave the changeset; the rest stay, with why:
+  `{:ok, %{applied: [key], errors: %{key => reason}, restart?: boolean}}`.
+  """
+  def apply(machine, db, controller, changes) do
+    selected = Profiles.selected(db)
+
+    {running, others} =
+      Enum.split_with(changes, fn c ->
+        c.part == :build or ((c.part == :profile and selected) && c.target == selected.id) or
+          (c.part == :wiring and c.target == controller.id)
+      end)
+
+    {applied, errors, restart?} =
+      case running do
+        [] ->
+          {[], %{}, false}
+
+        _ ->
+          case set(machine, db, controller, for(c <- running, do: {c.path, c.to})) do
+            {:ok, %{applied: ok, errors: bad, restart?: restart?}} ->
+              {for(c <- running, Map.has_key?(ok, c.path), do: Changes.key(c)),
+               for(c <- running, reason = bad[c.path], into: %{}, do: {Changes.key(c), reason}),
+               restart?}
+
+            {:error, reason} ->
+              {[], Map.new(running, &{Changes.key(&1), reason}), false}
+          end
+      end
+
+    {applied, errors} =
+      others
+      |> Enum.group_by(&{&1.part, &1.target})
+      |> Enum.reduce({applied, errors}, fn {{part, target}, group}, {ok, bad} ->
+        result =
+          case part do
+            :profile ->
+              Profiles.edit(db, target, for(c <- group, do: {c.path, c.to}))
+
+            :wiring ->
+              Wiring.change(db, target, Map.new(group, &{&1.path, &1.to}), "Edited")
+              {:ok, %{applied: Map.new(group, &{&1.path, &1.to}), errors: %{}}}
+          end
+
+        case result do
+          {:ok, %{applied: done, errors: failed}} ->
+            {ok ++ for(c <- group, Map.has_key?(done, c.path), do: Changes.key(c)),
+             Map.merge(
+               bad,
+               for(c <- group, why = failed[c.path], into: %{}, do: {Changes.key(c), why})
+             )}
+
+          {:error, reason} ->
+            {ok, Map.merge(bad, Map.new(group, &{Changes.key(&1), reason}))}
+        end
+      end)
+
+    Changes.drop(db, applied)
+    {:ok, %{applied: applied, errors: errors, restart?: restart?}}
+  end
+
+  @doc """
+  Staged changes whose value has moved on since they were staged (changed
+  elsewhere): their keys, so they can be flagged before applying.
+  """
+  def stale(db, controller, changes) do
+    for c <- changes,
+        now = current(db, controller, c),
+        not same_or_both_nil?(now, c.from),
+        do: Changes.key(c)
+  end
+
+  # What a staged change's value is now, in its part.
+  defp current(db, _controller, %{part: :build, path: path}), do: {Build.values(db)[path]}
+
+  defp current(db, _controller, %{part: :wiring, target: id, path: path}),
+    do: {Wiring.values(db, id)[path]}
+
+  defp current(db, _controller, %{part: :profile, target: pid, path: path}),
+    do: {(Profiles.find(db, pid) || %{values: %{}}).values[path]}
+
+  defp same_or_both_nil?({nil}, nil), do: true
+  defp same_or_both_nil?({nil}, _), do: false
+  defp same_or_both_nil?({_}, nil), do: false
+  defp same_or_both_nil?({a}, b), do: Values.same?(a, b)
 
   @doc """
   Keep what the controller runs (its file was changed elsewhere, a version

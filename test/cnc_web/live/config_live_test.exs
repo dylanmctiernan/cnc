@@ -4,6 +4,7 @@ defmodule CNCWeb.ConfigLiveTest do
   import Phoenix.LiveViewTest
 
   alias CNC.{Controllers, Machine}
+  alias CNC.Configuration.{FluidNC, Profiles}
 
   setup %{conn: conn} do
     {conn, m, _program} = with_instance(conn)
@@ -33,180 +34,155 @@ defmodule CNCWeb.ConfigLiveTest do
     assert has_element?(config, "#config-controller", "Fake sim")
   end
 
-  test "first visit: the Default profile, in use; change a setting", %{conn: conn, id: id} do
+  test "tabs, each with its own address; the status strip on every one", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/configuration")
+    assert has_element?(view, "#tab-panel-profiles")
     assert has_element?(view, "#in-use", "Default")
-    # A fresh sim runs its board's config: the Default made from it matches
-    assert has_element?(view, "#check-ok")
-    # Only the settings the fake sim takes: no steps per mm
-    refute has_element?(view, "#current-x-steps_per_mm")
-    assert has_element?(view, "#current", "Default")
-    assert has_element?(view, "#current-x-max_rate_mm_per_min", "3000")
-    refute has_element?(view, "#axes-form")
+    assert has_element?(view, "#status-file", "In step")
 
-    view |> element("#edit-current") |> render_click()
-    assert has_element?(view, "#set-x-max_rate_mm_per_min[value='3000']")
-
-    view
-    |> form("#axes-form",
-      set: %{
-        "axes/x/max_rate_mm_per_min" => "2500",
-        "axes/y/max_travel_mm" => "far"
-      }
-    )
-    |> render_submit()
-
-    # Asked first, with what changes
-    assert has_element?(view, "#approve-modal #approve-diffs li", "axes/x/max_rate_mm_per_min")
-    approve(view)
-
-    assert has_element?(view, "#set-x-max_rate_mm_per_min[value='2500']")
-    assert has_element?(view, "#set-y-max_travel_mm.is-error")
-
-    # Wiring: the dialog says the controller restarts
-    view
-    |> form("#other-form", other: %{path: "stepping/engine", value: "RMT"})
-    |> render_submit()
-
-    assert has_element?(view, "#approve-modal", "restarts")
-    assert has_element?(view, "#approve", "Apply and restart")
-    view |> element("#cancel-approve") |> render_click()
-    refute has_element?(view, "#config-drift")
-  end
-
-  test "cancelling the dialog changes nothing", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/configuration")
-    view |> element("#edit-current") |> render_click()
-
-    view
-    |> form("#axes-form", set: %{"axes/x/max_rate_mm_per_min" => "2000"})
-    |> render_submit()
-
-    assert has_element?(view, "#approve-modal", "3000")
-    view |> element("#cancel-approve") |> render_click()
-    refute has_element?(view, "#approve-modal")
-    assert has_element?(view, "#set-x-max_rate_mm_per_min[value='3000']")
-  end
-
-  test "make a profile, switch to it; the controllers page shows it", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/configuration")
-    view |> form("#new-profile-form", new: %{name: "Fast"}) |> render_submit()
-    fast = profile_id(view, "Fast")
-
-    view |> element("#profile-#{fast} button", "Switch to this") |> render_click()
-    approve(view)
-    assert eventually(fn -> has_element?(view, "#current", "Fast") end, 3000)
-    assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
-    assert has_element?(view, "#profiles", "Default")
-
-    {:ok, list, _} = live(conn, ~p"/controllers")
-    assert has_element?(list, "#profile-of-#{id}", "Fast")
-  end
-
-  test "history: each change with its reason; restoring a version, after its diff", %{
-    conn: conn,
-    id: id
-  } do
-    {:ok, view, _} = live(conn, ~p"/configuration")
-
-    for rate <- ["2500", "2600"] do
-      view |> element("#edit-current") |> render_click()
-
-      view
-      |> form("#axes-form", set: %{"axes/x/max_rate_mm_per_min" => rate})
-      |> render_submit()
-
-      approve(view)
+    for tab <- ~w(build wiring file history) do
+      view |> element("#tab-#{tab}") |> render_click()
+      assert_patch(view, "/configuration/#{tab}")
+      assert has_element?(view, "#tab-panel-#{tab}")
+      assert has_element?(view, "#in-use")
     end
 
-    assert has_element?(view, "#controller-history #c-v2", "Changed 1 value (profile Default)")
-    view |> element("#c-v1 .cnc-rev-head") |> render_click()
-    assert has_element?(view, "#c-v1 li", "axes/x/max_rate_mm_per_min")
-
-    view |> element("#c-v1 button", "Restore v1") |> render_click()
-    assert has_element?(view, "#approve-modal", "v1")
-    approve(view)
-
-    assert eventually(fn -> has_element?(view, "#check-differs") end, 3000)
-    assert has_element?(view, "#c-v3", "Restored v1")
-
-    view |> element("#write-profile") |> render_click()
-    approve(view)
-    assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
-
-    # The profile's own history
-    view |> element("#current-history") |> render_click()
-    assert has_element?(view, "#history-#{current_id(view)}", "Changed on the controller")
+    # The fake sim has nothing wired; its build is travel only
+    {:ok, view, _} = live(conn, ~p"/configuration/wiring")
+    assert has_element?(view, "#no-wiring")
+    {:ok, view, _} = live(conn, ~p"/configuration/build")
+    assert has_element?(view, "#view-build-x-max_travel_mm", "1250")
   end
 
-  test "other profiles: view, edit (stored only), then switch to it", %{conn: conn, id: id} do
-    {:ok, view, _} = live(conn, ~p"/configuration")
-    assert has_element?(view, "#no-other-profiles")
-    view |> form("#new-profile-form", new: %{name: "Slow"}) |> render_submit()
-    slow = profile_id(view, "Slow")
-
-    view |> element("#profile-#{slow} button", "View") |> render_click()
-    assert has_element?(view, "#view-#{slow}-x-max_rate_mm_per_min", "3000")
-
-    view |> element("#profile-#{slow} button", "Edit") |> render_click()
-
-    view
-    |> form("#edit-profile-#{slow}",
-      set: %{"axes/x/max_rate_mm_per_min" => "1000", "axes/y/max_rate_mm_per_min" => "fast"}
-    )
-    |> render_submit()
-
-    approve(view)
-
-    assert has_element?(view, ".cnc-set-error", "number")
-
-    # The valid value was saved with the first try: nothing left to ask
-    view
-    |> form("#edit-profile-#{slow}", set: %{"axes/x/max_rate_mm_per_min" => "1000"})
-    |> render_submit()
-
-    refute has_element?(view, "#approve-modal")
-
-    # Stored, not sent: the current settings are unchanged
-    assert has_element?(view, "#current-x-max_rate_mm_per_min", "3000")
-    assert has_element?(view, "#view-#{slow}-x-max_rate_mm_per_min", "1000")
-
-    view |> element("#profile-#{slow} button", "Diff with current") |> render_click()
-    assert has_element?(view, "#diff-#{slow}", "1 value differs")
-    assert has_element?(view, "#diff-#{slow} li", "axes/x/max_rate_mm_per_min")
-    assert has_element?(view, "#yaml-#{slow} .y-key", "max_rate_mm_per_min")
-
-    view |> element("#profile-#{slow} button", "Switch to this") |> render_click()
-    approve(view)
-    assert eventually(fn -> has_element?(view, "#current", "Slow") end, 3000)
-    assert eventually(fn -> has_element?(view, "#current-x-max_rate_mm_per_min", "1000") end)
-  end
-
-  test "advanced: view the file; your own config, uploaded or pasted, after its diff", %{
+  test "edits in two tabs are staged, reviewed together and applied at once", %{
     conn: conn,
-    id: id
+    m: m,
+    cnc: cnc
   } do
     {:ok, view, _} = live(conn, ~p"/configuration")
-    refute has_element?(view, "#advanced[open]")
-    view |> element("#advanced summary") |> render_click()
-    view |> element("#view-file") |> render_click()
-    assert has_element?(view, "#advanced[open]")
-    assert has_element?(view, "#config-text", "max_rate_mm_per_min")
+    pid = selected_id(cnc)
 
-    own = "name: Mine\naxes:\n  x:\n    max_rate_mm_per_min: 1500\n"
+    view |> element("#edit-#{pid}") |> render_click()
 
     view
-    |> file_input("#override-form", :config_file, [%{name: "mine.yaml", content: own}])
-    |> render_upload("mine.yaml")
+    |> form("#edit-profile-#{pid}", set: %{"axes/x/max_rate_mm_per_min" => "2500"})
+    |> render_submit(%{intent: "stage"})
 
-    view |> form("#override-form") |> render_submit()
-    assert has_element?(view, "#approve-modal", "1500")
-    approve(view)
-    assert eventually(fn -> has_element?(view, "#check-differs") end, 3000)
-    assert has_element?(view, "#check-differs", "wasn't written by the app")
-    assert has_element?(view, "#c-v1", "Uploaded mine.yaml")
+    # Staged, not applied
+    assert has_element?(view, "#pending-bar", "1 value staged")
+    assert has_element?(view, "#tab-profiles .cnc-tab-count", "1")
+    assert has_element?(view, "#view-#{pid}-x-max_rate_mm_per_min.is-staged", "2500")
+    assert FluidNC.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "3000"}
 
-    # Pasted
+    {:ok, view, _} = live(conn, ~p"/configuration/build")
+    # Every screen sees the same changeset
+    assert has_element?(view, "#pending-bar", "1 value staged")
+    view |> element("#edit-build-button") |> render_click()
+
+    view
+    |> form("#edit-build",
+      set: %{"axes/x/max_travel_mm" => "1000", "axes/y/max_travel_mm" => "900"}
+    )
+    |> render_submit(%{intent: "stage"})
+
+    assert has_element?(view, "#pending-bar", "3 values staged")
+
+    view |> element("#review-staged") |> render_click()
+    assert has_element?(view, "#review-modal", "profile Default")
+    assert has_element?(view, "#review-modal", "build")
+    # Drop one before applying
+
+    view |> element("#review-modal li[id$='axes-y-max_travel_mm'] button") |> render_click()
+    refute has_element?(view, "#review-modal li", "axes/y/max_travel_mm")
+
+    view |> element("#apply-staged") |> render_click()
+    refute has_element?(view, "#pending-bar")
+    assert FluidNC.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "2500"}
+    assert FluidNC.get(m, "axes/x/max_travel_mm") == {:ok, "1000"}
+
+    {:ok, view, _} = live(conn, ~p"/configuration/history")
+    assert has_element?(view, "#c-v1", "Changed 2 values (the build, profile Default)")
+  end
+
+  test "Apply now reviews just those edits; a bad value stays in the form", %{
+    conn: conn,
+    m: m,
+    cnc: cnc
+  } do
+    {:ok, view, _} = live(conn, ~p"/configuration")
+    pid = selected_id(cnc)
+    view |> element("#edit-#{pid}") |> render_click()
+
+    view
+    |> form("#edit-profile-#{pid}", set: %{"axes/y/max_rate_mm_per_min" => "1\n$H"})
+    |> render_submit(%{intent: "stage"})
+
+    assert has_element?(view, "#set-#{pid}-y-max_rate_mm_per_min.is-error")
+    refute has_element?(view, "#pending-bar")
+
+    view
+    |> form("#edit-profile-#{pid}", set: %{"axes/y/max_rate_mm_per_min" => "2800"})
+    |> render_submit(%{intent: "now"})
+
+    assert has_element?(view, "#review-modal", "2800")
+    view |> element("#apply-staged") |> render_click()
+    assert FluidNC.get(m, "axes/y/max_rate_mm_per_min") == {:ok, "2800"}
+  end
+
+  test "discarding drops everything staged", %{conn: conn, m: m, cnc: cnc} do
+    {:ok, view, _} = live(conn, ~p"/configuration")
+    pid = selected_id(cnc)
+    view |> element("#edit-#{pid}") |> render_click()
+
+    view
+    |> form("#edit-profile-#{pid}", set: %{"axes/x/max_rate_mm_per_min" => "2000"})
+    |> render_submit(%{intent: "stage"})
+
+    view |> element("#discard-staged") |> render_click()
+    refute has_element?(view, "#pending-bar")
+    assert FluidNC.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "3000"}
+  end
+
+  test "another profile: staged edits are stored only; switching is approved from its diff",
+       %{conn: conn, m: m, cnc: cnc} do
+    {:ok, view, _} = live(conn, ~p"/configuration")
+    view |> form("#new-profile-form", new: %{name: "Slow"}) |> render_submit()
+    slow = Enum.find(Profiles.list(cnc.db), &(&1.name == "Slow")).id
+
+    view |> element("#edit-#{slow}") |> render_click()
+
+    view
+    |> form("#edit-profile-#{slow}", set: %{"axes/x/max_rate_mm_per_min" => "1000"})
+    |> render_submit(%{intent: "now"})
+
+    assert has_element?(view, "#review-modal", "profile Slow")
+    view |> element("#apply-staged") |> render_click()
+    # Stored in Slow; the controller runs Default still
+    assert FluidNC.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "3000"}
+
+    view |> element("#profile-#{slow} button", "Diff with selected") |> render_click()
+    assert has_element?(view, "#diff-#{slow}", "1 value differs")
+
+    view |> element("#profile-#{slow} button", "Switch to this") |> render_click()
+    assert has_element?(view, "#approve-modal", "1000")
+    view |> element("#approve") |> render_click()
+    assert eventually(fn -> has_element?(view, "#in-use", "Slow") end, 3000)
+
+    assert eventually(
+             fn -> FluidNC.get(m, "axes/x/max_rate_mm_per_min") == {:ok, "1000"} end,
+             3000
+           )
+
+    {:ok, list, _} = live(conn, ~p"/controllers")
+    assert has_element?(list, "#controllers li.is-active dd", "Slow")
+  end
+
+  test "file: your own config (pasted), after its diff; then the configuration written back",
+       %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/configuration/file")
+    view |> element("#view-file") |> render_click()
+    assert has_element?(view, "#config-text", "max_rate_mm_per_min")
+
     view
     |> form("#override-form", %{
       paste: "name: Pasted\naxes:\n  x:\n    max_rate_mm_per_min: 1400\n"
@@ -214,12 +190,22 @@ defmodule CNCWeb.ConfigLiveTest do
     |> render_submit()
 
     assert has_element?(view, "#approve-modal", "1400")
-    approve(view)
-    assert eventually(fn -> has_element?(view, "#c-v2", "Pasted a config") end, 3000)
+    view |> element("#approve") |> render_click()
+
+    assert eventually(
+             fn -> has_element?(view, "#check-differs", "wasn't written by the app") end,
+             3000
+           )
 
     view |> element("#write-profile") |> render_click()
-    approve(view)
+    view |> element("#approve") |> render_click()
     assert eventually(fn -> has_element?(view, "#check-ok") end, 3000)
+
+    {:ok, view, _} = live(conn, ~p"/configuration/history")
+    assert has_element?(view, "#c-v1", "Pasted a config")
+    view |> element("#c-v1 .cnc-rev-head") |> render_click()
+    view |> element("#c-v1 button", "Restore v1") |> render_click()
+    assert has_element?(view, "#approve-modal", "v1")
   end
 
   test "with no controller in use it says so; it follows the one connected", %{
@@ -235,30 +221,11 @@ defmodule CNCWeb.ConfigLiveTest do
     :ok = Controllers.select(cnc.controllers, other.id)
     assert eventually(fn -> Machine.status(m).state == :alarm end, 3000)
     assert eventually(fn -> has_element?(view, "#config-controller", "Other") end, 3000)
-    assert eventually(fn -> has_element?(view, "#current") end, 3000)
   end
 
-  defp approve(view), do: view |> element("#approve") |> render_click()
-
-  defp current_id(view) do
-    view
-    |> render()
-    |> LazyHTML.from_fragment()
-    |> LazyHTML.query("#current .cnc-ctl-card")
-    |> LazyHTML.attribute("id")
-    |> hd()
-    |> String.replace_prefix("profile-", "")
-  end
-
-  defp profile_id(view, name) do
-    view
-    |> render()
-    |> LazyHTML.from_fragment()
-    |> LazyHTML.query("#profiles li")
-    |> Enum.find_value(fn li ->
-      if LazyHTML.text(LazyHTML.query(li, ".cnc-ctl-name")) == name,
-        do: li |> LazyHTML.attribute("id") |> hd() |> String.replace_prefix("profile-", "")
-    end)
+  defp selected_id(cnc) do
+    assert eventually(fn -> Profiles.selected(cnc.db) != nil end)
+    Profiles.selected(cnc.db).id
   end
 
   defp eventually(fun, timeout \\ 2000) do

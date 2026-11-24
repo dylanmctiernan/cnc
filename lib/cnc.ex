@@ -28,6 +28,7 @@ defmodule CNC do
       Controllers.Controller,
       Configuration,
       Configuration.Build,
+      Configuration.Changes,
       Configuration.FluidNC,
       Configuration.History,
       Configuration.Profiles,
