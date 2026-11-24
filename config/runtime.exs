@@ -42,6 +42,8 @@ end
 # Controller link. Default (config.exs) is the in-process simulator.
 #   CNC_TRANSPORT=grblhal_sim mix phx.server     # docker compose up grblhal-sim
 #   CNC_GRBLHAL=host:port                        # default localhost:2323
+#   CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
+#   CNC_UART_SPEED=115200                        # default; see `mix cnc.ports`
 case System.get_env("CNC_TRANSPORT") do
   nil ->
     :ok
@@ -56,8 +58,17 @@ case System.get_env("CNC_TRANSPORT") do
       adapter: CNC.Transport.TCP,
       opts: [host: host, port: String.to_integer(port)]
 
+  "uart" ->
+    port =
+      System.get_env("CNC_UART") ||
+        raise "CNC_TRANSPORT=uart needs CNC_UART=<device> (see mix cnc.ports)"
+
+    config :cnc, :transport,
+      adapter: CNC.Transport.UART,
+      opts: [port: port, speed: String.to_integer(System.get_env("CNC_UART_SPEED", "115200"))]
+
   other ->
-    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected sim or grblhal_sim)"
+    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected sim, grblhal_sim or uart)"
 end
 
 if config_env() == :prod do

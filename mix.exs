@@ -61,7 +61,8 @@ defmodule CNC.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:boundary, "~> 0.12", runtime: false}
+      {:boundary, "~> 0.12", runtime: false},
+      {:circuits_uart, "~> 1.5"}
     ]
   end
 

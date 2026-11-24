@@ -43,6 +43,17 @@ GRBLHAL_SIM=localhost:2323 mix test --only grblhal_sim
 It serves one TCP client at a time (the newest wins), so don't run the tests
 while the dev server is connected to it.
 
+### Against the real board (FluidNC over USB)
+
+```sh
+mix cnc.ports                                          # find the board, e.g. /dev/cu.usbserial-0001
+CNC_TRANSPORT=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
+```
+
+Opening the port may reset the board; the machine then shows Locked as after
+any controller restart. The serial adapter is tested against a virtual serial
+port (`test/support/pty_bridge.py`), not yet against hardware.
+
 ### From another device on your network
 
 ```sh
