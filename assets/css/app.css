@@ -3414,3 +3414,25 @@ body {
   background: var(--surface-1);
   color: var(--text-muted);
 }
+
+/* Touch layouts: More sits over the map's top-right corner */
+.cnc-view > .cnc-more {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 3;
+  margin: 0;
+}
+.cnc-view > .cnc-more > .cnc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 2.75rem;
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+}
+/* Phones: the bar would be empty (state and Stop are in the shell's top bar) */
+@media (max-width: 48rem) {
+  .cnc-bar {
+    display: none;
+  }
+}

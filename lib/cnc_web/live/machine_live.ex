@@ -442,61 +442,6 @@ defmodule CNCWeb.MachineLive do
               <UI.stop_button id="bar-stop" />
             </span>
           </div>
-          <%!-- Controller: the rarely used things live in a menu --%>
-          <div class="cnc-more">
-            <button
-              type="button"
-              class="cnc-btn"
-              phx-click="toggle_more"
-              aria-expanded={to_string(@more?)}
-              aria-controls="more-menu"
-            >
-              Menu
-            </button>
-            <div :if={@more?} id="more-menu" class="cnc-more-menu" phx-click-away="close_more">
-              <p class="cnc-sub">{firmware_label(@machine.controller_info)}</p>
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click={JS.push("feed_hold") |> JS.push("close_more")}
-                disabled={!@machine.connected?}
-              >
-                Hold
-              </button>
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click={
-                  JS.dispatch("bed:clear-trail", to: "#bed")
-                  |> JS.push("close_more")
-                }
-              >
-                Clear trail
-              </button>
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click={JS.push("open_file") |> JS.push("close_more")}
-              >
-                {if @program, do: "File: #{@program.name}", else: "Open file"}
-              </button>
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click={JS.push("toggle_details") |> JS.push("close_more")}
-              >
-                {if @details?, do: "Hide console", else: "Console"}
-              </button>
-              <button
-                type="button"
-                class="cnc-btn"
-                phx-click={JS.push("reset") |> JS.push("close_more")}
-                disabled={!@machine.connected?}
-              >
-                Reset controller
-              </button>
-            </div>
-          </div>
         </header>
 
         <div class="cnc-messages">
@@ -553,6 +498,63 @@ defmodule CNCWeb.MachineLive do
         </div>
 
         <section class="cnc-view" aria-label="Bed and Z">
+          <%!-- Touch layouts: the rarely used things, in a menu over the map's
+               corner (so it costs no row on a phone) --%>
+          <div class="cnc-more">
+            <button
+              type="button"
+              class="cnc-btn"
+              phx-click="toggle_more"
+              aria-expanded={to_string(@more?)}
+              aria-controls="more-menu"
+              aria-label="More"
+            >
+              <.icon name="hero-ellipsis-horizontal" class="ui-btn-icon" /> More
+            </button>
+            <div :if={@more?} id="more-menu" class="cnc-more-menu" phx-click-away="close_more">
+              <p class="cnc-sub">{firmware_label(@machine.controller_info)}</p>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("feed_hold") |> JS.push("close_more")}
+                disabled={!@machine.connected?}
+              >
+                Hold
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={
+                  JS.dispatch("bed:clear-trail", to: "#bed")
+                  |> JS.push("close_more")
+                }
+              >
+                Clear trail
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("open_file") |> JS.push("close_more")}
+              >
+                {if @program, do: "File: #{@program.name}", else: "Open file"}
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("toggle_details") |> JS.push("close_more")}
+              >
+                {if @details?, do: "Hide console", else: "Console"}
+              </button>
+              <button
+                type="button"
+                class="cnc-btn"
+                phx-click={JS.push("reset") |> JS.push("close_more")}
+                disabled={!@machine.connected?}
+              >
+                Reset controller
+              </button>
+            </div>
+          </div>
           <div class="cnc-view-switch ui-actions" role="group" aria-label="View">
             <UI.button
               :for={{mode, label} <- [top: "2D", "3d": "3D"]}
