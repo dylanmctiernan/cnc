@@ -1,0 +1,6 @@
+services:
+  grblhal-sim:
+    build: docker/grblhal-sim
+    image: cnc-grblhal-sim
+    ports:
+      - "2323:2323"

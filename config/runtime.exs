@@ -22,6 +22,27 @@ end
 
 config :cnc, CNCWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Controller link. Default (config.exs) is the in-process simulator.
+#   CNC_TRANSPORT=grblhal_sim mix phx.server     # docker compose up grblhal-sim
+#   CNC_GRBLHAL=host:port                        # default localhost:2323
+case System.get_env("CNC_TRANSPORT") do
+  nil ->
+    :ok
+
+  "sim" ->
+    :ok
+
+  "grblhal_sim" ->
+    [host, port] = String.split(System.get_env("CNC_GRBLHAL", "localhost:2323"), ":")
+
+    config :cnc, :transport,
+      adapter: CNC.Transport.TCP,
+      opts: [host: host, port: String.to_integer(port)]
+
+  other ->
+    raise "unknown CNC_TRANSPORT #{inspect(other)} (expected sim or grblhal_sim)"
+end
+
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

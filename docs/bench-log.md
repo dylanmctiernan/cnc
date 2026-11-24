@@ -2,6 +2,34 @@
 
 Manual checks that aren't covered by automated tests. Newest first.
 
+## 2026-11-23 — M5: grblHAL simulator findings (commit 9d1a390)
+
+Probed over raw TCP before writing the adapter:
+
+- No banner on connect; boots Idle with homing off. Status carries extra fields
+  (`Ov`, `A:`, `Sc:`, `TLR:`, `H:`), ignored by our parser.
+- Stock defaults: 200 mm travel, 500 mm/min max rate, 10 mm/s² accel.
+- Planner is 100 blocks deep (`Bf:100,1023`): ack-based limits alone would let
+  ~100 jog increments queue. The run-ahead bound is what keeps it short.
+- `0x85` decelerates (not an instant stop) and flushes all queued jog lines:
+  six acked 20 mm jogs stopped at 3 mm and stayed Idle.
+- **Homing cannot complete**: limit-switch simulation is an upstream TODO
+  (commented out in `simulator.c`); `$H` seeks forever and status polls go
+  unanswered meanwhile. Soft reset during homing → `ALARM:6`, blank line,
+  `GrblHAL 1.1f ...` banner — same shape our Sim emits.
+- **No soft limits**: `$20=1` needs homing (`error:10`); with homing enabled but
+  not homed, out-of-travel jogs are accepted (machine space ran negative).
+  Against this sim the host clamp is the only travel limit.
+- First command on a fresh EEPROM returns `error:7` (defaults restored).
+- The newest TCP client silently takes over the stream; settings are therefore
+  baked into the image at build time instead of applied at runtime.
+- Needs glibc ≥ 2.38 (`strlcpy`): built on Debian trixie. The validator target
+  doesn't link at this commit; only `grblHAL_sim` is built.
+
+`mix test --only grblhal_sim`: connect/lock/travel, jog + stop with
+deceleration, heartbeat loss stops the firmware, exact step, soft reset relock.
+5/5, three runs.
+
 ## 2026-11-23 — M4: manual UI checklist (pending)
 
 Run `mix phx.server`, open http://localhost:4000, then check:
