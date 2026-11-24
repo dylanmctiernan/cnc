@@ -633,13 +633,11 @@ defmodule CNCWeb.MachineLive do
           <div class="cnc-console-bar">
             <h2 class="cnc-h">Console</h2>
             <label class="cnc-check">
-              <input type="checkbox" checked={@polls?} phx-click="toggle_polls" /> Show status polls
+              <input type="checkbox" checked={@polls?} phx-click="toggle_polls" />
+              <span><span class="cnc-wide-only">Show </span>status polls</span>
             </label>
             <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_console">
               Clear
-            </button>
-            <button type="button" class="cnc-btn cnc-console-close" phx-click="toggle_details">
-              Close
             </button>
             <button
               type="button"
@@ -649,6 +647,9 @@ defmodule CNCWeb.MachineLive do
               aria-controls="console-help"
             >
               {if @commands?, do: "Hide commands", else: "Commands"}
+            </button>
+            <button type="button" class="cnc-btn cnc-console-close" phx-click="toggle_details">
+              Close
             </button>
           </div>
           <div :if={@commands?} id="console-help" class="cnc-help">

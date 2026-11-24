@@ -563,8 +563,8 @@ button {
 
 /* Console */
 .cnc-console {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   border-top: 1px solid var(--line);
   background: var(--bg);
 }
@@ -1236,18 +1236,69 @@ body {
   flex: 2;
 }
 
-/* Console: a sheet over everything but the dock */
+/* Console: a sheet laid over the screen grid, between the status bar and
+   the dock (so Stop stays reachable). The log takes the spare height. */
 .cnc-console {
-  position: fixed;
-  inset: 0 0 auto 0;
-  bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  grid-column: 1 / -1;
+  grid-row: 2 / -2;
   z-index: 20;
-  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
-  padding-top: env(safe-area-inset-top);
+  min-height: 0;
+  overflow: hidden;
+}
+.cnc-console-bar {
+  gap: 0.25rem;
+  padding: 0.25rem max(0.5rem, env(safe-area-inset-right)) 0.25rem
+    max(0.5rem, env(safe-area-inset-left));
+}
+.cnc-console-bar .cnc-h,
+.cnc-wide-only {
+  display: none;
+}
+.cnc-console-bar .cnc-check {
+  margin-right: auto;
 }
 .cnc-log {
+  flex: 1 1 0;
   height: auto;
   min-height: 0;
+  padding-inline: max(0.5rem, env(safe-area-inset-left)) max(0.5rem, env(safe-area-inset-right));
+  font-size: 0.75rem;
+}
+.cnc-log-row {
+  grid-template-columns: 6.25rem 1rem 1fr;
+}
+.cnc-help {
+  max-height: 45%;
+  flex: none;
+}
+.cnc-term {
+  padding-inline: max(0.5rem, env(safe-area-inset-left)) max(0.5rem, env(safe-area-inset-right));
+}
+/* 16 px: smaller and iOS zooms the page when the field is focused */
+.cnc-term input {
+  font-size: 16px;
+}
+.cnc-term-hint {
+  padding-left: max(0.5rem, env(safe-area-inset-left));
+}
+.cnc-help-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+.cnc-help-list dd {
+  margin-bottom: 0.375rem;
+}
+@media (orientation: landscape) and (max-height: 31.99rem) {
+  .cnc-term-hint:not(.is-error) {
+    display: none;
+  }
+}
+@media (min-width: 40rem) {
+  .cnc-help-list {
+    grid-template-columns: minmax(11rem, auto) 1fr;
+  }
+  .cnc-help-list dd {
+    margin-bottom: 0;
+  }
 }
 .cnc-console-close {
   display: inline-grid;
@@ -1314,8 +1365,7 @@ body {
     grid-template-columns: var(--joy) 3.75rem;
   }
   .cnc-console {
-    bottom: 0;
-    right: clamp(18rem, 34vw, 26rem);
+    grid-column: 1;
   }
 }
 /* Phones sideways: every pixel of height counts */
@@ -1444,12 +1494,32 @@ body {
     border-top: 1px solid var(--line);
   }
   .cnc-console {
-    position: static;
     grid-area: console;
-    padding-top: 0;
+  }
+  .cnc-console-bar {
+    gap: 1rem;
+    padding: 0.25rem 0.75rem;
+  }
+  .cnc-console-bar .cnc-h {
+    display: block;
+  }
+  .cnc-console-bar .cnc-check {
+    margin-right: 0;
+  }
+  .cnc-wide-only {
+    display: inline;
   }
   .cnc-log {
+    flex: none;
     height: 14rem;
+    padding-inline: 0.75rem;
+    font-size: 0.8125rem;
+  }
+  .cnc-log-row {
+    grid-template-columns: 7.5rem 1.25rem 1fr;
+  }
+  .cnc-term input {
+    font-size: inherit;
   }
 }
 
