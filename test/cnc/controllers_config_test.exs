@@ -96,18 +96,27 @@ defmodule CNC.Controllers.ConfigTest do
     end
 
     @tag :tmp_dir
-    test "restore an earlier version; write the board's default as a new file", %{
-      machine: m,
-      db: db
-    } do
-      {:ok, original} = Config.show(m, "config.yaml")
-      {:ok, _} = Config.upload(m, "config.yaml", "name: changed\n", {db, "c1"})
-      [before] = Config.history(db, "c1")
+    test "history: every recorded write is a version with its reason and diff; restoring is one too",
+         %{machine: m, db: db} do
+      {:ok, _} = Config.upload(m, "config.yaml", "name: A\nrate: 1\n", {db, "c1", "First"})
+      {:ok, _} = Config.upload(m, "config.yaml", "name: A\nrate: 2\n", {db, "c1", "Second"})
 
-      assert {:ok, "config.yaml"} = Config.restore(m, db, "c1", before)
-      assert Config.show(m, "config.yaml") == {:ok, original}
-      # What it held is kept too
-      assert [%{why: "before restoring an earlier version"}, _] = Config.history(db, "c1")
+      assert [
+               %{version: 2, reason: "Second", diff: [%{path: "rate", from: "1", to: "2"}]},
+               %{version: 1, reason: "First", text: "name: A\nrate: 1\n"}
+             ] = Config.history(db, "c1")
+
+      [_, first] = Config.history(db, "c1")
+      assert {:ok, "config.yaml"} = Config.restore(m, db, "c1", first)
+      assert Config.show(m, "config.yaml") == {:ok, "name: A\nrate: 1\n"}
+
+      assert [%{version: 3, reason: "Restored v1 (First)", diff: [%{from: "2", to: "1"}]} | _] =
+               Config.history(db, "c1")
+
+      # A live-only change: recorded without a file
+      :ok = Config.record(db, "c1", %{reason: "Live", diff: [%{path: "x", from: "1", to: "2"}]})
+      assert [%{version: 4, file: nil, text: nil} | _] = Config.history(db, "c1")
+      assert Config.restore(m, db, "c1", hd(Config.history(db, "c1"))) == {:error, :no_file}
 
       assert {:ok, "six.yaml"} = Config.write_board_default(m, :six_x, "six")
       {:ok, six} = Config.show(m, "six.yaml")

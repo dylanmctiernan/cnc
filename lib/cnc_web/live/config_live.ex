@@ -47,11 +47,12 @@ defmodule CNCWeb.ConfigLive do
          |> assign(controller: controller, machine: Machine.status(cnc.machine))
          |> assign(profiles: [], check: nil, settings: %{}, paths: [], drift: [])
          |> assign(wiring: %{checked: 0, differences: []}, files: [], history: [])
-         |> assign(viewing: nil, text: nil, showing: nil, renaming: nil, error: nil)
+         |> assign(viewing: nil, text: nil, renaming: nil, error: nil)
          |> assign(working: nil, field_errors: %{}, other: %{"path" => "", "value" => ""})
          |> assign(new: %{"name" => "", "from" => ""}, advanced?: false)
          |> assign(editing_current?: false, editing_profile: nil, showing_profile: nil)
-         |> assign(diffing_profile: nil)
+         |> assign(diffing_profile: nil, pending: nil)
+         |> assign(expanded: MapSet.new(), history_for: nil, paste: "")
          |> allow_upload(:config_file, accept: :any, max_entries: 1, max_file_size: 256_000)
          |> refresh_active()
          |> maybe_load()}
@@ -81,18 +82,146 @@ defmodule CNCWeb.ConfigLive do
 
   ## Profiles
 
-  def handle_event("switch", %{"profile" => pid}, socket) do
-    %{cnc: cnc, controller: c} = socket.assigns
-    name = Enum.find_value(socket.assigns.profiles, &(&1.id == pid && &1.name))
+  ## Asking first: what would change, approved in a dialog
 
-    case Profiles.switch(cnc.machine, cnc.db, c, pid) do
-      :ok ->
-        {:noreply,
-         assign(socket, working: "Switching to #{name}: the controller restarts…", error: nil)}
+  def handle_event("switch", %{"profile" => pid}, socket) do
+    %{profiles: profiles, check: check, controller: c} = socket.assigns
+
+    case Enum.find(profiles, &(&1.id == pid)) do
+      nil ->
+        {:noreply, assign(socket, error: error_text(:not_found))}
+
+      target ->
+        if check && selected?(check, target) do
+          ask(socket,
+            title: "Write #{target.name} to the controller",
+            note:
+              "Its config file becomes #{target.name}; the controller restarts and comes back locked. What the file holds now goes into the history.",
+            approve: "Write and restart",
+            diffs:
+              for(d <- check.differences, do: %{path: d.path, from: d.controller, to: d.profile}),
+            from_label: "file",
+            to_label: target.name,
+            action: {:switch, pid}
+          )
+        else
+          ask(socket,
+            title: "Switch to #{target.name}",
+            note:
+              "It's written to the controller as its config file; the controller restarts and comes back locked.",
+            approve: "Switch and restart",
+            diffs: if(check, do: Profiles.diff(c.board, check.profile, target), else: []),
+            from_label: check && check.profile.name,
+            to_label: target.name,
+            action: {:switch, pid}
+          )
+        end
+    end
+  end
+
+  # The axis table: every value that differs from the profile.
+  def handle_event("apply_axes", %{"set" => values}, socket) do
+    current = socket.assigns.check.profile.values
+
+    changes =
+      for {path, value} <- values,
+          String.trim(value) != "",
+          not same_value?(current[path], value),
+          do: {path, String.trim(value)}
+
+    ask_apply(socket, changes, nil)
+  end
+
+  def handle_event(
+        "apply_other",
+        %{"other" => %{"path" => path, "value" => value} = other},
+        socket
+      ) do
+    ask_apply(assign(socket, other: other), [{clean_path(path), String.trim(value)}], other)
+  end
+
+  def handle_event("save_profile", %{"profile" => pid, "set" => values}, socket) do
+    profile = Enum.find(socket.assigns.profiles, &(&1.id == pid))
+    current = (profile && profile.values) || %{}
+
+    changes =
+      for {path, value} <- values,
+          String.trim(value) != "",
+          not same_value?(current[path], value),
+          do: {path, String.trim(value)}
+
+    if changes == [] do
+      {:noreply, assign(socket, editing_profile: nil, field_errors: %{})}
+    else
+      ask(socket,
+        title: "Save #{profile.name}",
+        note:
+          "Saved in the profile only: the controller gets these when you switch to #{profile.name}.",
+        approve: "Save",
+        diffs: for({path, v} <- changes, do: %{path: path, from: current[path], to: v}),
+        from_label: "now",
+        to_label: "saved",
+        action: {:save_profile, pid, changes}
+      )
+    end
+  end
+
+  def handle_event("take_file", _, socket) do
+    %{cnc: cnc, controller: c, check: check} = socket.assigns
+
+    case Profiles.drift(cnc.machine, cnc.db, c.id) do
+      {:ok, drift} ->
+        ask(socket,
+          title: "Keep the controller's values in #{check.profile.name}",
+          note:
+            "What the controller runs now becomes #{check.profile.name}; then it's written as the config file and the controller restarts.",
+          approve: "Keep, write and restart",
+          diffs: for(d <- drift, do: %{path: d.path, from: d.profile, to: d.controller}),
+          from_label: check.profile.name,
+          to_label: "running",
+          action: :take_file
+        )
 
       {:error, reason} ->
         {:noreply, assign(socket, error: error_text(reason))}
     end
+  end
+
+  def handle_event("keep_drift", _, socket) do
+    %{drift: drift, check: check} = socket.assigns
+
+    ask(socket,
+      title: "Keep the running values in #{check.profile.name}",
+      note: "They go into the profile and its config file. Nothing restarts.",
+      approve: "Keep",
+      diffs: for(d <- drift, do: %{path: d.path, from: d.profile, to: d.controller}),
+      from_label: check.profile.name,
+      to_label: "running",
+      action: :keep_drift
+    )
+  end
+
+  def handle_event("put_back", _, socket) do
+    %{drift: drift, check: check} = socket.assigns
+
+    ask(socket,
+      title: "Put #{check.profile.name}'s values back",
+      note: "Set on the controller straight away. Nothing restarts.",
+      approve: "Put back",
+      diffs: for(d <- drift, do: %{path: d.path, from: d.controller, to: d.profile}),
+      from_label: "running",
+      to_label: check.profile.name,
+      action: :put_back
+    )
+  end
+
+  def handle_event("cancel_pending", _, socket), do: {:noreply, assign(socket, pending: nil)}
+
+  def handle_event("approve", _, %{assigns: %{pending: nil}} = socket), do: {:noreply, socket}
+
+  def handle_event("approve", _, socket) do
+    action = socket.assigns.pending.action
+    run(assign(socket, pending: nil), action)
   end
 
   def handle_event("new_change", %{"new" => new}, socket),
@@ -155,18 +284,6 @@ defmodule CNCWeb.ConfigLive do
     do: {:noreply, assign(socket, editing_current?: false, field_errors: %{})}
 
   # The axis table: every value that differs from the profile is set.
-  def handle_event("apply_axes", %{"set" => values}, socket) do
-    current = socket.assigns.check.profile.values
-
-    changes =
-      for {path, value} <- values,
-          String.trim(value) != "",
-          not same_value?(current[path], value),
-          do: {path, value}
-
-    apply_changes(socket, changes)
-  end
-
   def handle_event("show_all", %{"profile" => pid}, socket) do
     showing = if socket.assigns.showing_profile == pid, do: nil, else: pid
     {:noreply, assign(socket, showing_profile: showing)}
@@ -183,70 +300,8 @@ defmodule CNCWeb.ConfigLive do
   def handle_event("cancel_edit_profile", _, socket),
     do: {:noreply, assign(socket, editing_profile: nil, field_errors: %{})}
 
-  def handle_event("save_profile", %{"profile" => pid, "set" => values}, socket) do
-    %{cnc: cnc, controller: c, profiles: profiles} = socket.assigns
-    current = Enum.find_value(profiles, %{}, &(&1.id == pid && &1.values))
-
-    changes =
-      for {path, value} <- values,
-          String.trim(value) != "",
-          not same_value?(current[path], value),
-          do: {path, value}
-
-    case Profiles.edit(cnc.db, c.id, pid, changes) do
-      {:ok, %{errors: errors}} when errors == %{} ->
-        {:noreply, socket |> assign(editing_profile: nil, field_errors: %{}) |> maybe_load()}
-
-      {:ok, %{errors: errors}} ->
-        errors = Map.new(errors, fn {path, reason} -> {path, error_text(reason)} end)
-        {:noreply, socket |> assign(field_errors: errors) |> maybe_load()}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, error: error_text(reason))}
-    end
-  end
-
   def handle_event("other_change", %{"other" => other}, socket),
     do: {:noreply, assign(socket, other: other)}
-
-  def handle_event(
-        "apply_other",
-        %{"other" => %{"path" => path, "value" => value} = other},
-        socket
-      ) do
-    {:noreply, socket} = apply_changes(socket, [{path, value}])
-
-    if socket.assigns.field_errors == %{} and socket.assigns.error == nil,
-      do: {:noreply, assign(socket, other: %{"path" => "", "value" => ""})},
-      else: {:noreply, assign(socket, other: other)}
-  end
-
-  def handle_event("keep_drift", _, socket) do
-    %{cnc: cnc, controller: c} = socket.assigns
-
-    case Profiles.keep_drift(cnc.machine, cnc.db, c) do
-      :ok -> {:noreply, socket |> assign(error: nil) |> maybe_load()}
-      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
-    end
-  end
-
-  def handle_event("take_file", _, socket) do
-    %{cnc: cnc, controller: c} = socket.assigns
-
-    case Profiles.take_file(cnc.machine, cnc.db, c) do
-      :ok ->
-        {:noreply, assign(socket, working: "Writing it: the controller restarts…", error: nil)}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, error: error_text(reason))}
-    end
-  end
-
-  def handle_event("put_back", _, socket) do
-    %{cnc: cnc, controller: c} = socket.assigns
-    Profiles.put_back(cnc.machine, cnc.db, c.id)
-    {:noreply, socket |> assign(error: nil) |> maybe_load()}
-  end
 
   ## Files (advanced)
 
@@ -265,70 +320,119 @@ defmodule CNCWeb.ConfigLive do
   def handle_event("close_view", _, socket),
     do: {:noreply, assign(socket, viewing: nil, text: nil)}
 
-  def handle_event("validate_upload", _, socket), do: {:noreply, socket}
+  def handle_event("validate_upload", params, socket),
+    do: {:noreply, assign(socket, paste: Map.get(params, "paste", socket.assigns.paste))}
 
-  # The escape hatch: a file of your own becomes the controller's config.
-  def handle_event("upload_file", _, socket) do
-    %{cnc: cnc, controller: c} = socket.assigns
-
+  # An override: a file of your own (uploaded, or pasted) in place of the
+  # profile's. Shown as a diff first.
+  def handle_event("review_override", params, socket) do
     uploaded =
       consume_uploaded_entries(socket, :config_file, fn %{path: path}, entry ->
         {:ok, {entry.client_name, File.read!(path)}}
       end)
 
-    with [{name, text}] <- uploaded,
-         true <- Regex.match?(~r/\.ya?ml\z/i, name) || {:error, :not_yaml},
-         :ok <- Profiles.replace_file(cnc.machine, cnc.db, c, text) do
-      {:noreply,
-       assign(socket,
-         working: "Writing #{name} as #{Profiles.file()}: the controller restarts…",
-         viewing: nil,
-         error: nil
-       )}
+    paste = String.trim(Map.get(params, "paste", ""))
+
+    source =
+      case uploaded do
+        [{name, text}] ->
+          if Regex.match?(~r/\.ya?ml\z/i, name),
+            do: {:ok, text, "Uploaded #{name} (an override)"},
+            else: {:error, :not_yaml}
+
+        [] when paste != "" ->
+          {:ok, paste <> "\n", "Pasted a config (an override)"}
+
+        [] ->
+          {:error, :nothing_to_use}
+      end
+
+    with {:ok, text, reason} <- source,
+         true <- Config.parse(text) != [] || {:error, :not_a_config} do
+      ask(socket,
+        title: "Use your own config",
+        note:
+          "It replaces #{Profiles.file()} (wiring included) and the controller restarts with it. Recorded in the history as: #{reason}.",
+        approve: "Write and restart",
+        diffs: Config.diff_texts(socket.assigns.check && socket.assigns.check.text, text),
+        from_label: Profiles.file(),
+        to_label: "yours",
+        action: {:override, text, reason}
+      )
     else
-      [] -> {:noreply, socket}
       {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
     end
   end
 
-  def handle_event("show_version", %{"i" => i}, socket) do
+  def handle_event("toggle_rev", %{"key" => key}, socket) do
+    expanded = socket.assigns.expanded
+
+    expanded =
+      if MapSet.member?(expanded, key),
+        do: MapSet.delete(expanded, key),
+        else: MapSet.put(expanded, key)
+
+    {:noreply, assign(socket, expanded: expanded)}
+  end
+
+  def handle_event("profile_history", %{"profile" => pid}, socket) do
+    open = if socket.assigns.history_for == pid, do: nil, else: pid
+    {:noreply, assign(socket, history_for: open)}
+  end
+
+  # A controller revision back: its file, written as a new revision.
+  def handle_event("restore_config", %{"i" => i}, socket) do
+    %{history: history, check: check} = socket.assigns
+
+    case Enum.at(history, String.to_integer(i)) do
+      %{text: text, version: v} = rev when is_binary(text) ->
+        ask(socket,
+          title: "Restore the controller's config to v#{v}",
+          note:
+            "#{rev.file} gets v#{v}'s file back (a new version, \"Restored v#{v}\"); the controller restarts with it.",
+          approve: "Restore and restart",
+          diffs: Config.diff_texts(check && check.text, text),
+          from_label: "now",
+          to_label: "v#{v}",
+          action: {:restore_config, String.to_integer(i)}
+        )
+
+      _ ->
+        {:noreply, assign(socket, error: error_text(:not_found))}
+    end
+  end
+
+  # A profile revision back: a new revision of the profile.
+  def handle_event("restore_profile", %{"profile" => pid, "i" => i}, socket) do
+    %{cnc: cnc, controller: c, profiles: profiles, check: check} = socket.assigns
     i = String.to_integer(i)
-    {:noreply, assign(socket, showing: if(socket.assigns.showing == i, do: nil, else: i))}
+    profile = Enum.find(profiles, &(&1.id == pid))
+    rev = profile && Enum.at(profile.history, i)
+    selected? = check && check.profile.id == pid
+
+    if rev do
+      ask(socket,
+        title: "Restore #{profile.name} to v#{rev.version}",
+        note:
+          if(selected?,
+            do:
+              "A new version of #{profile.name} (\"Restored v#{rev.version}\"), written to the controller, which restarts.",
+            else:
+              "A new version of #{profile.name} (\"Restored v#{rev.version}\"). Stored only: the controller gets it when you switch to it."
+          ),
+        approve: if(selected?, do: "Restore and restart", else: "Restore"),
+        diffs: Profiles.restore_diff(cnc.db, c.id, pid, i),
+        from_label: "now",
+        to_label: "v#{rev.version}",
+        action: {:restore_profile, pid, i}
+      )
+    else
+      {:noreply, assign(socket, error: error_text(:not_found))}
+    end
   end
 
   # An earlier version back into its file; for the controller's file, a
   # restart loads it (then it shows as differing from the profile).
-  def handle_event("restore", %{"i" => i}, socket) do
-    %{cnc: cnc, controller: c, history: history} = socket.assigns
-    version = Enum.at(history, String.to_integer(i))
-
-    with %{} <- version || {:error, :not_found},
-         {:ok, file} <- Config.restore(cnc.machine, cnc.db, c.id, version) do
-      if file == Profiles.file() do
-        case Config.activate(cnc.machine, file) do
-          :ok ->
-            {:noreply,
-             assign(socket,
-               working: "Restoring #{file}: the controller restarts…",
-               showing: nil,
-               error: nil
-             )}
-
-          {:error, reason} ->
-            {:noreply, assign(socket, error: error_text(reason))}
-        end
-      else
-        {:noreply,
-         socket
-         |> assign(error: nil, showing: nil)
-         |> put_flash(:info, "Restored #{file}.")
-         |> maybe_load()}
-      end
-    else
-      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
-    end
-  end
-
   @impl true
   def render(assigns) do
     ~H"""
@@ -437,7 +541,6 @@ defmodule CNCWeb.ConfigLive do
                           phx-click="switch"
                           phx-value-profile={@check.profile.id}
                           disabled={@machine.moving?}
-                          data-confirm={"Write #{@check.profile.name} to the controller and restart it? What its file holds now goes into the history."}
                         >
                           Write {@check.profile.name} and restart
                         </button>
@@ -447,7 +550,6 @@ defmodule CNCWeb.ConfigLive do
                           id="take-file"
                           class="cnc-btn"
                           phx-click="take_file"
-                          data-confirm={"Replace #{@check.profile.name}'s values with the controller's file?"}
                         >
                           Keep the controller's values in {@check.profile.name}
                         </button>
@@ -563,6 +665,15 @@ defmodule CNCWeb.ConfigLive do
                       </button>
                       <button
                         type="button"
+                        class="cnc-btn"
+                        id="current-history"
+                        phx-click="profile_history"
+                        phx-value-profile={@check.profile.id}
+                      >
+                        {if @history_for == @check.profile.id, do: "Hide history", else: "History"}
+                      </button>
+                      <button
+                        type="button"
                         class="cnc-btn cnc-btn--quiet"
                         phx-click="rename"
                         phx-value-profile={@check.profile.id}
@@ -574,6 +685,15 @@ defmodule CNCWeb.ConfigLive do
                       :if={@showing_profile == @check.profile.id}
                       id="current-yaml"
                       text={Profiles.render(@controller.board, @check.profile)}
+                    />
+                    <.revisions
+                      :if={@history_for == @check.profile.id}
+                      id={"history-#{@check.profile.id}"}
+                      entries={@check.profile.history}
+                      prefix={"p-#{@check.profile.id}"}
+                      expanded={@expanded}
+                      restore="restore_profile"
+                      profile={@check.profile.id}
                     />
                   <% end %>
                 </div>
@@ -630,7 +750,6 @@ defmodule CNCWeb.ConfigLive do
                         phx-click="switch"
                         phx-value-profile={p.id}
                         disabled={@machine.moving?}
-                        data-confirm={"Switch to #{p.name}? It's written to the controller, which restarts and comes back locked."}
                       >
                         Switch to this
                       </button>
@@ -658,6 +777,14 @@ defmodule CNCWeb.ConfigLive do
                         phx-value-profile={p.id}
                       >
                         Edit
+                      </button>
+                      <button
+                        type="button"
+                        class="cnc-btn"
+                        phx-click="profile_history"
+                        phx-value-profile={p.id}
+                      >
+                        {if @history_for == p.id, do: "Hide history", else: "History"}
                       </button>
                       <button
                         type="button"
@@ -691,21 +818,22 @@ defmodule CNCWeb.ConfigLive do
                               do: "setting differs",
                               else: "settings differ"} from {@check.profile.name} (current → {p.name}):
                           </p>
-                          <ul class="cnc-changes">
-                            <li :for={d <- diffs}>
-                              <code>{d.path}</code>
-                              <span class="cnc-change-vals">
-                                <span class="cnc-diff-from">{shown(d.from) || "not set"}</span>
-                                → <strong class="cnc-diff-to">{shown(d.to) || "not set"}</strong>
-                              </span>
-                            </li>
-                          </ul>
+                          <.diff_list diffs={diffs} />
                       <% end %>
                     </div>
                     <div :if={@showing_profile == p.id and @editing_profile != p.id}>
                       <.axes_table values={p.values} id_prefix={"view-#{p.id}"} />
                       <.yaml_view id={"yaml-#{p.id}"} text={Profiles.render(@controller.board, p)} />
                     </div>
+                    <.revisions
+                      :if={@history_for == p.id}
+                      id={"history-#{p.id}"}
+                      entries={p.history}
+                      prefix={"p-#{p.id}"}
+                      expanded={@expanded}
+                      restore="restore_profile"
+                      profile={p.id}
+                    />
                   </li>
                 </ul>
 
@@ -777,15 +905,27 @@ defmodule CNCWeb.ConfigLive do
                 </div>
               </section>
 
+              <section class="cnc-set-group" aria-label="History" id="config-history">
+                <h2 class="cnc-h">History of the controller's config</h2>
+                <p :if={@history == []} class="cnc-sub">
+                  No changes yet. Every change made from here is kept: why, what changed, and the
+                  file it wrote.
+                </p>
+                <.revisions
+                  :if={@history != []}
+                  id="controller-history"
+                  entries={@history}
+                  prefix="c"
+                  expanded={@expanded}
+                  restore="restore_config"
+                  files
+                />
+              </section>
+
               <details class="cnc-set-group cnc-advanced" id="advanced" open={@advanced?}>
                 <summary class="cnc-h" phx-click="toggle_advanced">
                   Advanced: the controller's config file
                 </summary>
-                <p class="cnc-sub">
-                  The controller loads {Profiles.file()}, written from the selected profile. As
-                  an escape hatch you can upload a config file of your own: it replaces {Profiles.file()} (the one there now is kept below) and the controller restarts
-                  with it. This page then shows how it differs from the profile.
-                </p>
                 <div class="cnc-row">
                   <button
                     type="button"
@@ -800,73 +940,244 @@ defmodule CNCWeb.ConfigLive do
                 <.yaml_view :if={@viewing} id="config-text" text={@text} />
 
                 <form
-                  id="upload-form"
-                  class="cnc-ctl-form"
+                  id="override-form"
+                  class="cnc-override"
                   phx-change="validate_upload"
-                  phx-submit="upload_file"
+                  phx-submit="review_override"
                 >
-                  <h3 class="cnc-sub">Upload a config file</h3>
-                  <.live_file_input upload={@uploads.config_file} class="cnc-file-input" />
+                  <h3 class="cnc-override-title">Use your own config</h3>
+                  <p class="cnc-sub">
+                    The escape hatch: a FluidNC config of your own in place of the profile's. It
+                    replaces {Profiles.file()} (wiring included) and the controller restarts with
+                    it; the page then shows how it differs from the profile. You'll see the
+                    changes before anything is written.
+                  </p>
+                  <div class="cnc-override-ways">
+                    <label class="cnc-drop" phx-drop-target={@uploads.config_file.ref}>
+                      <span class="cnc-drop-title">Upload a file</span>
+                      <span class="cnc-dim">.yaml, or drop it here</span>
+                      <.live_file_input upload={@uploads.config_file} class="cnc-drop-input" />
+                      <span
+                        :for={entry <- @uploads.config_file.entries}
+                        class="cnc-drop-file"
+                        id="override-file"
+                      >
+                        {entry.client_name}
+                      </span>
+                    </label>
+                    <label class="cnc-paste">
+                      <span class="cnc-drop-title">Or paste it</span>
+                      <textarea
+                        name="paste"
+                        id="override-paste"
+                        rows="9"
+                        spellcheck="false"
+                        placeholder="name: My router&#10;axes:&#10;  x:&#10;    max_rate_mm_per_min: 3000"
+                      >{@paste}</textarea>
+                    </label>
+                  </div>
                   <p :for={err <- upload_errors(@uploads.config_file)} class="cnc-set-error">
                     {upload_error(err)}
                   </p>
                   <div class="cnc-row">
                     <button
                       type="submit"
-                      id="upload-file"
+                      id="review-override"
                       class="cnc-btn"
-                      disabled={@uploads.config_file.entries == [] or @machine.moving?}
-                      data-confirm={"Replace #{Profiles.file()} with this file and restart the controller?"}
+                      disabled={
+                        (@uploads.config_file.entries == [] and String.trim(@paste) == "") or
+                          @machine.moving?
+                      }
                     >
-                      Upload and restart
+                      Review changes
                     </button>
                   </div>
                 </form>
-
-                <div :if={@history != []} id="config-history-group">
-                  <h3 class="cnc-sub">Earlier versions</h3>
-                  <ul class="cnc-ctls" id="config-history">
-                    <li
-                      :for={{v, i} <- Enum.with_index(@history)}
-                      id={"version-#{i}"}
-                      class="cnc-ctl-card"
-                    >
-                      <div class="cnc-ctl-card-head">
-                        <h3 class="cnc-ctl-name">{v.file}</h3>
-                        <span class="cnc-ctl-size">
-                          {Calendar.strftime(v.at, "%Y-%m-%d %H:%M")} UTC, {v.why}
-                        </span>
-                      </div>
-                      <div class="cnc-row">
-                        <button
-                          type="button"
-                          class="cnc-btn"
-                          phx-click="show_version"
-                          phx-value-i={i}
-                        >
-                          {if @showing == i, do: "Hide", else: "View"}
-                        </button>
-                        <button
-                          type="button"
-                          class="cnc-btn"
-                          phx-click="restore"
-                          phx-value-i={i}
-                          data-confirm={"Write this version back into #{v.file}? What it holds now goes into the history."}
-                        >
-                          Restore
-                        </button>
-                      </div>
-                      <.yaml_view :if={@showing == i} id={"version-text-#{i}"} text={v.text} />
-                    </li>
-                  </ul>
-                </div>
               </details>
           <% end %>
+          <div
+            :if={@pending}
+            class="cnc-modal"
+            id="approve-modal"
+            phx-window-keydown="cancel_pending"
+            phx-key="Escape"
+          >
+            <div
+              class="cnc-modal-box"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="approve-title"
+              phx-click-away="cancel_pending"
+            >
+              <h2 id="approve-title" class="cnc-modal-title">{@pending.title}</h2>
+              <p class="cnc-sub">{@pending.note}</p>
+              <p :if={@pending.diffs == []} class="cnc-sub" id="approve-nothing">
+                No settings change.
+              </p>
+              <div :if={@pending.diffs != []} class="cnc-modal-diffs">
+                <p class="cnc-sub">{@pending.from_label} → {@pending.to_label}:</p>
+                <.diff_list diffs={@pending.diffs} id="approve-diffs" />
+              </div>
+              <div class="cnc-row">
+                <button
+                  type="button"
+                  id="approve"
+                  class="cnc-btn cnc-btn--primary"
+                  phx-click="approve"
+                  disabled={@machine.moving?}
+                >
+                  {@pending.approve}
+                </button>
+                <button type="button" id="cancel-approve" class="cnc-btn" phx-click="cancel_pending">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
         </main>
       </div>
     </Layouts.app>
     """
   end
+
+  ## Approved actions
+
+  defp run(socket, {:switch, pid}) do
+    %{cnc: cnc, controller: c} = socket.assigns
+    name = Enum.find_value(socket.assigns.profiles, &(&1.id == pid && &1.name))
+
+    case Profiles.switch(cnc.machine, cnc.db, c, pid) do
+      :ok ->
+        {:noreply,
+         assign(socket, working: "Writing #{name}: the controller restarts…", error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  defp run(socket, {:apply, changes, other}) do
+    {:noreply, socket} = apply_changes(socket, changes)
+
+    if other != nil and socket.assigns.field_errors == %{} and socket.assigns.error == nil,
+      do: {:noreply, assign(socket, other: %{"path" => "", "value" => ""})},
+      else: {:noreply, socket}
+  end
+
+  defp run(socket, {:save_profile, pid, changes}) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Profiles.edit(cnc.db, c.id, pid, changes) do
+      {:ok, %{errors: errors}} when errors == %{} ->
+        {:noreply, socket |> assign(editing_profile: nil, field_errors: %{}) |> maybe_load()}
+
+      {:ok, %{errors: errors}} ->
+        errors = Map.new(errors, fn {path, reason} -> {path, error_text(reason)} end)
+        {:noreply, socket |> assign(field_errors: errors) |> maybe_load()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  defp run(socket, :take_file) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Profiles.take_file(cnc.machine, cnc.db, c) do
+      :ok ->
+        {:noreply, assign(socket, working: "Writing it: the controller restarts…", error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  defp run(socket, :keep_drift) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Profiles.keep_drift(cnc.machine, cnc.db, c) do
+      :ok -> {:noreply, socket |> assign(error: nil) |> maybe_load()}
+      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  defp run(socket, {:override, text, reason}) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Profiles.replace_file(cnc.machine, cnc.db, c, text, reason) do
+      :ok ->
+        {:noreply,
+         assign(socket,
+           working: "Writing your config: the controller restarts…",
+           paste: "",
+           viewing: nil,
+           error: nil
+         )}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  defp run(socket, {:restore_config, i}) do
+    %{cnc: cnc, controller: c, history: history} = socket.assigns
+
+    with %{} = rev <- Enum.at(history, i) || {:error, :not_found},
+         {:ok, file} <- Config.restore(cnc.machine, cnc.db, c.id, rev),
+         :ok <- if(file == Profiles.file(), do: Config.activate(cnc.machine, file), else: :ok) do
+      {:noreply,
+       assign(socket, working: "Restoring v#{rev.version}: the controller restarts…", error: nil)}
+    else
+      {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  defp run(socket, {:restore_profile, pid, i}) do
+    %{cnc: cnc, controller: c, check: check} = socket.assigns
+
+    case Profiles.restore(cnc.machine, cnc.db, c, pid, i) do
+      :ok ->
+        if check && check.profile.id == pid,
+          do:
+            {:noreply,
+             assign(socket, working: "Writing it: the controller restarts…", error: nil)},
+          else: {:noreply, socket |> assign(error: nil) |> maybe_load()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
+  defp run(socket, :put_back) do
+    %{cnc: cnc, controller: c} = socket.assigns
+    Profiles.put_back(cnc.machine, cnc.db, c.id)
+    {:noreply, socket |> assign(error: nil) |> maybe_load()}
+  end
+
+  # Changes to the profile in use, shown first.
+  defp ask_apply(socket, [], _other),
+    do: {:noreply, assign(socket, field_errors: %{}, error: nil)}
+
+  defp ask_apply(socket, changes, other) do
+    %{check: check, settings: running} = socket.assigns
+    name = check.profile.name
+
+    ask(socket,
+      title: "Apply to #{name}",
+      note: "Set on the controller straight away and kept in #{name} (and its config file).",
+      approve: "Apply",
+      diffs:
+        for(
+          {path, v} <- changes,
+          do: %{path: path, from: check.profile.values[path] || running[path], to: v}
+        ),
+      from_label: "now",
+      to_label: "new",
+      action: {:apply, changes, other}
+    )
+  end
+
+  defp ask(socket, opts), do: {:noreply, assign(socket, pending: Map.new(opts))}
 
   defp apply_changes(socket, []), do: {:noreply, assign(socket, field_errors: %{}, error: nil)}
 
@@ -925,6 +1236,138 @@ defmodule CNCWeb.ConfigLive do
       </tbody>
     </table>
     """
+  end
+
+  attr :id, :string, required: true
+  attr :entries, :list, required: true
+  attr :prefix, :string, required: true
+  attr :expanded, :any, required: true
+  attr :restore, :string, required: true
+  attr :profile, :string, default: nil
+  attr :files, :boolean, default: false
+
+  # A history, newest first: each version with why, when and what changed;
+  # open one for its diff, its file, and restoring it (a new version).
+  defp revisions(assigns) do
+    ~H"""
+    <ol class="cnc-revs" id={@id}>
+      <li :for={{e, i} <- Enum.with_index(@entries)} id={"#{@prefix}-v#{e.version}"} class="cnc-rev">
+        <button
+          type="button"
+          class="cnc-rev-head"
+          phx-click="toggle_rev"
+          phx-value-key={"#{@prefix}-#{e.version}"}
+          aria-expanded={to_string(MapSet.member?(@expanded, "#{@prefix}-#{e.version}"))}
+        >
+          <span class="cnc-rev-v">v{e.version}</span>
+          <span class="cnc-rev-reason">{e.reason}</span>
+          <span class="cnc-rev-meta">
+            {changes_label(e.diff)} · {Calendar.strftime(e.at, "%b %-d %H:%M")} UTC
+          </span>
+        </button>
+        <div :if={MapSet.member?(@expanded, "#{@prefix}-#{e.version}")} class="cnc-rev-body">
+          <.diff_list :if={e.diff != []} diffs={e.diff} />
+          <p :if={e.diff == []} class="cnc-sub">No settings changed.</p>
+          <div class="cnc-row">
+            <button
+              :if={i > 0 and (not @files or is_binary(e.text))}
+              type="button"
+              class="cnc-btn"
+              phx-click={@restore}
+              phx-value-i={i}
+              phx-value-profile={@profile}
+            >
+              Restore v{e.version}
+            </button>
+            <button
+              :if={@files and is_binary(e.text)}
+              type="button"
+              class="cnc-btn cnc-btn--quiet"
+              phx-click="toggle_rev"
+              phx-value-key={"#{@prefix}-#{e.version}-file"}
+            >
+              {if MapSet.member?(@expanded, "#{@prefix}-#{e.version}-file"),
+                do: "Hide file",
+                else: "View file"}
+            </button>
+          </div>
+          <.yaml_view
+            :if={
+              @files and is_binary(e.text) and
+                MapSet.member?(@expanded, "#{@prefix}-#{e.version}-file")
+            }
+            text={e.text}
+          />
+        </div>
+      </li>
+    </ol>
+    """
+  end
+
+  attr :diffs, :list, required: true
+  attr :id, :string, default: nil
+
+  # Values that changed first; settings only one side has (one file spells
+  # out what the other leaves to FluidNC's defaults) folded away.
+  defp diff_list(assigns) do
+    {changed, rest} = Enum.split_with(assigns.diffs, &(&1.from != nil and &1.to != nil))
+    {added, removed} = Enum.split_with(rest, &(&1.from == nil))
+    assigns = assign(assigns, changed: changed, added: added, removed: removed)
+
+    ~H"""
+    <div class="cnc-difflist" id={@id}>
+      <ul :if={@changed != []} class="cnc-changes">
+        <.diff_row :for={d <- @changed} d={d} />
+      </ul>
+      <p :if={@changed == []} class="cnc-sub">No values changed.</p>
+      <details :if={@added != []} class="cnc-diff-more">
+        <summary>
+          {settings_count(length(@added))} added (FluidNC's defaults were in use for them)
+        </summary>
+        <ul class="cnc-changes">
+          <.diff_row :for={d <- @added} d={d} />
+        </ul>
+      </details>
+      <details :if={@removed != []} class="cnc-diff-more">
+        <summary>
+          {settings_count(length(@removed))} removed (left to FluidNC's defaults)
+        </summary>
+        <ul class="cnc-changes">
+          <.diff_row :for={d <- @removed} d={d} />
+        </ul>
+      </details>
+    </div>
+    """
+  end
+
+  attr :d, :map, required: true
+
+  defp diff_row(assigns) do
+    ~H"""
+    <li>
+      <code>{@d.path}</code>
+      <span class="cnc-change-vals">
+        <span class="cnc-diff-from">{shown(@d.from) || "not set"}</span>
+        → <strong class="cnc-diff-to">{shown(@d.to) || "not set"}</strong>
+      </span>
+    </li>
+    """
+  end
+
+  defp settings_count(1), do: "1 setting"
+  defp settings_count(n), do: "#{n} settings"
+
+  defp changes_label([]), do: "no settings changed"
+
+  defp changes_label(diff) do
+    changed = Enum.count(diff, &(&1.from != nil and &1.to != nil))
+    other = length(diff) - changed
+
+    case {changed, other} do
+      {c, 0} -> "#{settings_count(c)} changed"
+      {0, o} -> "#{settings_count(o)} added or removed"
+      {c, o} -> "#{settings_count(c)} changed, #{o} added or removed"
+    end
   end
 
   attr :profile, :map, required: true
@@ -1043,6 +1486,8 @@ defmodule CNCWeb.ConfigLive do
   defp error_text(:exists), do: "There's already one with that name."
   defp error_text(:in_use), do: "That's the selected profile: switch to another first."
   defp error_text(:no_profile), do: "No profile is selected."
+  defp error_text(:nothing_to_use), do: "Choose a file, or paste a config."
+  defp error_text(:no_file), do: "That version has no file (a live change)."
   defp error_text(:not_yaml), do: "Choose a FluidNC config file (.yaml or .yml)."
   defp error_text(:not_a_config), do: "That file doesn't look like a FluidNC config."
   defp error_text(:selected), do: "That's the current profile: edit it above."

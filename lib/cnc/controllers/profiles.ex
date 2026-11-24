@@ -8,16 +8,22 @@ defmodule CNC.Controllers.Profiles do
   the selected profile: the board's default config (`CNC.Boards.config/1`,
   which owns the wiring) with the profile's values set (`render/2`).
   Switching writes the other profile into that file and restarts the
-  controller. Every earlier version of the file is kept in the app's
-  history (`CNC.Controllers.Config.history/2`).
+  controller.
+
+  Two histories, each change with its reason and diff:
+
+    * the controller's (`CNC.Controllers.Config.history/2`): every change to
+      its config (switching, settings changed, a file uploaded or pasted, a
+      version restored, values put back), with the file as written;
+    * each profile's (`profile.history`): every change to its values (made,
+      edited, changed live, kept from the controller, restored), with the
+      values after, so it can be restored (`restore/5`, itself a revision).
 
   The controller's file is read back and checked against the selected
-  profile (`check/3`): it matches, or it differs (edited elsewhere, an
-  earlier version restored, another file loaded directly), and then either
-  side can win: write the profile again, or take the file's values into the
-  profile. Editing a value applies it live, stores it in the profile and
-  rewrites the file. `drift/3` finds live values the profile doesn't have
-  (changed in the console).
+  profile (`check/3`): it matches, or it differs (edited elsewhere, a version
+  restored, a file of your own), and then either side can win: write the
+  profile again, or take the controller's values into it. An override
+  (`replace_file/5`) puts your own file in place of the profile's.
 
   A controller seen for the first time gets a "Default" profile from what
   it runs. Nothing is written until a profile is written or switched to.
@@ -26,11 +32,19 @@ defmodule CNC.Controllers.Profiles do
   alias CNC.Boards
   alias CNC.Controllers.{Config, Yaml}
 
-  @type profile :: %{id: String.t(), name: String.t(), values: map}
+  @type revision :: %{
+          version: pos_integer,
+          at: DateTime.t(),
+          reason: String.t(),
+          diff: [map],
+          values: map
+        }
+  @type profile :: %{id: String.t(), name: String.t(), values: map, history: [revision]}
 
   @key :profiles
   # The one file on the controller
   @config_file "config.yaml"
+  @history_max 50
 
   @doc "The config file the app keeps on the controller."
   def file, do: @config_file
@@ -65,7 +79,7 @@ defmodule CNC.Controllers.Profiles do
     cond do
       s.profiles == [] ->
         with {:ok, running} <- Config.running(machine) do
-          profile = %{id: new_id(), name: "Default", values: editable(running)}
+          profile = new_profile("Default", editable(running), "Made from what the controller ran")
           put(db, id, %{s | profiles: [profile], selected: profile.id})
         end
 
@@ -92,12 +106,8 @@ defmodule CNC.Controllers.Profiles do
       # What the profile writes: the board's defaults plus its values.
       expected = editable(render(controller.board, profile))
 
-      # (A tuple, not two bindings: in a comprehension a binding to nil
-      # filters the element out, and a value missing on one side counts.)
       differences =
-        for path <- Enum.sort(Enum.uniq(Map.keys(expected) ++ Map.keys(in_file))),
-            {want, have} = {expected[path], in_file[path]},
-            want == nil or have == nil or not Config.same?(want, have),
+        for %{path: path, from: want, to: have} <- diff_maps(expected, in_file),
             do: %{path: path, profile: want, controller: have}
 
       matches? = loaded == @config_file and differences == []
@@ -107,6 +117,7 @@ defmodule CNC.Controllers.Profiles do
        %{
          profile: profile,
          loaded: loaded,
+         text: text,
          override?: loaded != @config_file,
          matches?: matches?,
          written_by_app?: String.starts_with?(text, "# Written by the CNC app"),
@@ -125,10 +136,16 @@ defmodule CNC.Controllers.Profiles do
     name = String.trim(name)
     profiles = list(db, id)
 
-    values =
+    {values, reason} =
       case from do
-        :board -> editable(Boards.config(board))
-        pid -> Enum.find_value(profiles, &(&1.id == pid && &1.values))
+        :board ->
+          {editable(Boards.config(board)), "Made from the board's default"}
+
+        pid ->
+          case Enum.find(profiles, &(&1.id == pid)) do
+            nil -> {nil, nil}
+            p -> {p.values, "Made as a copy of #{p.name}"}
+          end
       end
 
     cond do
@@ -142,13 +159,13 @@ defmodule CNC.Controllers.Profiles do
         {:error, :not_found}
 
       true ->
-        profile = %{id: new_id(), name: name, values: values}
+        profile = new_profile(name, values, reason)
         put(db, id, %{stored(db, id) | profiles: profiles ++ [profile]})
         {:ok, profile}
     end
   end
 
-  @doc "Rename a profile."
+  @doc "Rename a profile (a revision with no settings changed)."
   def rename(db, id, pid, name) do
     name = String.trim(name)
     profiles = list(db, id)
@@ -161,7 +178,11 @@ defmodule CNC.Controllers.Profiles do
         {:error, :exists}
 
       true ->
-        update(db, id, pid, &%{&1 | name: name})
+        update(db, id, pid, fn p ->
+          if p.name == name,
+            do: p,
+            else: revise(%{p | name: name}, p.values, "Renamed from #{p.name}")
+        end)
     end
   end
 
@@ -177,31 +198,47 @@ defmodule CNC.Controllers.Profiles do
   @doc """
   Switch to a profile (or write the selected one again): its values go into
   the controller's file, which is chosen for boot, and the controller
-  restarts with it (and comes back locked). The file's previous text goes
-  into the history.
+  restarts with it (and comes back locked). Recorded in the controller's
+  history (`reason` defaults to "Switched to profile X" / "Wrote profile X").
   """
-  @spec switch(GenServer.server(), GenServer.server(), map, String.t()) :: :ok | {:error, term}
-  def switch(machine, db, controller, pid) do
-    with %{} = profile <- find(db, controller.id, pid) || {:error, :not_found},
-         {:ok, _} <- write(machine, db, controller, profile) do
-      put(db, controller.id, %{stored(db, controller.id) | selected: pid})
-      Config.activate(machine, @config_file)
+  @spec switch(GenServer.server(), GenServer.server(), map, String.t(), String.t() | nil) ::
+          :ok | {:error, term}
+  def switch(machine, db, controller, pid, reason \\ nil) do
+    with %{} = profile <- find(db, controller.id, pid) || {:error, :not_found} do
+      reason =
+        reason ||
+          if stored(db, controller.id).selected == pid,
+            do: "Wrote profile #{profile.name}",
+            else: "Switched to profile #{profile.name}"
+
+      with {:ok, _} <- write(machine, db, controller, profile, reason) do
+        put(db, controller.id, %{stored(db, controller.id) | selected: pid})
+        Config.activate(machine, @config_file)
+      end
     end
   end
 
   @doc """
   Keep what the controller runs in the selected profile (its file was
-  changed elsewhere, an earlier version restored, a file uploaded, and
-  that's the one to keep): the running values, which include FluidNC's
-  defaults for whatever the file leaves out, become the profile's; then the
-  profile is written and the controller restarts, so file and profile agree.
+  changed elsewhere, a version restored, a file of your own, and that's the
+  one to keep): the running values, which include FluidNC's defaults for
+  whatever the file leaves out, become the profile's; then the profile is
+  written and the controller restarts, so file and profile agree.
   """
   def take_file(machine, db, controller) do
     with %{} = profile <- selected(db, controller.id) || {:error, :no_profile},
          {:ok, running} <- Config.running(machine) do
-      profile = %{profile | values: editable(running)}
-      update(db, controller.id, profile.id, fn _ -> profile end)
-      switch(machine, db, controller, profile.id)
+      update(db, controller.id, profile.id, fn p ->
+        revise(p, editable(running), "Kept the controller's values")
+      end)
+
+      switch(
+        machine,
+        db,
+        controller,
+        profile.id,
+        "Kept the controller's values in profile #{profile.name}"
+      )
     end
   end
 
@@ -209,7 +246,7 @@ defmodule CNC.Controllers.Profiles do
   Change settings in the selected profile: each is set live and read back
   (refused: wiring, or what the controller didn't apply), stored, then the
   controller's file is rewritten once. Only while the controller runs the
-  app's file (not a file loaded directly).
+  app's file (not a file of your own).
   """
   @spec set(GenServer.server(), GenServer.server(), map, [{String.t(), String.t()}]) ::
           {:ok, %{applied: map, errors: map}} | {:error, term}
@@ -232,9 +269,18 @@ defmodule CNC.Controllers.Profiles do
         if applied == %{} do
           :ok
         else
-          profile = %{profile | values: Map.merge(profile.values, applied)}
+          profile =
+            revise(profile, Map.merge(profile.values, applied), "Changed on the controller")
+
           update(db, controller.id, profile.id, fn _ -> profile end)
-          write(machine, db, controller, profile)
+
+          write(
+            machine,
+            db,
+            controller,
+            profile,
+            "Changed #{count(applied)} in profile #{profile.name}"
+          )
         end
 
       case written do
@@ -275,9 +321,45 @@ defmodule CNC.Controllers.Profiles do
         end)
 
       if applied != %{},
-        do: update(db, id, pid, &%{&1 | values: Map.merge(&1.values, applied)})
+        do: update(db, id, pid, &revise(&1, Map.merge(&1.values, applied), "Edited"))
 
       {:ok, %{applied: applied, errors: errors}}
+    end
+  end
+
+  @doc """
+  Put a profile back to one of its earlier revisions: a new revision
+  ("Restored ..."), with its diff. The selected profile is then written to
+  the controller, which restarts.
+  """
+  @spec restore(GenServer.server(), GenServer.server(), map, String.t(), non_neg_integer) ::
+          :ok | {:error, term}
+  def restore(machine, db, controller, pid, index) do
+    with %{} = profile <- find(db, controller.id, pid) || {:error, :not_found},
+         %{values: values, version: v} <-
+           Enum.at(profile.history, index) || {:error, :not_found} do
+      update(db, controller.id, pid, &revise(&1, values, "Restored v#{v}"))
+
+      if stored(db, controller.id).selected == pid,
+        do:
+          switch(
+            machine,
+            db,
+            controller,
+            pid,
+            "Restored profile #{profile.name} to its v#{v}"
+          ),
+        else: :ok
+    end
+  end
+
+  @doc "What restoring a profile's revision would change: `[%{path, from, to}]`."
+  def restore_diff(db, id, pid, index) do
+    with %{} = profile <- find(db, id, pid),
+         %{values: values} <- Enum.at(profile.history, index) do
+      diff_maps(profile.values, values)
+    else
+      _ -> []
     end
   end
 
@@ -314,29 +396,41 @@ defmodule CNC.Controllers.Profiles do
     with {:ok, list} <- drift(machine, db, controller.id),
          %{} = profile <- selected(db, controller.id) do
       values = Map.merge(profile.values, Map.new(list, &{&1.path, &1.controller}))
-      profile = %{profile | values: values}
+      profile = revise(profile, values, "Kept running values")
       update(db, controller.id, profile.id, fn _ -> profile end)
-      with {:ok, _} <- write(machine, db, controller, profile), do: :ok
+
+      reason = "Kept #{count(list)} running in profile #{profile.name}"
+      with {:ok, _} <- write(machine, db, controller, profile, reason), do: :ok
     end
   end
 
-  @doc "Put the selected profile's values back on the controller (live)."
+  @doc "Put the selected profile's values back on the controller (live; recorded)."
   def put_back(machine, db, id) do
-    with {:ok, list} <- drift(machine, db, id) do
+    with {:ok, list} <- drift(machine, db, id),
+         %{} = profile <- selected(db, id) do
       Enum.each(list, &Config.set(machine, &1.path, &1.profile))
+
+      if list != [] do
+        Config.record(db, id, %{
+          reason: "Put back #{count(list)} of profile #{profile.name} (live, file unchanged)",
+          diff: for(d <- list, do: %{path: d.path, from: d.controller, to: d.profile})
+        })
+      end
+
+      :ok
     end
   end
 
   @doc """
-  The escape hatch: a config file of your own replaces the controller's
-  (its current text goes into the history) and the controller restarts with
-  it. `check/3` then shows how it differs from the selected profile.
+  An override: a config file of your own replaces the controller's and the
+  controller restarts with it; recorded with `reason` ("Uploaded mine.yaml",
+  "Pasted a config"). `check/3` then shows how it differs from the profile.
   """
-  @spec replace_file(GenServer.server(), GenServer.server(), map, String.t()) ::
+  @spec replace_file(GenServer.server(), GenServer.server(), map, String.t(), String.t()) ::
           :ok | {:error, term}
-  def replace_file(machine, db, controller, text) do
+  def replace_file(machine, db, controller, text, reason) do
     with true <- Config.parse(text) != [] || {:error, :not_a_config},
-         {:ok, _} <- Config.upload(machine, @config_file, text, {db, controller.id}) do
+         {:ok, _} <- Config.upload(machine, @config_file, text, {db, controller.id, reason}) do
       Config.activate(machine, @config_file)
     end
   end
@@ -349,15 +443,7 @@ defmodule CNC.Controllers.Profiles do
   @spec diff(atom, profile, profile) :: [
           %{path: String.t(), from: String.t() | nil, to: String.t() | nil}
         ]
-  def diff(board, a, b) do
-    from = editable(render(board, a))
-    to = editable(render(board, b))
-
-    for path <- Enum.sort(Enum.uniq(Map.keys(from) ++ Map.keys(to))),
-        {x, y} = {from[path], to[path]},
-        x == nil or y == nil or not Config.same?(x, y),
-        do: %{path: path, from: x, to: y}
-  end
+  def diff(board, a, b), do: diff_maps(editable(render(board, a)), editable(render(board, b)))
 
   @doc "The file a profile makes for a board: the board's default config with the profile's values."
   @spec render(atom, profile) :: String.t()
@@ -377,11 +463,55 @@ defmodule CNC.Controllers.Profiles do
     """ <> Yaml.render(tree)
   end
 
+  ## Revisions
+
+  defp new_profile(name, values, reason) do
+    %{id: new_id(), name: name, values: %{}, history: []}
+    |> revise(values, reason)
+  end
+
+  # New values with a revision: why, what changed, and the values after.
+  defp revise(profile, values, reason) do
+    entry = %{
+      version: next_version(profile.history),
+      at: DateTime.utc_now(:second),
+      reason: reason,
+      diff: diff_maps(profile.values, values),
+      values: values
+    }
+
+    %{profile | values: values, history: Enum.take([entry | profile.history], @history_max)}
+  end
+
+  defp next_version([%{version: v} | _]), do: v + 1
+  defp next_version(history), do: length(history) + 1
+
+  # (A tuple, not two bindings: in a comprehension a binding to nil filters
+  # the element out, and a value missing on one side counts.)
+  defp diff_maps(from, to) do
+    for path <- Enum.sort(Enum.uniq(Map.keys(from) ++ Map.keys(to))),
+        {x, y} = {from[path], to[path]},
+        x == nil or y == nil or not Config.same?(x, y),
+        do: %{path: path, from: x, to: y}
+  end
+
+  defp count(map_or_list) do
+    case Enum.count(map_or_list) do
+      1 -> "1 setting"
+      n -> "#{n} settings"
+    end
+  end
+
   ## Storage
 
-  defp write(machine, db, controller, profile),
+  defp write(machine, db, controller, profile, reason),
     do:
-      Config.upload(machine, @config_file, render(controller.board, profile), {db, controller.id})
+      Config.upload(
+        machine,
+        @config_file,
+        render(controller.board, profile),
+        {db, controller.id, reason}
+      )
 
   defp editable(text), do: for({p, v} <- Config.parse(text), editable?(p), into: %{}, do: {p, v})
 
@@ -397,10 +527,15 @@ defmodule CNC.Controllers.Profiles do
     if s.seen != seen, do: put(db, id, %{s | seen: seen})
   end
 
-  # Profiles stored before (one file each) carry a :file; it's ignored.
+  # Profiles stored before carry other keys (a :file) and no history.
   defp stored(db, id) do
     s = Map.merge(%{profiles: [], selected: nil, seen: nil}, CubDB.get(db, {@key, id}, %{}))
-    %{s | profiles: Enum.map(s.profiles, &Map.take(&1, [:id, :name, :values]))}
+
+    profiles =
+      for p <- s.profiles,
+          do: Map.merge(%{history: []}, Map.take(p, [:id, :name, :values, :history]))
+
+    %{s | profiles: profiles}
   end
 
   defp put(db, id, data), do: CubDB.put(db, {@key, id}, data)

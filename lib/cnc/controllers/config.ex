@@ -22,9 +22,25 @@ defmodule CNC.Controllers.Config do
   alias CNC.Machine
 
   @type file :: %{name: String.t(), size: non_neg_integer}
-  @type snapshot :: %{at: DateTime.t(), file: String.t(), text: String.t(), why: String.t()}
+  @typedoc """
+  One change to a controller's config, in its history: when, why (`reason`,
+  e.g. "Switched to profile Fast"), the file written (`file`, `text`: the
+  file as it was written, so it can be restored; both `nil` for a live-only
+  change) and what changed (`diff`).
+  """
+  @type revision :: %{
+          version: pos_integer,
+          at: DateTime.t(),
+          reason: String.t(),
+          file: String.t() | nil,
+          text: String.t() | nil,
+          diff: [%{path: String.t(), from: String.t() | nil, to: String.t() | nil}]
+        }
 
-  @history_max 30
+  @typedoc "Where to record a change: `{db, controller_id, reason}`, or nil to not record it."
+  @type recording :: {GenServer.server(), String.t(), String.t()} | nil
+
+  @history_max 50
 
   @doc "The config files on the controller and the one it loads at boot."
   @spec files(GenServer.server()) ::
@@ -86,17 +102,12 @@ defmodule CNC.Controllers.Config do
     end
   end
 
-  @doc """
-  Delete a config file (not the one loaded at boot). With a database and
-  controller id, its text goes into the history first.
-  """
-  @spec delete(GenServer.server(), String.t(), {GenServer.server(), String.t()} | nil) ::
-          :ok | {:error, term}
-  def delete(machine, name, keep \\ nil) do
+  @doc "Delete a config file (not the one loaded at boot)."
+  @spec delete(GenServer.server(), String.t()) :: :ok | {:error, term}
+  def delete(machine, name) do
     with {:ok, name} <- valid_name(name),
          {:ok, %{active: active}} <- files(machine),
          false <- name == active && {:error, :active},
-         :ok <- keep_in_history(machine, keep, name, "before deleting"),
          {:ok, _} <- Machine.request(machine, "$LocalFS/Delete=" <> name),
          do: :ok
   end
@@ -179,31 +190,47 @@ defmodule CNC.Controllers.Config do
 
   @doc """
   Write a whole config file onto the controller (`CNC.Machine.upload/4`:
-  XModem on hardware). To use it, switch to it (`activate/2`).
+  XModem on hardware). To use it, switch to it (`activate/2`). With
+  `{db, controller_id, reason}` the change goes into the controller's
+  history: the reason, the diff against what the file held, and the file.
   """
-  @spec upload(
-          GenServer.server(),
-          String.t(),
-          String.t(),
-          {GenServer.server(), String.t()} | nil
-        ) :: {:ok, String.t()} | {:error, term}
-  def upload(machine, name, text, keep \\ nil) do
+  @spec upload(GenServer.server(), String.t(), String.t(), recording) ::
+          {:ok, String.t()} | {:error, term}
+  def upload(machine, name, text, record \\ nil) do
     with {:ok, name} <- valid_name(name),
-         :ok <- keep_in_history(machine, keep, name, "before it was rewritten"),
-         {:ok, _bytes} <- Machine.upload(machine, name, text),
-         do: {:ok, name}
+         {:ok, before} <- current_text(machine, name, record),
+         {:ok, _bytes} <- Machine.upload(machine, name, text) do
+      with {db, id, reason} <- record do
+        record(db, id, %{reason: reason, file: name, text: text, diff: diff_texts(before, text)})
+      end
+
+      {:ok, name}
+    end
+  end
+
+  # What a file holds before it's rewritten (nil if it isn't there): only
+  # needed when the change is recorded.
+  defp current_text(_machine, _name, nil), do: {:ok, nil}
+
+  defp current_text(machine, name, _record) do
+    case show(machine, name) do
+      {:ok, text} -> {:ok, text}
+      {:error, :not_found} -> {:ok, nil}
+      error -> error
+    end
   end
 
   @doc """
-  Put an earlier version back into its file. What the file holds now goes
-  into the history first. If it's the file the controller loads, it takes
-  effect after a restart.
+  Write a revision's file back (it becomes a new revision, "Restored ...").
+  If it's the file the controller loads, it takes effect after a restart.
   """
-  @spec restore(GenServer.server(), GenServer.server(), String.t(), snapshot) ::
+  @spec restore(GenServer.server(), GenServer.server(), String.t(), revision) ::
           {:ok, String.t()} | {:error, term}
-  def restore(machine, db, id, %{file: file, text: text}) do
-    with :ok <- keep_in_history(machine, {db, id}, file, "before restoring an earlier version"),
-         do: upload(machine, file, text)
+  def restore(_machine, _db, _id, %{text: nil}), do: {:error, :no_file}
+
+  def restore(machine, db, id, %{file: file, text: text} = revision) do
+    reason = "Restored v#{revision.version} (#{revision.reason})"
+    upload(machine, file, text, {db, id, reason})
   end
 
   @doc "Write a board's default config (`CNC.Boards.config/1`) onto the controller as a file."
@@ -212,30 +239,65 @@ defmodule CNC.Controllers.Config do
   def write_board_default(machine, board, name),
     do: upload(machine, name, CNC.Boards.config(board))
 
-  @doc "Earlier versions of this controller's config files, newest first."
-  @spec history(GenServer.server(), String.t()) :: [snapshot]
-  def history(db, id), do: CubDB.get(db, {:config_history, id}, [])
+  @doc """
+  Add a change to a controller's history (newest first, the last
+  #{@history_max} kept). For changes that write no file (live only), `file`
+  and `text` are nil.
+  """
+  def record(db, id, change) do
+    history = history(db, id)
+
+    version =
+      case history do
+        [%{version: v} | _] -> v + 1
+        _ -> length(history) + 1
+      end
+
+    entry = Map.merge(%{file: nil, text: nil, diff: []}, change)
+    entry = Map.merge(entry, %{at: DateTime.utc_now(:second), version: version})
+    CubDB.put(db, {:config_history, id}, Enum.take([entry | history], @history_max))
+  end
+
+  @doc "A controller's config history: every recorded change, newest first."
+  @spec history(GenServer.server(), String.t()) :: [revision]
+  def history(db, id) do
+    entries = CubDB.get(db, {:config_history, id}, [])
+    count = length(entries)
+
+    for {entry, i} <- Enum.with_index(entries) do
+      # Entries from before revisions had reasons, diffs and versions
+      Map.merge(
+        %{
+          reason: Map.get(entry, :why, "Earlier version"),
+          diff: [],
+          file: nil,
+          text: nil,
+          version: count - i
+        },
+        entry
+      )
+    end
+  end
+
+  @doc """
+  What changed between two config texts, by setting (`nil` text is an
+  empty file): `[%{path, from, to}]`, numbers compared as numbers.
+  """
+  @spec diff_texts(String.t() | nil, String.t()) :: [map]
+  def diff_texts(old, new) do
+    from = Map.new(parse(old || ""))
+    to = Map.new(parse(new || ""))
+
+    # (A tuple, not two bindings: a nil binding would filter the element out.)
+    for path <- Enum.sort(Enum.uniq(Map.keys(from) ++ Map.keys(to))),
+        {x, y} = {from[path], to[path]},
+        x == nil or y == nil or not same?(x, y),
+        do: %{path: path, from: x, to: y}
+  end
 
   @doc "Forget a controller's profiles and history (it was removed)."
   def forget(db, id),
     do: CubDB.delete_multi(db, [{:config_history, id}, {:profiles, id}])
-
-  defp keep_in_history(_machine, nil, _file, _why), do: :ok
-
-  # A file that isn't there (yet) has nothing to keep.
-  defp keep_in_history(machine, {db, id}, file, why) do
-    case show(machine, file) do
-      {:ok, text} ->
-        entry = %{at: DateTime.utc_now(:second), file: file, text: text, why: why}
-        CubDB.put(db, {:config_history, id}, Enum.take([entry | history(db, id)], @history_max))
-
-      {:error, :not_found} ->
-        :ok
-
-      error ->
-        error
-    end
-  end
 
   # A setting's reply, as lines; an unknown path is error:3.
   defp request_setting(machine, line) do

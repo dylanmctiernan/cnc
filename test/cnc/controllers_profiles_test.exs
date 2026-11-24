@@ -137,21 +137,63 @@ defmodule CNC.Controllers.ProfilesTest do
     ctl: ctl
   } do
     {:ok, _} = Profiles.set(m, db, ctl, [{"axes/x/max_rate_mm_per_min", "2500"}])
-    [before | _] = Config.history(db, "c1")
-    {:ok, _} = Config.restore(m, db, "c1", before)
+    {:ok, _} = Profiles.set(m, db, ctl, [{"axes/x/max_rate_mm_per_min", "2600"}])
+
+    assert [%{version: 2, reason: "Changed 1 setting in profile Default"}, %{version: 1} = v1] =
+             Config.history(db, "c1")
+
+    {:ok, _} = Config.restore(m, db, "c1", v1)
     # (The page restarts the controller after restoring its file.)
     :ok = Config.activate(m, "config.yaml")
     assert eventually(fn -> Machine.status(m).state == :alarm end)
 
     {:ok, %{matches?: false, differences: diffs}} = Profiles.check(m, db, ctl)
 
-    assert %{profile: "2500", controller: "3000.000"} =
+    assert %{profile: "2600", controller: "2500"} =
              Enum.find(diffs, &(&1.path == "axes/x/max_rate_mm_per_min"))
 
     # The file's values win: they go into the profile, which is written
     :ok = Profiles.take_file(m, db, ctl)
     assert eventually(fn -> match?({:ok, %{matches?: true}}, Profiles.check(m, db, ctl)) end)
-    assert [%{values: %{"axes/x/max_rate_mm_per_min" => "3000.000"}}] = Profiles.list(db, "c1")
+    assert [%{values: %{"axes/x/max_rate_mm_per_min" => "2500"}}] = Profiles.list(db, "c1")
+
+    assert %{reason: "Kept the controller's values in profile Default"} =
+             hd(Config.history(db, "c1"))
+  end
+
+  test "a profile's history: a version per change; restoring is a new version", %{
+    m: m,
+    db: db,
+    ctl: ctl
+  } do
+    [default] = Profiles.list(db, "c1")
+    {:ok, fast} = Profiles.create(db, "c1", "Fast", :fake_sim, default.id)
+    {:ok, _} = Profiles.edit(db, "c1", fast.id, [{"axes/x/acceleration_mm_per_sec2", "800"}])
+    :ok = Profiles.rename(db, "c1", fast.id, "Quick")
+
+    quick = Enum.find(Profiles.list(db, "c1"), &(&1.id == fast.id))
+
+    assert [
+             %{version: 3, reason: "Renamed from Fast", diff: []},
+             %{version: 2, reason: "Edited", diff: [%{path: "axes/x/acceleration_mm_per_sec2"}]},
+             %{version: 1, reason: "Made as a copy of Default"}
+           ] = quick.history
+
+    assert [%{path: "axes/x/acceleration_mm_per_sec2", from: "800"}] =
+             Profiles.restore_diff(db, "c1", fast.id, 2)
+
+    :ok = Profiles.restore(m, db, ctl, fast.id, 2)
+    quick = Enum.find(Profiles.list(db, "c1"), &(&1.id == fast.id))
+    assert %{version: 4, reason: "Restored v1"} = hd(quick.history)
+    assert quick.values["axes/x/acceleration_mm_per_sec2"] == "500.000"
+    # Not the selected profile: nothing went to the controller
+    assert Config.history(db, "c1") == []
+
+    # The selected one: written, and recorded on the controller's side too
+    {:ok, _} = Profiles.set(m, db, ctl, [{"axes/x/max_rate_mm_per_min", "2500"}])
+    :ok = Profiles.restore(m, db, ctl, default.id, 1)
+    assert eventually(fn -> match?({:ok, %{matches?: true}}, Profiles.check(m, db, ctl)) end)
+    assert %{reason: "Restored profile Default to its v1"} = hd(Config.history(db, "c1"))
   end
 
   test "drift: a console change shows; keep it or put it back", %{m: m, db: db, ctl: ctl} do
@@ -187,8 +229,8 @@ defmodule CNC.Controllers.ProfilesTest do
     # The escape hatch: a file of your own becomes config.yaml
     {:ok, text} = Config.show(m, "mine.yaml")
     own = String.replace(text, "max_rate_mm_per_min: 3000.000", "max_rate_mm_per_min: 1500")
-    assert Profiles.replace_file(m, db, ctl, "") == {:error, :not_a_config}
-    :ok = Profiles.replace_file(m, db, ctl, own)
+    assert Profiles.replace_file(m, db, ctl, "", "Pasted") == {:error, :not_a_config}
+    :ok = Profiles.replace_file(m, db, ctl, own, "Uploaded own.yaml")
 
     assert eventually(fn ->
              match?(
@@ -206,8 +248,11 @@ defmodule CNC.Controllers.ProfilesTest do
         m,
         db,
         ctl,
-        "name: Mine\naxes:\n  x:\n    max_rate_mm_per_min: 3000\n"
+        "name: Mine\naxes:\n  x:\n    max_rate_mm_per_min: 3000\n",
+        "Pasted a config"
       )
+
+    assert %{reason: "Pasted a config"} = hd(Config.history(db, "c1"))
 
     assert eventually(fn ->
              match?({:ok, %{written_by_app?: false}}, Profiles.check(m, db, ctl))
