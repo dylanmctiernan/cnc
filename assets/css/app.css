@@ -3512,3 +3512,245 @@ body {
   font-size: var(--text-md);
 }
 
+
+/* =====================================================================
+   Configuration and Controllers on the design system.
+   Normal is calm (a green dot, not green text and borders); attention
+   gets colour. Each card has one primary action, one secondary, then
+   quiet tools; destructive actions are quiet until hovered, in red.
+   ===================================================================== */
+
+/* Cards */
+.cnc-ctls {
+  gap: var(--space-3);
+}
+.cnc-ctl-card {
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+/* The one in use: outlined, not coloured */
+.cnc-ctl-card.is-active {
+  border-color: var(--border);
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--text-muted);
+}
+.cnc-ctl-name {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.cnc-ctl-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.6rem;
+}
+.cnc-ctl-card .cnc-facts {
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
+}
+.cnc-ctl-card .cnc-facts dt {
+  color: var(--text-muted);
+}
+.cnc-ctl-card > .cnc-row {
+  align-items: center;
+  gap: var(--space-2);
+}
+/* A small break between the card's actions and its tools */
+.cnc-row-gap {
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 var(--space-1);
+  background: var(--border-faint);
+}
+.ui-btn--danger-text:hover:not(:disabled) {
+  color: var(--danger-text);
+}
+
+/* Value tables: the X/Y/Z headers over their numbers, columns close to
+   their labels so the axes compare at a glance */
+.cnc-axes {
+  width: auto;
+  max-width: 100%;
+  /* As a grid item it would stretch; keep it to its content */
+  justify-self: start;
+}
+.cnc-axes th[scope="row"] {
+  padding-right: var(--space-6);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.cnc-axes thead th {
+  min-width: 6.5rem;
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-align: right;
+}
+.cnc-axes td.cnc-axes-value {
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--font-mono);
+}
+.cnc-axes tbody tr + tr > * {
+  border-top: 1px solid var(--border-faint);
+}
+.cnc-axes input {
+  border-color: var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  font-family: var(--font-mono);
+}
+.cnc-axes input:focus {
+  border-color: var(--info);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 30%, transparent);
+}
+.cnc-axes input.is-staged,
+.cnc-axes span.is-staged {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.cnc-axes input.is-error {
+  border-color: var(--danger);
+}
+.cnc-layer {
+  border-color: var(--border-faint);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+/* Status: calm when in step (an icon says it), amber when not */
+.cnc-ok {
+  color: var(--text-muted);
+}
+.cnc-status-strip {
+  align-items: center;
+  border-color: var(--border-faint);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.cnc-status-strip a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  text-decoration: none;
+}
+.cnc-status-strip a:hover {
+  text-decoration: underline;
+}
+.cnc-status-icon {
+  width: 1rem;
+  height: 1rem;
+}
+.cnc-status-strip .cnc-ok .cnc-status-icon {
+  color: var(--ok);
+}
+
+/* Forms */
+.cnc-ctl-field > span,
+.cnc-ctl-field > legend,
+.cnc-ctl-field > label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+.cnc-ctl-field input,
+.cnc-ctl-field select,
+.cnc-paste textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+  color: var(--text);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.cnc-ctl-field input:focus,
+.cnc-ctl-field select:focus,
+.cnc-paste textarea:focus {
+  outline: none;
+  border-color: var(--info);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 30%, transparent);
+}
+.cnc-ctl-field input::placeholder,
+.cnc-paste textarea::placeholder {
+  color: var(--text-faint);
+}
+/* The link choice: the same calm selection as everywhere else */
+.cnc-ctl-field .cnc-seg label {
+  display: grid;
+  place-items: center;
+  background: var(--surface-1);
+  border-color: var(--border-faint);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.cnc-ctl-field .cnc-seg label.is-on {
+  position: relative;
+  z-index: 1;
+  border-color: var(--text-muted);
+  background: var(--surface-3);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--text);
+}
+.cnc-ctl-field .cnc-seg label:has(input:focus-visible) {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+}
+.cnc-add {
+  padding: var(--space-4);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+/* Upload: a real button instead of the browser's "Choose File" */
+.cnc-drop,
+.cnc-paste {
+  border-color: var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.cnc-drop:hover,
+.cnc-drop.phx-drop-target-active {
+  border-color: var(--info);
+  background: color-mix(in srgb, var(--info) 6%, var(--surface-1));
+}
+.cnc-drop-input::file-selector-button {
+  margin-right: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cnc-drop-file {
+  color: var(--text);
+}
+.cnc-paste textarea {
+  font-family: var(--font-mono);
+}
+
+/* A value that differs from the selected profile's: what you'd change by
+   switching. Information, not a problem: blue, with a marker, not colour alone */
+.cnc-axes span.is-different {
+  color: var(--info);
+  font-weight: 600;
+}
+.cnc-axes span.is-different::before {
+  content: "●";
+  margin-right: 0.35em;
+  font-size: 0.5em;
+  vertical-align: 0.35em;
+}

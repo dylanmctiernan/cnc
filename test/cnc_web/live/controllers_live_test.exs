@@ -20,6 +20,7 @@ defmodule CNCWeb.ControllersLiveTest do
 
   test "add: the board decides which links are offered; USB needs a port", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/controllers")
+    view |> element("#add-open") |> render_click()
 
     # ESP32: USB and Wi-Fi
     assert has_element?(view, "#add-form input[name='add[type]'][value=serial]")
@@ -50,6 +51,7 @@ defmodule CNCWeb.ControllersLiveTest do
 
   test "change a controller's link: USB to Wi-Fi, same controller", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/controllers")
+    view |> element("#add-open") |> render_click()
 
     view
     |> form("#add-form", add: %{name: "6x", board: "six_x", type: "serial", port: "/dev/cu.six"})
@@ -67,6 +69,7 @@ defmodule CNCWeb.ControllersLiveTest do
 
   test "use another controller; remove one that isn't in use", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/controllers")
+    view |> element("#add-open") |> render_click()
     first = controller_id(view, "Fake sim")
 
     view |> form("#add-form", add: %{board: "fake_sim"}) |> render_change()

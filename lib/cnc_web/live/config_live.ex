@@ -693,7 +693,9 @@ defmodule CNCWeb.ConfigLive do
           <div class="cnc-ctl-card-head">
             <h3 :if={@renaming != p.id} class="cnc-ctl-name">{p.name}</h3>
             <.rename_form :if={@renaming == p.id} profile={p} />
-            <span :if={selected?(@check, p)} class="cnc-ctl-tag">Selected</span>
+            <span :if={selected?(@check, p)} class="cnc-ctl-tag">
+              <span class="ui-dot ui-dot--ok" aria-hidden="true"></span> Selected
+            </span>
           </div>
 
           <form
@@ -737,6 +739,12 @@ defmodule CNCWeb.ConfigLive do
                 )
               }
               staged={staged_map(@staged, :profile, p.id)}
+              compare={
+                if not selected?(@check, p),
+                  do:
+                    {@check.profile.name,
+                     Configuration.expected(@cnc.db, @controller, @check.profile)}
+              }
               id_prefix={"view-#{p.id}"}
             />
           </div>
@@ -759,11 +767,18 @@ defmodule CNCWeb.ConfigLive do
             >
               Edit
             </UI.button>
-            <UI.button type="button" phx-click="toggle" phx-value-key={"file-#{p.id}"}>
+            <span class="cnc-row-gap" aria-hidden="true"></span>
+            <UI.button
+              variant="quiet"
+              type="button"
+              phx-click="toggle"
+              phx-value-key={"file-#{p.id}"}
+            >
               {if MapSet.member?(@showing, "file-#{p.id}"), do: "Hide file", else: "View file"}
             </UI.button>
             <UI.button
               :if={not selected?(@check, p)}
+              variant="quiet"
               phx-click="toggle"
               phx-value-key={"diff-#{p.id}"}
             >
@@ -771,7 +786,12 @@ defmodule CNCWeb.ConfigLive do
                 do: "Hide diff",
                 else: "Diff with selected"}
             </UI.button>
-            <UI.button type="button" phx-click="toggle" phx-value-key={"history-#{p.id}"}>
+            <UI.button
+              variant="quiet"
+              type="button"
+              phx-click="toggle"
+              phx-value-key={"history-#{p.id}"}
+            >
               {if MapSet.member?(@showing, "history-#{p.id}"), do: "Hide history", else: "History"}
             </UI.button>
             <UI.button
@@ -784,6 +804,7 @@ defmodule CNCWeb.ConfigLive do
             <UI.button
               :if={not selected?(@check, p)}
               variant="quiet"
+              class="ui-btn--danger-text"
               phx-click="delete_profile"
               phx-value-profile={p.id}
               data-confirm={"Delete the profile #{p.name}?"}
@@ -862,16 +883,18 @@ defmodule CNCWeb.ConfigLive do
         staged={staged_map(@staged, :build, nil)}
         editing={@editing == {"build", nil}}
         errors={@field_errors}
-      />
-      <div class="cnc-row">
-        <UI.button
-          id="build-history"
-          phx-click="toggle"
-          phx-value-key="history-build"
-        >
-          {if MapSet.member?(@showing, "history-build"), do: "Hide history", else: "History"}
-        </UI.button>
-      </div>
+      >
+        <:actions>
+          <UI.button
+            id="build-history"
+            variant="quiet"
+            phx-click="toggle"
+            phx-value-key="history-build"
+          >
+            {if MapSet.member?(@showing, "history-build"), do: "Hide history", else: "History"}
+          </UI.button>
+        </:actions>
+      </.part_editor>
       <.revisions
         :if={MapSet.member?(@showing, "history-build")}
         id="history-build"
@@ -915,15 +938,13 @@ defmodule CNCWeb.ConfigLive do
         staged={staged_map(@staged, :wiring, @controller.id)}
         editing={@editing == {"wiring", @controller.id}}
         errors={@field_errors}
-      />
-      <div class="cnc-row">
-        <UI.button
-          id="wiring-history"
-          phx-click="toggle"
-          phx-value-key="history-wiring"
-        >
-          {if MapSet.member?(@showing, "history-wiring"), do: "Hide history", else: "History"}
-        </UI.button>
+      >
+        <:actions>
+          <.wiring_history_button showing={@showing} />
+        </:actions>
+      </.part_editor>
+      <div :if={Wiring.values(@cnc.db, @controller.id) == %{}} class="cnc-row">
+        <.wiring_history_button showing={@showing} />
       </div>
       <.revisions
         :if={MapSet.member?(@showing, "history-wiring")}
@@ -1104,6 +1125,10 @@ defmodule CNCWeb.ConfigLive do
         id="status-file"
         class={if(@check.matches?, do: "cnc-ok", else: "cnc-warn")}
       >
+        <.icon
+          name={if(@check.matches?, do: "hero-check-circle", else: "hero-exclamation-triangle")}
+          class="cnc-status-icon"
+        />
         {cond do
           @check.matches? -> "In step with the controller"
           @check.override? -> "Controller loaded its own file"
@@ -1120,6 +1145,7 @@ defmodule CNCWeb.ConfigLive do
   attr :staged, :map, required: true
   attr :editing, :boolean, required: true
   attr :errors, :map, default: %{}
+  slot :actions
 
   # A part's values: the axis table for the usual ones, a list for the rest;
   # read-only, or (Edit) inputs that stage changes.
@@ -1153,7 +1179,6 @@ defmodule CNCWeb.ConfigLive do
       <.values_list id={"values-#{@part}"} values={@values} staged={@staged} skip={axis_paths()} />
       <div class="cnc-row">
         <UI.button
-          variant="primary"
           id={"edit-#{@part}-button"}
           phx-click="edit"
           phx-value-part={@part}
@@ -1161,8 +1186,22 @@ defmodule CNCWeb.ConfigLive do
         >
           Edit
         </UI.button>
+        {render_slot(@actions)}
       </div>
     <% end %>
+    """
+  end
+
+  defp wiring_history_button(assigns) do
+    ~H"""
+    <UI.button
+      id="wiring-history"
+      variant="quiet"
+      phx-click="toggle"
+      phx-value-key="history-wiring"
+    >
+      {if MapSet.member?(@showing, "history-wiring"), do: "Hide history", else: "History"}
+    </UI.button>
     """
   end
 
@@ -1315,6 +1354,11 @@ defmodule CNCWeb.ConfigLive do
   end
 
   attr :values, :map, required: true
+
+  attr :compare, :any,
+    default: nil,
+    doc: "{name, values}: mark the values that differ from this (the selected profile)"
+
   attr :id_prefix, :string, required: true
   attr :staged, :map, default: %{}
   attr :editable, :boolean, default: false
@@ -1365,7 +1409,11 @@ defmodule CNCWeb.ConfigLive do
             <% else %>
               <span
                 id={"#{@id_prefix}-#{a}-#{field}"}
-                class={[Map.has_key?(@staged, "axes/#{a}/#{field}") && "is-staged"]}
+                class={[
+                  Map.has_key?(@staged, "axes/#{a}/#{field}") && "is-staged",
+                  differs?(@compare, @values, "axes/#{a}/#{field}") && "is-different"
+                ]}
+                title={differs_title(@compare, "axes/#{a}/#{field}")}
               >
                 {shown(@values["axes/#{a}/#{field}"])}
               </span>
@@ -1376,6 +1424,20 @@ defmodule CNCWeb.ConfigLive do
     </table>
     """
   end
+
+  # Differs from the compared (selected) profile's value
+  defp differs?(nil, _values, _path), do: false
+
+  defp differs?({_name, other}, values, path) do
+    case {values[path], other[path]} do
+      {nil, nil} -> false
+      {a, b} when is_binary(a) and is_binary(b) -> not Values.same?(a, b)
+      _ -> true
+    end
+  end
+
+  defp differs_title(nil, _path), do: nil
+  defp differs_title({name, other}, path), do: "#{name}: #{shown(other[path])}"
 
   defp editable_cell?(false, _layer, _field), do: false
   defp editable_cell?(true, nil, _field), do: true

@@ -29,7 +29,7 @@ defmodule CNCWeb.ControllersLive do
      socket
      |> assign(page_title: "Controllers", cnc: cnc, machine: Machine.status(cnc.machine))
      |> assign(editing: nil, edit: %{}, error: nil, ports: Controllers.serial_ports())
-     |> assign(add: new_add())
+     |> assign(add: new_add(), adding?: false)
      |> load()}
   end
 
@@ -101,6 +101,11 @@ defmodule CNCWeb.ControllersLive do
     {:noreply, assign(socket, add: params, error: nil)}
   end
 
+  def handle_event("add_open", _, socket), do: {:noreply, assign(socket, adding?: true)}
+
+  def handle_event("add_close", _, socket),
+    do: {:noreply, assign(socket, adding?: false, add: new_add(), error: nil)}
+
   def handle_event("add", %{"add" => params}, socket) do
     attrs = %{
       name: String.trim(params["name"] || ""),
@@ -109,8 +114,11 @@ defmodule CNCWeb.ControllersLive do
     }
 
     case Controllers.add(socket.assigns.cnc.controllers, attrs) do
-      {:ok, _} -> {:noreply, socket |> assign(add: new_add(), error: nil) |> load()}
-      {:error, reason} -> {:noreply, assign(socket, add: params, error: error_text(reason))}
+      {:ok, _} ->
+        {:noreply, socket |> assign(add: new_add(), adding?: false, error: nil) |> load()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, add: params, error: error_text(reason))}
     end
   end
 
@@ -151,6 +159,11 @@ defmodule CNCWeb.ControllersLive do
                 <div class="cnc-ctl-card-head">
                   <h3 class="cnc-ctl-name">{p.name}</h3>
                   <span :if={p.id == @active_id} class="cnc-ctl-tag">
+                    <span
+                      class={["ui-dot", @machine.connected? && "ui-dot--ok"]}
+                      aria-hidden="true"
+                    >
+                    </span>
                     {if @machine.connected?, do: "In use, connected", else: "In use, not connected"}
                   </span>
                 </div>
@@ -207,6 +220,7 @@ defmodule CNCWeb.ControllersLive do
                   <UI.button
                     :if={p.id != @active_id}
                     variant="quiet"
+                    class="ui-btn--danger-text"
                     phx-click="remove"
                     phx-value-id={p.id}
                     data-confirm={remove_confirm(p)}
@@ -218,7 +232,17 @@ defmodule CNCWeb.ControllersLive do
             </ul>
           </section>
 
-          <section class="cnc-set-group" aria-label="Add a controller">
+          <%!-- Adding is occasional: behind a button, unless there's nothing yet --%>
+          <div :if={not @adding? and @controllers != []} class="cnc-row">
+            <UI.button id="add-open" phx-click="add_open">
+              <.icon name="hero-plus" class="ui-btn-icon" /> Add a controller
+            </UI.button>
+          </div>
+          <section
+            :if={@adding? or @controllers == []}
+            class="cnc-set-group cnc-add"
+            aria-label="Add a controller"
+          >
             <h2 class="cnc-h">Add a controller</h2>
             <form id="add-form" class="cnc-ctl-form" phx-change="add_change" phx-submit="add">
               <label class="cnc-ctl-field">
@@ -245,6 +269,14 @@ defmodule CNCWeb.ControllersLive do
               <.link_fields name="add" params={@add} board={board(@add["board"])} ports={@ports} />
               <div class="cnc-row">
                 <UI.button variant="primary" type="submit">Add controller</UI.button>
+                <UI.button
+                  :if={@controllers != []}
+                  variant="quiet"
+                  id="add-cancel"
+                  phx-click="add_close"
+                >
+                  Cancel
+                </UI.button>
               </div>
             </form>
           </section>
