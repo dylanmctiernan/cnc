@@ -190,13 +190,13 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element("button[phx-value-mode=zero]") |> render_click()
 
     assert eventually(fn ->
-             not has_element?(view, ".cnc-zero button[phx-value-axes=x][disabled]")
+             not has_element?(view, ".cnc-zero button[phx-value-axes=xy][disabled]")
            end)
 
-    view |> element(".cnc-zero button[phx-value-axes=x]") |> render_click()
+    view |> element(".cnc-zero button[phx-value-axes=xy]") |> render_click()
 
     assert eventually(fn ->
-             match?({wx, _, _} when abs(wx) < 0.001, Machine.status().wpos)
+             match?({wx, wy, _} when abs(wx) < 0.001 and abs(wy) < 0.001, Machine.status().wpos)
            end)
 
     view |> element(".cnc-zero button[phx-value-frame=machine]") |> render_click()

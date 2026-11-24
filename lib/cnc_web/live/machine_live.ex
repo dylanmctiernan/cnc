@@ -504,19 +504,6 @@ defmodule CNCWeb.MachineLive do
             <span :if={!@machine.wpos} class="cnc-num">
               {fmt(axis_value(shown(@machine, @frame), i))}
             </span>
-            <%!-- Kept in the machine frame too (hidden), so the rows don't change size --%>
-            <button
-              type="button"
-              class={["cnc-btn cnc-btn--zero", frame(@machine, @frame) != :work && "is-hidden"]}
-              phx-click="zero"
-              phx-value-axes={String.downcase(axis)}
-              disabled={@machine.state != :idle or frame(@machine, @frame) != :work}
-              aria-hidden={to_string(frame(@machine, @frame) != :work)}
-              tabindex={if frame(@machine, @frame) != :work, do: "-1"}
-              aria-label={"Set work #{axis} to zero here"}
-            >
-              Zero
-            </button>
           </div>
           <p :if={@machine.wpos} class="cnc-sub cnc-dro-other">
             {if frame(@machine, @frame) == :work, do: "machine", else: "work"} {xyz_label(
@@ -532,6 +519,15 @@ defmodule CNCWeb.MachineLive do
               disabled={@machine.state != :idle}
             >
               Zero X/Y
+            </button>
+            <button
+              type="button"
+              class="cnc-btn is-z"
+              phx-click="zero"
+              phx-value-axes="z"
+              disabled={@machine.state != :idle}
+            >
+              Zero Z
             </button>
             <button
               type="button"
@@ -661,26 +657,25 @@ defmodule CNCWeb.MachineLive do
               <.frame_switch machine={@machine} frame={@frame} />
               <div class="cnc-zero-axes">
                 <button
-                  :for={axis <- ~w(X Y Z)}
-                  type="button"
-                  class={["cnc-btn", "is-#{String.downcase(axis)}"]}
-                  phx-click="zero"
-                  phx-value-axes={String.downcase(axis)}
-                  disabled={@machine.state != :idle}
-                >
-                  Zero {axis}
-                </button>
-              </div>
-              <div class="cnc-zero-axes">
-                <button
                   type="button"
                   class="cnc-btn"
                   phx-click="zero"
                   phx-value-axes="xy"
                   disabled={@machine.state != :idle}
                 >
-                  Zero X and Y
+                  Zero X/Y
                 </button>
+                <button
+                  type="button"
+                  class="cnc-btn is-z"
+                  phx-click="zero"
+                  phx-value-axes="z"
+                  disabled={@machine.state != :idle}
+                >
+                  Zero Z
+                </button>
+              </div>
+              <div class="cnc-zero-axes">
                 <button
                   type="button"
                   class="cnc-btn"
@@ -691,7 +686,7 @@ defmodule CNCWeb.MachineLive do
                 </button>
               </div>
               <p class="cnc-sub">
-                Zero sets the work position to 0 where the tool is now; tap a position
+                Zero X/Y at the stock's corner, Zero Z on its surface; tap a position
                 above to type any value. Go to work zero lifts Z, then moves to X0 Y0.
               </p>
             </div>

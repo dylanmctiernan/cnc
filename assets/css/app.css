@@ -378,7 +378,7 @@ button {
 }
 .cnc-dro-row {
   display: grid;
-  grid-template-columns: 2rem 1fr auto;
+  grid-template-columns: 2rem 1fr;
   gap: 0.5rem;
   align-items: baseline;
   padding: 0.25rem 0.625rem;
@@ -402,12 +402,6 @@ button {
   color: var(--text-dim);
   font-weight: 700;
   font-size: 1rem;
-}
-.cnc-btn--zero {
-  min-height: 2.25rem;
-  padding: 0.125rem 0.5rem;
-  font-size: 0.75rem;
-  align-self: center;
 }
 .cnc-num {
   font-weight: 500;
@@ -1079,7 +1073,6 @@ body {
 .cnc-dro-head,
 .cnc-dro-other,
 .cnc-dro-tools,
-.cnc-btn--zero,
 .cnc-speed .cnc-unit,
 .cnc[data-mode="step"] .cnc-speed {
   display: none;
@@ -1492,11 +1485,8 @@ body {
   .cnc-dro-tools {
     display: flex;
   }
-  .cnc-btn--zero {
-    display: inline-block;
-  }
   .cnc-dro-row {
-    grid-template-columns: 2rem 1fr auto;
+    grid-template-columns: 2rem 1fr;
     gap: 0.5rem;
     padding: 0.25rem 0.625rem;
   }
@@ -1693,9 +1683,4 @@ body {
   font: inherit;
   font-size: max(1rem, 16px);
   text-align: right;
-}
-
-/* Hidden but still taking its space (no layout shift on frame switch) */
-.cnc-btn--zero.is-hidden {
-  visibility: hidden;
 }
