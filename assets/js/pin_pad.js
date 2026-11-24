@@ -28,8 +28,12 @@ export function mountPinPad() {
   }
 
   input.addEventListener("input", () => set(input.value))
-  input.addEventListener("focus", () => form.classList.add("is-focused"))
-  input.addEventListener("blur", () => form.classList.remove("is-focused"))
+  // The page is only this field: be ready to type. autofocus covers a
+  // fresh load; a page restored with Back (bfcache) needs telling. (Phones
+  // won't open the keyboard without a tap; the cells are that tap target.)
+  const ready = () => input.focus({preventScroll: true})
+  window.addEventListener("pageshow", ready)
+  ready()
 
   render()
 }

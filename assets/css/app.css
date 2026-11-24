@@ -907,7 +907,7 @@ button {
   border-radius: 50%;
   background: var(--text);
 }
-.is-focused .cnc-pin-cell.is-active {
+.cnc-pin-form:focus-within .cnc-pin-cell.is-active {
   border-bottom-color: var(--move);
 }
 .is-error .cnc-pin-cell {
@@ -3813,3 +3813,27 @@ body {
 .cnc-messages:has(> :nth-child(2)):not(:has(> :nth-child(3)))::after { content: "+1 more"; }
 .cnc-messages:has(> :nth-child(3)):not(:has(> :nth-child(4)))::after { content: "+2 more"; }
 .cnc-messages:has(> :nth-child(4))::after { content: "+3 or more"; }
+
+/* PIN: the next cell shows a blinking cursor while the field has focus,
+   the usual "type here" (steady when motion is reduced) */
+.cnc-pin-form:focus-within .cnc-pin-cell.is-active {
+  border-color: var(--info);
+  border-bottom-color: var(--info);
+}
+.cnc-pin-form:focus-within .cnc-pin-cell.is-active::after {
+  content: "";
+  width: 2px;
+  height: 1.75rem;
+  background: var(--info);
+  animation: cnc-caret 1s steps(1) infinite;
+}
+@keyframes cnc-caret {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cnc-pin-form:focus-within .cnc-pin-cell.is-active::after {
+    animation: none;
+  }
+}
