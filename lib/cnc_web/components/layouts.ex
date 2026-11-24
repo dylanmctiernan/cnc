@@ -20,8 +20,14 @@ defmodule CNCWeb.Layouts do
   @doc """
   The workstation shell: a left rail (the app's places, and the machine's
   state with Hold pinned at its foot, so both are always in reach), and the
-  page beside it. The rail collapses to icons; on narrow screens it's a top
-  bar with a drawer. `machine` comes from `CNCWeb.Shell` (`@shell_machine`).
+  page beside it. The rail collapses to icons. `machine` comes from
+  `CNCWeb.Shell` (`@shell_machine`).
+
+  The workstation is for desktop screens (at least 1024 × 600); phones and
+  tablets have the pendant. Below that size, instead of a broken layout,
+  the shell says so, points to the pendant and keeps the machine's state
+  and Hold in reach; "Use anyway" shows the workstation regardless (for
+  this browser session).
   """
   attr :flash, :map, required: true, doc: "the map of flash messages"
   attr :current, :atom, default: nil, doc: "the rail item for this page"
@@ -70,20 +76,44 @@ defmodule CNCWeb.Layouts do
         </div>
       </aside>
 
-      <div class="ui-topbar">
-        <button
-          type="button"
-          class="ui-rail-toggle"
-          phx-click={CNCWeb.UI.toggle_drawer()}
-          aria-label="Menu"
-        >
-          <.icon name="hero-bars-3" class="ui-nav-icon" />
-        </button>
-        <span class="ui-brand">CNC</span>
-        <span class="ui-spacer"></span>
-        <CNCWeb.UI.machine_state :if={@machine} machine={@machine} id="top-state" />
-        <CNCWeb.UI.hold_button :if={@machine} id="top-hold" />
-      </div>
+      <section id="too-small" class="ui-too-small" phx-hook=".UseAnyway" aria-label="Screen too small">
+        <div class="ui-too-small-box">
+          <.icon name="hero-computer-desktop" class="ui-too-small-icon" />
+          <h1 class="ui-modal-title">This window is too small for the workstation</h1>
+          <p class="ui-muted">
+            The workstation is laid out for a desktop screen, at least 1024 × 600. On a
+            phone or tablet, use the pendant: jogging, Hold and Resume.
+          </p>
+          <div :if={@machine} class="ui-too-small-machine">
+            <CNCWeb.UI.machine_state machine={@machine} id="small-state" />
+            <CNCWeb.UI.hold_button id="small-hold" size="lg" />
+          </div>
+          <div class="ui-actions">
+            <CNCWeb.UI.button variant="primary" navigate="/pendant" id="small-pendant">
+              Open the pendant
+            </CNCWeb.UI.button>
+            <CNCWeb.UI.button variant="quiet" id="small-anyway" data-anyway>
+              Use anyway
+            </CNCWeb.UI.button>
+          </div>
+        </div>
+      </section>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".UseAnyway">
+        // "Use anyway": remembered for this browser session, on <html> (outside
+        // what LiveView patches), so it holds across pages.
+        const KEY = "cnc:use-anyway"
+        export default {
+          mounted() {
+            try {
+              if (sessionStorage.getItem(KEY)) document.documentElement.classList.add("cnc-anyway")
+            } catch (_) {}
+            this.el.querySelector("[data-anyway]")?.addEventListener("click", () => {
+              document.documentElement.classList.add("cnc-anyway")
+              try { sessionStorage.setItem(KEY, "1") } catch (_) {}
+            })
+          }
+        }
+      </script>
 
       <main class="ui-main">
         {render_slot(@inner_block)}

@@ -238,8 +238,8 @@ defmodule CNCWeb.MachineLive do
   def handle_event("viewport_ready", _, socket),
     do: {:noreply, socket |> push_program() |> push_pos(socket.assigns.machine)}
 
-  def handle_event("toggle_zoom", _, socket) do
-    zoom = if socket.assigns.zoom == :file, do: :bed, else: :file
+  def handle_event("zoom", %{"zoom" => zoom}, socket) when zoom in ~w(bed file) do
+    zoom = String.to_existing_atom(zoom)
     {:noreply, socket |> assign(zoom: zoom) |> push_event("zoom", %{mode: zoom})}
   end
 
@@ -277,7 +277,7 @@ defmodule CNCWeb.MachineLive do
   def handle_event("dismiss", %{"note" => "travel"}, socket),
     do: {:noreply, dismiss(socket, :travel)}
 
-  def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step zero),
+  def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step),
     do: {:noreply, assign(socket, control_mode: String.to_existing_atom(mode))}
 
   def handle_event("step_axis", %{"axis" => axis}, socket) when axis in ~w(x y z),
@@ -536,63 +536,26 @@ defmodule CNCWeb.MachineLive do
               </UI.button>
             </div>
             <span class="cnc-view-bar-gap"></span>
-            <button
-              :if={@program != nil and @view_mode == :top}
+            <%!-- Always there, same size: no shift when a file loads or the
+                 zoom changes (in 3D the viewport has its own views) --%>
+            <div
               id="zoom-toggle"
-              type="button"
-              class="cnc-btn cnc-zoom"
-              phx-click="toggle_zoom"
-              aria-pressed={to_string(@zoom == :file)}
+              class={["cnc-seg cnc-seg--small cnc-zoom-seg", @view_mode != :top && "is-hidden"]}
+              role="group"
+              aria-label="Zoom"
             >
-              {if @zoom == :file, do: "Whole bed", else: "Zoom to file"}
-            </button>
-            <%!-- Touch layouts: the rarely used things --%>
-            <div class="cnc-more">
               <button
+                :for={{z, label} <- [bed: "Bed", file: "File"]}
                 type="button"
                 class="cnc-btn"
-                phx-click="toggle_more"
-                aria-expanded={to_string(@more?)}
-                aria-controls="more-menu"
-                aria-label="More"
+                id={"zoom-#{z}"}
+                phx-click="zoom"
+                phx-value-zoom={z}
+                aria-pressed={to_string(@zoom == z)}
+                disabled={z == :file and @program == nil}
               >
-                <.icon name="hero-ellipsis-horizontal" class="ui-btn-icon" /> More
+                {label}
               </button>
-              <div :if={@more?} id="more-menu" class="cnc-more-menu" phx-click-away="close_more">
-                <p class="cnc-sub">{firmware_label(@machine.controller_info)}</p>
-                <button
-                  type="button"
-                  class="cnc-btn"
-                  phx-click={
-                    JS.dispatch("bed:clear-trail", to: "#bed")
-                    |> JS.push("close_more")
-                  }
-                >
-                  Clear trail
-                </button>
-                <button
-                  type="button"
-                  class="cnc-btn"
-                  phx-click={JS.push("open_file") |> JS.push("close_more")}
-                >
-                  {if @program, do: "File: #{@program.name}", else: "Open file"}
-                </button>
-                <button
-                  type="button"
-                  class="cnc-btn"
-                  phx-click={JS.push("toggle_details") |> JS.push("close_more")}
-                >
-                  {if @details?, do: "Hide console", else: "Console"}
-                </button>
-                <button
-                  type="button"
-                  class="cnc-btn"
-                  phx-click={JS.push("reset") |> JS.push("close_more")}
-                  disabled={!@machine.connected?}
-                >
-                  Reset controller
-                </button>
-              </div>
             </div>
           </div>
           <UI.viewport
@@ -630,9 +593,6 @@ defmodule CNCWeb.MachineLive do
             </h2>
             <.frame_switch machine={@machine} frame={@frame} />
           </div>
-          <span class="cnc-dro-frame" aria-hidden="true">
-            {if frame(@machine, @frame) == :work, do: "work", else: "mach"}
-          </span>
           <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
             <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
             <%!-- Work tab: tap the work position to type it. Machine tab: the
@@ -696,7 +656,7 @@ defmodule CNCWeb.MachineLive do
         <section class="cnc-ctl" aria-label="Jog and zero">
           <div class="cnc-seg cnc-tabs" role="group" aria-label="Control mode">
             <button
-              :for={{mode, label} <- [joystick: "Stick", step: "Step", zero: "Zero"]}
+              :for={{mode, label} <- [joystick: "Stick", step: "Step"]}
               type="button"
               class={["cnc-btn", "cnc-tab--#{mode}"]}
               aria-pressed={to_string(@control_mode == mode)}
@@ -802,47 +762,6 @@ defmodule CNCWeb.MachineLive do
                   <span class="cnc-unit">{@step} mm</span>
                 </button>
               </div>
-            </div>
-
-            <%!-- Zero: set where the work is (controller layouts; the workstation
-                 has these next to the readout) --%>
-            <div :if={@control_mode == :zero} class="cnc-zero">
-              <.frame_switch machine={@machine} frame={@frame} />
-              <div class="cnc-zero-axes">
-                <button
-                  type="button"
-                  class="cnc-btn"
-                  phx-click="zero"
-                  phx-value-axes="xy"
-                  disabled={@machine.state != :idle}
-                >
-                  Zero X/Y
-                </button>
-                <button
-                  type="button"
-                  class="cnc-btn is-z"
-                  phx-click="zero"
-                  phx-value-axes="z"
-                  disabled={@machine.state != :idle}
-                >
-                  Zero Z
-                </button>
-              </div>
-              <div class="cnc-zero-axes">
-                <button
-                  type="button"
-                  class="cnc-btn"
-                  phx-click="go_to_zero"
-                  disabled={not can_go_to_zero?(@machine)}
-                >
-                  Go to work zero
-                </button>
-              </div>
-              <.work_zero_row :if={@machine.wco} machine={@machine} />
-              <p class="cnc-sub">
-                Zero X/Y at the stock's corner, Zero Z on its surface. To type a value,
-                tap a work position, or the work zero above.
-              </p>
             </div>
           </div>
         </section>
@@ -1105,20 +1024,6 @@ defmodule CNCWeb.MachineLive do
               "Typed moves skip the jog safety stop and the travel limit. ↑ and ↓ recall earlier commands."}
           </p>
         </section>
-        <%!-- Controller: Hold always in reach, at the bottom (thumb zone);
-             Resume beside it, enabled only when there's a hold to release --%>
-        <nav class="cnc-dock" aria-label="Hold and resume">
-          <UI.hold_button id="dock-hold" class="cnc-dock-hold" />
-          <button
-            type="button"
-            id="dock-resume"
-            class="cnc-btn"
-            phx-click="resume"
-            disabled={not held?(@machine)}
-          >
-            Resume
-          </button>
-        </nav>
       </div>
     </Layouts.app>
     """

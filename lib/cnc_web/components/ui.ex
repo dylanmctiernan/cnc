@@ -3,6 +3,22 @@ defmodule CNCWeb.UI do
   The component kit: every page is built from these, styled by the design
   tokens in app.css (`ui-*` classes), with no one-off CSS of its own.
 
+  Rules every screen follows:
+
+    * **No layout shift.** Controls never appear, disappear or change size
+      under the operator's hand: something that's sometimes unavailable is
+      disabled, not removed (Resume, the zoom's File); labels that change
+      keep their size; things that come and go (notes, dialogs, covers) lie
+      over the content instead of pushing it. `mix e2e.layout` checks this
+      in a browser against the dev server; add a step for each new
+      interaction (assets/e2e/layout_shift.mjs).
+    * **Grey is normal, colour means attention** (ISA-101): a calm state
+      gets a small mark, not a coloured block; never colour alone.
+    * **Hold is always in reach** and never covered.
+    * **Desktop first:** the workstation is for screens of at least
+      1024 x 600 (a tablet sideways counts); phones and tablets upright get
+      the pendant (`Layouts.app` says so below that size).
+
     * `page_header/1` — a page's title, what it's for, and its actions
     * `section/1` — a titled group on a page
     * `card/1` — one thing (a profile, a controller), optionally selected
@@ -281,7 +297,6 @@ defmodule CNCWeb.UI do
     """
   end
 
-  @doc "Collapse or expand the shell's rail (desktop), or open/close it (narrow screens)."
+  @doc "Collapse or expand the shell's rail."
   def toggle_rail(js \\ %JS{}), do: JS.toggle_class(js, "is-collapsed", to: "#shell")
-  def toggle_drawer(js \\ %JS{}), do: JS.toggle_class(js, "is-open", to: "#shell")
 end

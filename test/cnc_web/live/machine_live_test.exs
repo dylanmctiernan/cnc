@@ -194,50 +194,22 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> has_element?(view, ".cnc-meta-firmware dd") end)
   end
 
-  test "touch layouts: the dock's Hold cancels a jog; More holds the secondary actions", %{
-    conn: conn,
-    m: m
-  } do
+  test "Hold in the header cancels a jog; Resume only when held", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
     assert eventually(fn -> Machine.status(m).state == :idle end)
+    assert has_element?(view, "#bar-resume[disabled]")
 
     render_hook(view, "jog", %{"x" => 1, "y" => 0, "tier" => "normal"})
     assert Machine.status(m).state == :jogging
-    view |> element("#dock-hold") |> render_click()
-    assert Machine.status(m).state == :idle
-
-    view |> element(".cnc-more > button", "More") |> render_click()
-    assert has_element?(view, "#nav-controllers")
-    assert has_element?(view, ".cnc-more button", "Clear trail")
-    view |> element(".cnc-more button", "Reset controller") |> render_click()
-    refute has_element?(view, "#more-menu")
+    view |> element("#bar-hold") |> render_click()
+    assert eventually(fn -> Machine.status(m).state != :jogging end)
   end
 
-  test "controller: Zero mode zeroes axes and switches work/machine", %{conn: conn, m: m} do
+  test "the zoom is always there: File waits for a file", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> Machine.status(m).state == :idle end)
-
-    assert eventually(fn -> render(view) =~ "Work position" end)
-    view |> element("button[phx-value-mode=zero]") |> render_click()
-
-    assert eventually(fn ->
-             not has_element?(view, ".cnc-zero button[phx-value-axes=xy][disabled]")
-           end)
-
-    view |> element(".cnc-zero button[phx-value-axes=xy]") |> render_click()
-
-    assert eventually(fn ->
-             match?({wx, wy, _} when abs(wx) < 0.001 and abs(wy) < 0.001, Machine.status(m).wpos)
-           end)
-
-    view |> element(".cnc-zero button[phx-value-frame=machine]") |> render_click()
-    assert has_element?(view, ".cnc-zero button[phx-value-frame=machine][aria-pressed=true]")
-
-    view |> element("button[phx-value-mode=joystick]") |> render_click()
-    refute has_element?(view, ".cnc-zero")
-    assert has_element?(view, "#joystick")
+    assert has_element?(view, "#zoom-bed")
+    assert has_element?(view, "#zoom-file[disabled]")
   end
 
   test "Add to Home Screen: manifest and Apple tags", %{conn: conn} do
@@ -373,10 +345,10 @@ defmodule CNCWeb.MachineLiveTest do
     # The other screen has it too (one program for the whole app).
     assert eventually(fn -> has_element?(other, ".cnc-file-side", "sample.nc") end)
 
-    # Loading zooms the map to the file; the toggle goes back to the whole bed.
-    assert has_element?(view, "#zoom-toggle", "Whole bed")
-    view |> element("#zoom-toggle") |> render_click()
-    assert has_element?(view, "#zoom-toggle", "Zoom to file")
+    # Loading zooms the map to the file; Bed goes back to the whole bed.
+    assert has_element?(view, "#zoom-file[aria-pressed=true]")
+    view |> element("#zoom-bed") |> render_click()
+    assert has_element?(view, "#zoom-bed[aria-pressed=true]")
 
     view |> element("#file-dialog button", "Clear file") |> render_click()
     assert eventually(fn -> not has_element?(other, ".cnc-file-side") end)

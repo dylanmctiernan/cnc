@@ -865,12 +865,7 @@ button {
 }
 /* Touch screens: the on-screen number pad covers the bottom half, so the
    cells sit in the upper part where it never reaches. */
-@media (pointer: coarse) {
-  .cnc-pin {
-    place-items: start center;
-    padding-top: max(12vh, env(safe-area-inset-top));
-  }
-}
+
 .cnc-pin-form {
   display: grid;
   justify-items: center;
@@ -1090,33 +1085,7 @@ a.cnc-btn {
 }
 
 /* Settings on narrow screens: one column per setting, input full width */
-@media (max-width: 40rem) {
-  .cnc-settings {
-    padding: 0.75rem 0.5rem 2rem;
-  }
-  .cnc-set-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .cnc-set-label {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .cnc-set-input input {
-    flex: 1;
-    width: auto;
-    min-width: 0;
-  }
-  .cnc-set-input .cnc-unit {
-    min-width: 0;
-  }
-  .cnc-page-title {
-    margin-right: 0;
-    order: -1;
-    width: 100%;
-  }
-  .cnc-review-box {
-    padding: 1rem;
-  }
-}
+
 
 /* ---------------------------------------------------------------------------
    Machine screen layout. Mobile first: the base is the controller, for
@@ -1148,14 +1117,7 @@ body {
   user-select: none;
 }
 /* Every touch target at least 44 pt (Apple HIG) */
-@media (pointer: coarse) {
-  .cnc-btn,
-  .cnc-btn--quiet,
-  .cnc-seg--small .cnc-btn,
-  .cnc-check {
-    min-height: 44px;
-  }
-}
+
 
 .cnc {
   display: grid;
@@ -1416,11 +1378,7 @@ body {
 .cnc-help-list dd {
   margin-bottom: 0.375rem;
 }
-@media (orientation: landscape) and (max-height: 31.99rem) {
-  .cnc-term-hint:not(.is-error) {
-    display: none;
-  }
-}
+
 @media (min-width: 40rem) {
   .cnc-help-list {
     grid-template-columns: minmax(11rem, auto) 1fr;
@@ -1435,258 +1393,185 @@ body {
 }
 
 /* Upright tablets: same controller, roomier, content kept to a thumb's width */
-@media (min-width: 40rem) {
-  .cnc-ctl {
-    padding-inline: max(0.75rem, calc((100% - 36rem) / 2));
-  }
-  .cnc-dro {
-    padding-inline: max(0.75rem, calc((100% - 48rem) / 2));
-  }
-  .cnc-num {
-    font-size: 1.75rem;
-  }
-  .cnc-speed .cnc-unit {
-    display: inline;
-    margin-left: 0.375rem;
-  }
-  .cnc-ctl {
-    --joy: min(15rem, calc(100dvh - 30rem));
-  }
-}
+
 
 /* Sideways (phones and iPads): readout, map and Stop on the left; the
    controller alone in a column on the right, under the right thumb. */
-@media (orientation: landscape) {
-  .cnc {
-    grid-template-columns: minmax(0, 1fr) clamp(18rem, 34vw, 26rem);
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-    grid-template-areas:
-      "status status"
-      "msgs msgs"
-      "dro ctl"
-      "view ctl"
-      "dock ctl";
-  }
-  .cnc-view {
-    padding-left: env(safe-area-inset-left);
-  }
-  .cnc-dro {
-    padding-inline: max(0.5rem, env(safe-area-inset-left)) 0.5rem;
-  }
-  .cnc-dock {
-    padding-inline: max(0.5rem, env(safe-area-inset-left)) 0.5rem;
-  }
-  .cnc-ctl {
-    grid-template-columns: minmax(0, 1fr);
-    padding-inline: 0.5rem max(0.5rem, env(safe-area-inset-right));
-    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
-    border-top: 0;
-    border-left: 1px solid var(--line);
-    overflow-y: auto;
-  }
-  .cnc-num {
-    font-size: 1.25rem;
-  }
-  .cnc-ctl {
-    --joy: min(18rem, calc(100dvh - 11.5rem), calc(clamp(18rem, 34vw, 26rem) - 6.5rem));
-  }
-  .cnc-joy {
-    grid-template-columns: var(--joy) 3.75rem;
-  }
-  .cnc-console {
-    grid-column: 1;
-  }
-}
+
 /* Phones sideways: every pixel of height counts */
-@media (orientation: landscape) and (max-height: 31.99rem) {
-  .cnc-bar {
-    padding-top: max(0.25rem, env(safe-area-inset-top));
-    padding-bottom: 0.25rem;
-  }
-  .cnc-state {
-    min-height: 2.25rem;
-  }
-  .cnc-dock .cnc-btn {
-    min-height: 2.75rem;
-  }
-}
+
 
 /* ---------------------------------------------------------------------------
    Workstation: wide screen with a mouse. Status and machine actions across
    the top (Stop first), map on the left, readout + jog + details on the
    right, console docked along the bottom. Keyboard is the main jog input.
    --------------------------------------------------------------------------- */
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) {
-  .cnc {
-    grid-template-columns: minmax(0, 1fr) 24rem;
-    grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
-    grid-template-areas:
-      "status status"
-      "msgs msgs"
-      "view dro"
-      "view ctl"
-      "view side"
-      "console console";
-  }
-  .cnc-more,
-  .cnc-dock,
-  .cnc-tab--zero,
-  .cnc-dro-frame,
-  .cnc-console-close {
-    display: none;
-  }
-  .cnc-meta,
-  .cnc-actions {
-    display: flex;
-  }
-  /* One row that never re-wraps: the readouts have fixed widths, long
-     text is cut with an ellipsis. A changing feed can't move the header. */
-  .cnc-bar {
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 0.5rem 1.25rem;
-    padding: 0.5rem 0.75rem;
-  }
-  .cnc-meta {
-    flex: 1 1 auto;
-    flex-wrap: nowrap;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .cnc-meta div {
-    min-width: 0;
-  }
-  .cnc-meta dd {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .cnc-meta-firmware,
-  .cnc-meta-linkinfo {
-    flex: 0 1 auto;
-  }
-  .cnc-meta-reports dd {
-    width: 8ch;
-  }
-  .cnc-meta-reports {
-    flex: none;
-  }
-  .cnc-bar > .cnc-state,
-  .cnc-actions {
-    flex: none;
-  }
-  .cnc-actions {
-    flex-wrap: nowrap;
-  }
-  .cnc-state {
-    min-width: 9rem;
-    min-height: var(--touch);
-    font-size: 1rem;
-  }
-  .cnc-actions {
-    margin-left: auto;
-  }
-  .cnc-note,
-  .cnc-lock {
-    font-size: 0.875rem;
-    padding: 0.5rem 0.75rem;
-  }
-  .cnc-lock-tag {
-    display: inline;
-  }
-
-  .cnc-view {
-    padding: 0;
-  }
-  .cnc-dro,
-  .cnc-ctl,
-  .cnc-side {
-    padding: 0.75rem;
-    border-left: 1px solid var(--line);
-    background: var(--panel);
-  }
-  .cnc-dro {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.25rem;
-    border-bottom: 0;
-  }
-  .cnc-dro-head {
-    display: flex;
-  }
-  .cnc-dro-other {
-    display: block;
-  }
-  .cnc-dro-tools {
-    display: flex;
-  }
-  .cnc-dro-row {
-    grid-template-columns: 2rem 1fr;
-    gap: 0.5rem;
-    padding: 0.25rem 0.625rem;
-  }
-  .cnc-num {
-    font-size: 1.875rem;
-  }
-  .cnc-ctl {
-    overflow: visible;
-  }
-  .cnc[data-mode="step"] .cnc-speed {
-    display: flex;
-  }
-  .cnc-ctl {
-    --joy: min(13rem, calc(100dvh - 30rem));
-    border-top: 1px solid var(--line);
-  }
-  .cnc-joy {
-    grid-template-columns: var(--joy) 4rem;
-  }
-  .cnc-pendant-btn {
-    font-size: 1.375rem;
-  }
-  .cnc-side {
-    grid-area: side;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    overflow-y: auto;
-    border-top: 1px solid var(--line);
-  }
-  .cnc-console {
-    grid-area: console;
-  }
-  .cnc-console-bar {
-    gap: 1rem;
-    padding: 0.25rem 0.75rem;
-  }
-  .cnc-console-bar .cnc-h {
-    display: block;
-  }
-  .cnc-console-bar .cnc-check {
-    margin-right: 0;
-  }
-  .cnc-wide-only {
-    display: inline;
-  }
-  .cnc-log {
-    flex: none;
-    height: 14rem;
-    padding-inline: 0.75rem;
-    font-size: 0.8125rem;
-  }
-  .cnc-log-row {
-    grid-template-columns: 7.5rem 1.25rem 1fr;
-  }
-  .cnc-term input {
-    font-size: inherit;
-  }
+.cnc {
+  grid-template-columns: minmax(0, 1fr) 24rem;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "status status"
+    "msgs msgs"
+    "view dro"
+    "view ctl"
+    "view side"
+    "console console";
 }
+.cnc-more,
+.cnc-dock,
+.cnc-tab--zero,
+.cnc-dro-frame,
+.cnc-console-close {
+  display: none;
+}
+.cnc-meta,
+.cnc-actions {
+  display: flex;
+}
+/* One row that never re-wraps: the readouts have fixed widths, long
+   text is cut with an ellipsis. A changing feed can't move the header. */
+.cnc-bar {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  padding: 0.5rem 0.75rem;
+}
+.cnc-meta {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+.cnc-meta div {
+  min-width: 0;
+}
+.cnc-meta dd {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cnc-meta-firmware,
+.cnc-meta-linkinfo {
+  flex: 0 1 auto;
+}
+.cnc-meta-reports dd {
+  width: 8ch;
+}
+.cnc-meta-reports {
+  flex: none;
+}
+.cnc-bar > .cnc-state,
+.cnc-actions {
+  flex: none;
+}
+.cnc-actions {
+  flex-wrap: nowrap;
+}
+.cnc-state {
+  min-width: 9rem;
+  min-height: var(--touch);
+  font-size: 1rem;
+}
+.cnc-actions {
+  margin-left: auto;
+}
+.cnc-note,
+.cnc-lock {
+  font-size: 0.875rem;
+  padding: 0.5rem 0.75rem;
+}
+.cnc-lock-tag {
+  display: inline;
+}
+
+.cnc-view {
+  padding: 0;
+}
+.cnc-dro,
+.cnc-ctl,
+.cnc-side {
+  padding: 0.75rem;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+}
+.cnc-dro {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.25rem;
+  border-bottom: 0;
+}
+.cnc-dro-head {
+  display: flex;
+}
+.cnc-dro-other {
+  display: block;
+}
+.cnc-dro-tools {
+  display: flex;
+}
+.cnc-dro-row {
+  grid-template-columns: 2rem 1fr;
+  gap: 0.5rem;
+  padding: 0.25rem 0.625rem;
+}
+.cnc-num {
+  font-size: 1.875rem;
+}
+.cnc-ctl {
+  overflow: visible;
+}
+.cnc[data-mode="step"] .cnc-speed {
+  display: flex;
+}
+.cnc-ctl {
+  --joy: min(13rem, calc(100dvh - 30rem));
+  border-top: 1px solid var(--line);
+}
+.cnc-joy {
+  grid-template-columns: var(--joy) 4rem;
+}
+.cnc-pendant-btn {
+  font-size: 1.375rem;
+}
+.cnc-side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+.cnc-console {
+  grid-area: console;
+}
+.cnc-console-bar {
+  gap: 1rem;
+  padding: 0.25rem 0.75rem;
+}
+.cnc-console-bar .cnc-h {
+  display: block;
+}
+.cnc-console-bar .cnc-check {
+  margin-right: 0;
+}
+.cnc-wide-only {
+  display: inline;
+}
+.cnc-log {
+  flex: none;
+  height: 14rem;
+  padding-inline: 0.75rem;
+  font-size: 0.8125rem;
+}
+.cnc-log-row {
+  grid-template-columns: 7.5rem 1.25rem 1fr;
+}
+.cnc-term input {
+  font-size: inherit;
+}
+
 
 /* Short screens (iPhone SE, phones sideways): drop the Zero explainer */
-@media (max-height: 46rem) {
-  .cnc-zero > .cnc-sub {
-    display: none;
-  }
-}
+
 
 /* G-code file: dialog, drop zone, summary. The dialog sits in the screen
    grid like the console sheet, between the status bar and the dock, so Stop
@@ -1706,17 +1591,12 @@ body {
   max-height: 100%;
   overflow: auto;
 }
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) {
-  .cnc-file-dialog {
-    grid-row: 2 / -1;
-  }
+.cnc-file-dialog {
+  grid-row: 2 / -1;
 }
+
 /* Touch: near the top, so the on-screen keyboard doesn't cover the input */
-@media (pointer: coarse) {
-  .cnc-file-dialog {
-    place-items: start center;
-  }
-}
+
 .cnc-sr-only {
   position: absolute;
   width: 1px;
@@ -1820,17 +1700,17 @@ body {
 }
 
 /* Narrower workstations: the header keeps state, reports and the actions */
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 100rem) {
+@media (max-width: 100rem) {
   .cnc-meta .cnc-meta-firmware {
     display: none;
   }
 }
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 86rem) {
+@media (max-width: 86rem) {
   .cnc-meta .cnc-meta-linkinfo {
     display: none;
   }
 }
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) and (max-width: 76rem) {
+@media (max-width: 76rem) {
   .cnc-meta div:has(> dd.is-on),
   .cnc-meta div:has(> dd.is-off) {
     display: none;
@@ -1873,11 +1753,10 @@ body {
 .cnc-dro > .cnc-zero-row {
   display: none;
 }
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) {
-  .cnc-dro > .cnc-zero-row {
-    display: flex;
-  }
+.cnc-dro > .cnc-zero-row {
+  display: flex;
 }
+
 
 /* Map: zoom to the loaded file / back to the whole bed */
 .cnc-view {
@@ -2033,11 +1912,7 @@ body {
   grid-template-columns: 2fr 1fr;
   gap: 0.75rem;
 }
-@media (max-width: 40rem) {
-  .cnc-other-row {
-    grid-template-columns: 1fr;
-  }
-}
+
 .cnc-now {
   margin-left: 0.5em;
   color: var(--text-dim);
@@ -2253,18 +2128,7 @@ body {
 .cnc-rev-body {
   padding: 0 0.25rem 0.75rem 4.25rem;
 }
-@media (max-width: 40rem) {
-  .cnc-rev-head {
-    grid-template-columns: 3rem minmax(0, 1fr);
-  }
-  .cnc-rev-meta {
-    grid-column: 2;
-    white-space: normal;
-  }
-  .cnc-rev-body {
-    padding-left: 0.25rem;
-  }
-}
+
 
 /* Override: upload or paste */
 .cnc-override {
@@ -2280,11 +2144,7 @@ body {
   gap: 0.75rem;
   margin: 0.75rem 0;
 }
-@media (max-width: 40rem) {
-  .cnc-override-ways {
-    grid-template-columns: 1fr;
-  }
-}
+
 .cnc-drop,
 .cnc-paste {
   display: flex;
@@ -2605,46 +2465,6 @@ body {
 .ui-main {
   min-width: 0;
 }
-.ui-topbar {
-  display: none;
-}
-.ui-spacer {
-  flex: 1;
-}
-
-/* Narrow screens: a top bar (state and Stop always in reach), the rail as a drawer */
-@media (max-width: 48rem) {
-  .ui-shell,
-  .ui-shell.is-collapsed {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ui-topbar {
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    border-bottom: 1px solid var(--border-faint);
-    background: var(--surface-rail);
-  }
-  .ui-rail {
-    position: fixed;
-    inset: 0 auto 0 0;
-    z-index: 50;
-    width: min(18rem, 85vw);
-    transform: translateX(-100%);
-    transition: transform 160ms ease;
-  }
-  .ui-shell.is-open .ui-rail {
-    transform: none;
-    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
-  }
-  .ui-shell .ui-rail-machine {
-    display: none;
-  }
-}
 
 /* Page structure */
 .ui-page {
@@ -2653,11 +2473,7 @@ body {
   margin: 0 auto;
   padding: var(--space-6) var(--space-6) var(--space-12);
 }
-@media (max-width: 48rem) {
-  .ui-page {
-    padding: var(--space-4) var(--space-4) var(--space-12);
-  }
-}
+
 .ui-page-header {
   display: flex;
   flex-wrap: wrap;
@@ -3262,14 +3078,7 @@ body {
   gap: var(--space-3);
 }
 /* Phones: the shell's top bar already shows the state and Stop */
-@media (max-width: 48rem) {
-  .cnc-bar > .cnc-state {
-    display: none;
-  }
-  .cnc-bar {
-    padding-block: var(--space-1);
-  }
-}
+
 .cnc-run-group {
   display: flex;
   align-items: center;
@@ -3413,44 +3222,43 @@ body {
 }
 
 /* The workstation's panels: one rhythm of padding, borders and headings */
-@media (hover: hover) and (pointer: fine) and (min-width: 64rem) {
-  .cnc-dro,
-  .cnc-ctl,
-  .cnc-side {
-    padding: var(--space-3) var(--space-4);
-    border-left-color: var(--border-faint);
-    background: var(--surface-1);
-  }
-  .cnc-ctl,
-  .cnc-side {
-    border-top-color: var(--border-faint);
-  }
-  .cnc-dro-tools {
-    margin-top: var(--space-1);
-  }
-  .cnc-side {
-    gap: var(--space-2);
-  }
-  .cnc-side > .cnc-h:not(:first-child) {
-    margin-top: var(--space-3);
-  }
-  .cnc-file-side {
-    border-bottom-color: var(--border-faint);
-  }
-  .cnc-facts,
-  .cnc-keys {
-    font-size: var(--text-sm);
-  }
-  .cnc-facts dt,
-  .cnc-keys dd {
-    color: var(--text-muted);
-  }
-  .cnc-keys dt {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text);
-  }
+.cnc-dro,
+.cnc-ctl,
+.cnc-side {
+  padding: var(--space-3) var(--space-4);
+  border-left-color: var(--border-faint);
+  background: var(--surface-1);
 }
+.cnc-ctl,
+.cnc-side {
+  border-top-color: var(--border-faint);
+}
+.cnc-dro-tools {
+  margin-top: var(--space-1);
+}
+.cnc-side {
+  gap: var(--space-2);
+}
+.cnc-side > .cnc-h:not(:first-child) {
+  margin-top: var(--space-3);
+}
+.cnc-file-side {
+  border-bottom-color: var(--border-faint);
+}
+.cnc-facts,
+.cnc-keys {
+  font-size: var(--text-sm);
+}
+.cnc-facts dt,
+.cnc-keys dd {
+  color: var(--text-muted);
+}
+.cnc-keys dt {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text);
+}
+
 
 
 /* A note inside the file summary: a stacked callout, not a banner */
@@ -3499,11 +3307,7 @@ body {
   background: color-mix(in srgb, var(--surface-2) 92%, transparent);
 }
 /* Phones: the bar would be empty (state and Stop are in the shell's top bar) */
-@media (max-width: 48rem) {
-  .cnc-bar {
-    display: none;
-  }
-}
+
 
 /* Touch layouts' dock: Hold fills its slot */
 .cnc-dock .cnc-dock-hold {
@@ -3755,10 +3559,9 @@ body {
   vertical-align: 0.35em;
 }
 
-/* Hold is never covered: the rail (and the phone's top bar) sit above
-   dialogs and the pending-changes bar, so Hold stays visible and usable */
-.ui-rail,
-.ui-topbar {
+/* Hold is never covered: the rail sits above dialogs and the
+   pending-changes bar, so Hold stays visible and usable */
+.ui-rail {
   z-index: 70;
 }
 
@@ -3848,3 +3651,100 @@ body {
   border-color: var(--border);
 }
 
+/* Jog speeds show their mm/s beside the name */
+.cnc-speed .cnc-unit {
+  display: inline;
+  margin-left: 0.375rem;
+}
+
+/* Notes (Locked, Undo zero, errors) lie over the map, under its toolbar:
+   appearing never moves anything */
+.cnc-messages {
+  margin-top: 2.75rem;
+}
+
+/* Below the workstation's size (1024 x 600): say so, point to the
+   pendant, keep the state and Hold in reach. "Use anyway" (html.cnc-anyway)
+   shows the workstation regardless. */
+.ui-too-small {
+  display: none;
+}
+@media (max-width: 63.99rem), (max-height: 37.49rem) {
+  html:not(.cnc-anyway) .ui-too-small {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: var(--space-6) var(--space-4);
+    overflow: auto;
+    background: var(--surface-0);
+  }
+  html:not(.cnc-anyway) .ui-shell > .ui-rail,
+  html:not(.cnc-anyway) .ui-shell > .ui-main {
+    visibility: hidden;
+  }
+}
+.ui-too-small-box {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 28rem;
+  text-align: center;
+  justify-items: center;
+}
+.ui-too-small-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--text-muted);
+}
+.ui-too-small-machine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.ui-too-small-machine .ui-pill {
+  min-height: 2.5rem;
+  padding: 0 var(--space-4);
+}
+
+
+/* A tablet sideways gets the workstation: finger-sized targets (44 px,
+   Apple HIG / WCAG 2.5.5) when the main pointer is a finger */
+@media (pointer: coarse) {
+  .cnc-btn,
+  .ui-btn,
+  .ui-hold,
+  .cnc-seg--small .cnc-btn,
+  .cnc-zero-val {
+    min-height: 44px;
+  }
+}
+
+/* Smaller desktops (under 1280 px): the rail is icons only, as in most
+   desktop apps, so the map and the panels keep their room */
+@media (max-width: 79.99rem) {
+  .ui-shell,
+  .ui-shell.is-collapsed {
+    grid-template-columns: var(--rail-collapsed) minmax(0, 1fr);
+  }
+  .ui-shell .ui-nav-label,
+  .ui-shell .ui-brand,
+  .ui-shell .ui-rail-toggle {
+    display: none;
+  }
+  .ui-rail .ui-rail-machine .ui-pill {
+    min-height: 0;
+    width: 0.75rem;
+    height: 0.75rem;
+    padding: 0;
+    font-size: 0;
+    justify-self: center;
+  }
+  .ui-rail .ui-rail-machine .ui-pill .ui-dot {
+    display: none;
+  }
+  .ui-rail .ui-hold {
+    padding: 0;
+    font-size: var(--text-xs);
+  }
+}

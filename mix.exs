@@ -87,6 +87,8 @@ defmodule CNC.MixProject do
         "esbuild cnc --minify",
         "phx.digest"
       ],
+      # Layout stability against the running dev server (see assets/e2e)
+      "e2e.layout": ["cmd --cd assets node e2e/layout_shift.mjs"],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end
