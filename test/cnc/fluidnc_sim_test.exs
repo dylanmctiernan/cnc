@@ -3,7 +3,7 @@ defmodule CNC.FluidNCSimTest do
   CNC.Machine against real FluidNC firmware running natively
   (`CNC.Transport.FluidNCSim`), with this machine's `fluidnc/sim.yaml`.
 
-  Runs when FluidNC has been built (`fluidnc/build.sh`); skipped otherwise
+  Runs when FluidNC has been built (`mix cnc.fluidnc.build`); skipped otherwise
   (see test_helper.exs). Each test starts its own FluidNC in a temporary
   directory, at machine position 0,0,0.
   """

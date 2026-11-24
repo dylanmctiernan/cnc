@@ -36,5 +36,5 @@ npm-debug.log
 /assets/node_modules/
 
 
-# Native FluidNC build (fluidnc/build.sh)
+# Native FluidNC build (mix cnc.fluidnc.build)
 /.fluidnc/

@@ -4,7 +4,7 @@ defmodule CNC.Transport.UARTFluidNCTest do
   CNC.Transport.UART → a virtual serial port → real FluidNC (the FluidNC sim
   running as the port's terminal, via test/support/fluidnc_serial.py).
 
-  Runs when FluidNC has been built (fluidnc/build.sh).
+  Runs when FluidNC has been built (mix cnc.fluidnc.build).
   """
   use ExUnit.Case, async: true
   @moduletag :fluidnc_sim

@@ -39,7 +39,7 @@ if config_env() == :dev and System.get_env("CNC_LAN") in ~w(1 true) do
   config :cnc, CNCWeb.Endpoint, http: [ip: {0, 0, 0, 0}]
 end
 
-# Controller link. Dev uses native FluidNC once built (fluidnc/build.sh),
+# Controller link. Dev uses native FluidNC once built (mix cnc.fluidnc.build),
 # else the fake sim; tests always use the fake sim (config.exs).
 #   CNC_TRANSPORT=fluidnc mix phx.server         # native FluidNC, fluidnc/sim.yaml
 #   CNC_TRANSPORT=fake mix phx.server            # fake sim (built in)

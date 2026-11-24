@@ -1,4 +1,4 @@
-# FluidNC configuration: the FluidNC sim, a native build on this computer (fluidnc/build.sh),
+# FluidNC configuration: the FluidNC sim, a native build on this computer (mix cnc.fluidnc.build),
 # the dev controller. Runs automatically with `mix phx.server`.
 #
 # Same axes as esp32_bench.yaml: travel, speeds, acceleration and homing

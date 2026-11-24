@@ -24,7 +24,7 @@ The web layer can only reach `CNC.Machine`; protocol and transport stay private 
 ```sh
 mise install        # Erlang/Elixir from .mise.toml
 mix setup
-fluidnc/build.sh    # once: real FluidNC firmware, built to run on this Mac
+mix cnc.fluidnc.build    # once: real FluidNC firmware, built to run on this Mac
 mix phx.server      # http://localhost:4000
 mix test
 ```
@@ -41,7 +41,7 @@ The FluidNC sim has no switches, so homing is off (`$22=0`): Unlock instead. Edi
 ### Against the real board (FluidNC over USB)
 
 Flash the bench ESP32 with FluidNC (same pinned commit as the sim) and
-`fluidnc/esp32_bench.yaml`: `fluidnc/flash.sh /dev/cu.usbserial-0001`. The
+`fluidnc/esp32_bench.yaml`: `mix cnc.fluidnc.flash /dev/cu.usbserial-0001`. The
 first session is in `docs/bench-esp32.md`.
 
 ```sh

@@ -1,6 +1,6 @@
 defmodule CNC.Transport.FluidNCSim do
   @moduledoc """
-  Link to FluidNC running natively on this computer (see `fluidnc/build.sh`):
+  Link to FluidNC running natively on this computer (see `mix cnc.fluidnc.build`):
   the real firmware as a child program, spoken to over its stdin/stdout.
 
   Each connect starts a fresh FluidNC with the current `fluidnc/sim.yaml`,
@@ -112,7 +112,7 @@ defmodule CNC.Transport.FluidNCSim do
       {:noreply, %{s | port: port, os_pid: os_pid}}
     else
       {:error, reason} ->
-        Logger.warning("FluidNC start failed: #{inspect(reason)} (run fluidnc/build.sh)")
+        Logger.warning("FluidNC start failed: #{inspect(reason)} (run mix cnc.fluidnc.build)")
         {:stop, {:shutdown, {:connect_failed, reason}}, s}
     end
   end

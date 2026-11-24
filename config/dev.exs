@@ -58,7 +58,7 @@ config :cnc, CNCWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :cnc, dev_routes: true
 
-# Dev uses native FluidNC once built (fluidnc/build.sh), else the built-in
+# Dev uses native FluidNC once built (mix cnc.fluidnc.build), else the built-in
 # simulator; see runtime.exs.
 
 # Do not include metadata nor timestamps in development logs

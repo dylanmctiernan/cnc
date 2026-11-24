@@ -24,7 +24,7 @@ Record what you find in `docs/bench-log.md`.
 ## 2. Flash FluidNC and the config
 
 ```sh
-fluidnc/flash.sh /dev/cu.usbserial-0001
+mix cnc.fluidnc.flash /dev/cu.usbserial-0001
 ```
 
 This builds FluidNC from the same pinned commit as the FluidNC sim (the
