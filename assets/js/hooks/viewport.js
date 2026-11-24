@@ -66,7 +66,10 @@ export default {
 
     this.handleEvent("pos", ({x, y, z, wco}) => {
       this.tool.position.set(x, y, z)
-      if (wco) this.setWork(wco)
+      if (wco && (wco[0] !== this.wco[0] || wco[1] !== this.wco[1] || wco[2] !== this.wco[2])) {
+        this.setWork(wco)
+        this.buildShadow()
+      }
       this.render()
     })
     this.handleEvent("program", ({path}) => {
@@ -77,6 +80,7 @@ export default {
     this.handleEvent("travel", ({travel}) => {
       this.travel = travel
       this.buildMachine()
+      this.buildShadow()
       this.render()
     })
 
@@ -203,6 +207,34 @@ export default {
     }
   },
 
+  // Height made readable: the cut's shadow on the bed (where it is in X/Y)
+  // and a dashed line from the work zero down to the bed (how high it is).
+  // Before Z is touched off, the work Z zero is still at the top of travel,
+  // so the path really is up in the air.
+  buildShadow() {
+    if (this.shadow) this.scene.remove(this.shadow)
+    this.shadow = new THREE.Group()
+    const bedZ = this.travel[2][0]
+    const [wx, wy, wz] = this.wco
+    const v = this.pathData
+    if (v && v.length) {
+      const flat = []
+      for (let i = 4; i < v.length; i += 4)
+        if (v[i] === 1) flat.push(v[i - 3] + wx, v[i - 2] + wy, bedZ + 0.2, v[i + 1] + wx, v[i + 2] + wy, bedZ + 0.2)
+      this.shadow.add(lines(flat, this.colors.path, 0.22))
+    }
+    const drop = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(wx, wy, wz),
+        new THREE.Vector3(wx, wy, bedZ),
+      ]),
+      new THREE.LineDashedMaterial({color: this.colors.z, dashSize: 4, gapSize: 3, transparent: true, opacity: 0.7})
+    )
+    drop.computeLineDistances()
+    this.shadow.add(drop)
+    this.scene.add(this.shadow)
+  },
+
   buildPath() {
     if (this.pathLines) this.work.remove(...this.pathLines)
     this.pathLines = []
@@ -228,6 +260,7 @@ export default {
     this.pathLines = [lines(cut, this.colors.path), rapidLines]
     this.work.add(...this.pathLines)
     if (!this.axes) this.setWork(this.wco)
+    this.buildShadow()
   },
 }
 

@@ -3754,3 +3754,97 @@ body {
   font-size: 0.5em;
   vertical-align: 0.35em;
 }
+
+/* Hold is never covered: the rail (and the phone's top bar) sit above
+   dialogs and the pending-changes bar, so Hold stays visible and usable */
+.ui-rail,
+.ui-topbar {
+  z-index: 70;
+}
+
+/* Diffs: the old value muted and struck through, the new one plain. A
+   change isn't good or bad, so no red and green */
+.cnc-diff-from {
+  color: var(--text-faint);
+  text-decoration-color: var(--text-faint);
+}
+.cnc-diff-to {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Staged changes: a quiet bar with the count, and the way to apply them */
+.cnc-pending {
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  box-shadow: inset 0 2px 0 var(--warn), 0 -10px 30px rgb(0 0 0 / 0.35);
+}
+
+/* The G-code file dialog */
+.cnc-file-dialog {
+  background: color-mix(in srgb, var(--surface-0) 75%, transparent);
+}
+.cnc-file-box {
+  border-color: var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.cnc-drop-main {
+  color: var(--text);
+}
+
+/* The map's toolbar: a strip above the drawing, never over it */
+.cnc-view {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.cnc-view-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 2.75rem;
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-faint);
+}
+.cnc-view-bar-gap {
+  flex: 1;
+}
+.cnc-view-bar > .cnc-view-switch,
+.cnc-view-bar > .cnc-zoom,
+.cnc-view-bar > .cnc-more {
+  position: static;
+  transform: none;
+  margin: 0;
+}
+.cnc-view-bar > .cnc-more {
+  position: relative;
+}
+.cnc-view-bar > .cnc-more > .cnc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 2.25rem;
+}
+.cnc-view-bar .cnc-zoom {
+  min-height: 2rem;
+}
+
+/* Work zero values: centred in their boxes, the row aligned */
+.cnc-zero-row {
+  align-items: center;
+}
+.cnc-zero-val {
+  align-items: center;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0 var(--space-2);
+  border-color: var(--border-faint);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  line-height: 1;
+}
+.cnc-zero-val:hover,
+.cnc-zero-val:focus-visible {
+  border-color: var(--border);
+}
+

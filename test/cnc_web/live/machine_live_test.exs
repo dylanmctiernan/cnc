@@ -280,11 +280,30 @@ defmodule CNCWeb.MachineLiveTest do
            end)
   end
 
-  test "Esc stops and holds; keyboard listed", %{conn: conn} do
+  test "Esc holds", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    assert has_element?(view, ".cnc-keys dd", "Hold, always")
     assert render_hook(view, "hold", %{})
   end
+
+  test "zeroing can be undone: the work zero goes back where it was", %{conn: conn, m: m} do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    assert eventually(fn -> Machine.status(m).state == :idle and Machine.status(m).wco end)
+
+    :ok = Machine.set_work_offset(m, x: 10.0, y: 20.0)
+    assert eventually(fn -> match?({10.0, 20.0, _}, Machine.status(m).wco) end)
+    _ = render(view)
+
+    view |> element(".cnc-dro-tools button", "Zero X/Y") |> render_click()
+    assert eventually(fn -> match?({+0.0, +0.0, _}, round_wco(Machine.status(m).wco)) end)
+    assert has_element?(view, "#note-undo-zero")
+
+    view |> element("#undo-zero") |> render_click()
+    assert eventually(fn -> match?({10.0, 20.0, _}, Machine.status(m).wco) end)
+    refute has_element?(view, "#note-undo-zero")
+  end
+
+  defp round_wco({x, y, z}), do: {Float.round(x * 1.0, 3), Float.round(y * 1.0, 3), z}
 
   test "details and console", %{conn: conn, m: m} do
     {:ok, view, _} = live(conn, ~p"/")
