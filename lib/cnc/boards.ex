@@ -88,7 +88,7 @@ defmodule CNC.Boards do
       }
     },
     esp32_devkit: %{
-      label: "ESP32 DevKit (bench)",
+      label: "ESP32 DevKit",
       firmware: :fluidnc,
       links: [:serial, :tcp],
       engine: "RMT",
