@@ -9,7 +9,8 @@ defmodule CNCWeb.ControllersLive do
   on_mount CNCWeb.Pin
 
   alias CNC.{Boards, Controllers, Machine}
-  alias CNC.Controllers.{Controller, Profiles}
+  alias CNC.Configuration
+  alias CNC.Controllers.Controller
 
   @link_labels %{
     fluidnc_sim: "FluidNC sim",
@@ -368,10 +369,11 @@ defmodule CNCWeb.ControllersLive do
 
     seen =
       with true <- live? and connected?(socket),
-           {:ok, %{profile: p, matches?: matches?}} <- Profiles.check(cnc.machine, cnc.db, ctl) do
+           {:ok, %{profile: p, matches?: matches?}} <-
+             Configuration.check(cnc.machine, cnc.db, ctl) do
         %{name: p.name, matches?: matches?}
       else
-        _ -> Profiles.last_seen(cnc.db, ctl.id)
+        _ -> Configuration.last_seen(cnc.db, ctl.id)
       end
 
     case seen do

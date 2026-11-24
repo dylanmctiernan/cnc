@@ -19,7 +19,10 @@ defmodule CNC.Controllers do
   Each FluidNC sim runs in its own folder under the data dir, so its
   config and settings persist across restarts, like a board's flash.
   """
-  use Boundary, deps: [CNC.Machine, CNC.Link, CNC.Boards], exports: [Controller, Config, Profiles]
+  use Boundary,
+    deps: [CNC.Machine, CNC.Link, CNC.Boards, CNC.Configuration],
+    exports: [Controller]
+
   use GenServer
   require Logger
 
@@ -209,7 +212,7 @@ defmodule CNC.Controllers do
         if ctl.link.type in [:fluidnc_sim, :fake_sim],
           do: File.rm_rf(Path.join([s.data_dir, "controllers", id]))
 
-        CNC.Controllers.Config.forget(s.db, id)
+        CNC.Configuration.forget(s.db, id)
 
         {:reply, :ok, save(%{s | controllers: Enum.reject(s.controllers, &(&1.id == id))})}
     end

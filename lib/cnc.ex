@@ -26,8 +26,13 @@ defmodule CNC do
       GCode.Program,
       Controllers,
       Controllers.Controller,
-      Controllers.Config,
-      Controllers.Profiles,
+      Configuration,
+      Configuration.Build,
+      Configuration.FluidNC,
+      Configuration.History,
+      Configuration.Profiles,
+      Configuration.Values,
+      Configuration.Wiring,
       Boards
     ]
 end

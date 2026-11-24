@@ -103,7 +103,7 @@ defmodule CNC.Machine do
   The controller's settings from the last read: `%{n => value}` (values as
   the controller printed them). Re-read after every connect and after a
   setting typed in the console; `State.settings_rev` changes when they do.
-  (Changing the configuration is `CNC.Controllers.Config`.)
+  (Changing the configuration is `CNC.Configuration`.)
   """
   @spec settings(server) :: %{non_neg_integer => String.t()}
   def settings(server \\ __MODULE__), do: call(server, :settings)

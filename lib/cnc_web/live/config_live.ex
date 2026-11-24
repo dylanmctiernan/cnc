@@ -13,7 +13,8 @@ defmodule CNCWeb.ConfigLive do
   on_mount CNCWeb.Pin
 
   alias CNC.{Boards, Controllers, Machine}
-  alias CNC.Controllers.{Config, Profiles}
+  alias CNC.Configuration
+  alias CNC.Configuration.{Build, FluidNC, History, Profiles, Values, Wiring}
 
   import CNCWeb.YamlView, only: [yaml_view: 1]
 
@@ -53,6 +54,7 @@ defmodule CNCWeb.ConfigLive do
          |> assign(editing_current?: false, editing_profile: nil, showing_profile: nil)
          |> assign(diffing_profile: nil, pending: nil)
          |> assign(expanded: MapSet.new(), history_for: nil, paste: "")
+         |> assign(build_history: [], wiring_history: [], current: %{})
          |> allow_upload(:config_file, accept: :any, max_entries: 1, max_file_size: 256_000)
          |> refresh_active()
          |> maybe_load()}
@@ -85,7 +87,7 @@ defmodule CNCWeb.ConfigLive do
   ## Asking first: what would change, approved in a dialog
 
   def handle_event("switch", %{"profile" => pid}, socket) do
-    %{profiles: profiles, check: check, controller: c} = socket.assigns
+    %{profiles: profiles, check: check} = socket.assigns
 
     case Enum.find(profiles, &(&1.id == pid)) do
       nil ->
@@ -110,7 +112,7 @@ defmodule CNCWeb.ConfigLive do
             note:
               "It's written to the controller as its config file; the controller restarts and comes back locked.",
             approve: "Switch and restart",
-            diffs: if(check, do: Profiles.diff(c.board, check.profile, target), else: []),
+            diffs: if(check, do: Profiles.diff(check.profile, target), else: []),
             from_label: check && check.profile.name,
             to_label: target.name,
             action: {:switch, pid}
@@ -121,7 +123,8 @@ defmodule CNCWeb.ConfigLive do
 
   # The axis table: every value that differs from the profile.
   def handle_event("apply_axes", %{"set" => values}, socket) do
-    current = socket.assigns.check.profile.values
+    # Against all three parts: build rows are in the table too
+    current = socket.assigns.current
 
     changes =
       for {path, value} <- values,
@@ -169,7 +172,7 @@ defmodule CNCWeb.ConfigLive do
   def handle_event("take_file", _, socket) do
     %{cnc: cnc, controller: c, check: check} = socket.assigns
 
-    case Profiles.drift(cnc.machine, cnc.db, c.id) do
+    case Configuration.drift(cnc.machine, cnc.db, c) do
       {:ok, drift} ->
         ask(socket,
           title: "Keep the controller's values in #{check.profile.name}",
@@ -238,7 +241,7 @@ defmodule CNCWeb.ConfigLive do
         pid -> pid
       end
 
-    case Profiles.create(cnc.db, c.id, name, c.board, from) do
+    case Profiles.create(cnc.db, name, c.board, from) do
       {:ok, p} ->
         {:noreply,
          socket
@@ -257,18 +260,18 @@ defmodule CNCWeb.ConfigLive do
   def handle_event("cancel_rename", _, socket), do: {:noreply, assign(socket, renaming: nil)}
 
   def handle_event("save_name", %{"profile" => pid, "name" => name}, socket) do
-    %{cnc: cnc, controller: c} = socket.assigns
+    %{cnc: cnc} = socket.assigns
 
-    case Profiles.rename(cnc.db, c.id, pid, name) do
+    case Profiles.rename(cnc.db, pid, name) do
       :ok -> {:noreply, socket |> assign(renaming: nil, error: nil) |> maybe_load()}
       {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
     end
   end
 
   def handle_event("delete_profile", %{"profile" => pid}, socket) do
-    %{cnc: cnc, controller: c} = socket.assigns
+    %{cnc: cnc} = socket.assigns
 
-    case Profiles.delete(cnc.db, c.id, pid) do
+    case Profiles.delete(cnc.db, pid) do
       :ok -> {:noreply, socket |> assign(error: nil) |> maybe_load()}
       {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
     end
@@ -311,7 +314,7 @@ defmodule CNCWeb.ConfigLive do
     do: {:noreply, update(socket, :advanced?, &(not &1))}
 
   def handle_event("view", %{"name" => name}, socket) do
-    case Config.show(machine(socket), name) do
+    case FluidNC.show(machine(socket), name) do
       {:ok, text} -> {:noreply, assign(socket, viewing: name, text: text, error: nil)}
       {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
     end
@@ -348,14 +351,14 @@ defmodule CNCWeb.ConfigLive do
       end
 
     with {:ok, text, reason} <- source,
-         true <- Config.parse(text) != [] || {:error, :not_a_config} do
+         true <- Values.parse(text) != [] || {:error, :not_a_config} do
       ask(socket,
         title: "Use your own config",
         note:
-          "It replaces #{Profiles.file()} (wiring included) and the controller restarts with it. Recorded in the history as: #{reason}.",
+          "It replaces #{Configuration.file()} (wiring included) and the controller restarts with it. Recorded in the history as: #{reason}.",
         approve: "Write and restart",
-        diffs: Config.diff_texts(socket.assigns.check && socket.assigns.check.text, text),
-        from_label: Profiles.file(),
+        diffs: Values.diff_texts(socket.assigns.check && socket.assigns.check.text, text),
+        from_label: Configuration.file(),
         to_label: "yours",
         action: {:override, text, reason}
       )
@@ -391,7 +394,7 @@ defmodule CNCWeb.ConfigLive do
           note:
             "#{rev.file} gets v#{v}'s file back (a new version, \"Restored v#{v}\"); the controller restarts with it.",
           approve: "Restore and restart",
-          diffs: Config.diff_texts(check && check.text, text),
+          diffs: Values.diff_texts(check && check.text, text),
           from_label: "now",
           to_label: "v#{v}",
           action: {:restore_config, String.to_integer(i)}
@@ -402,9 +405,38 @@ defmodule CNCWeb.ConfigLive do
     end
   end
 
+  # The build or the wiring back to an earlier version: written, restarts.
+  def handle_event("restore_layer", %{"profile" => layer, "i" => i}, socket)
+      when layer in ["build", "wiring"] do
+    %{cnc: cnc, controller: c} = socket.assigns
+    i = String.to_integer(i)
+
+    {history, now} =
+      if layer == "build",
+        do: {socket.assigns.build_history, Build.values(cnc.db)},
+        else: {socket.assigns.wiring_history, Wiring.values(cnc.db, c.id)}
+
+    case Enum.at(history, i) do
+      %{values: values, version: v} ->
+        ask(socket,
+          title: "Restore the #{layer} to v#{v}",
+          note:
+            "A new version of the #{layer} (\"Restored v#{v}\"), written to the controller, which restarts.",
+          approve: "Restore and restart",
+          diffs: Values.diff_maps(now, values),
+          from_label: "now",
+          to_label: "v#{v}",
+          action: {:restore_layer, String.to_existing_atom(layer), i}
+        )
+
+      nil ->
+        {:noreply, assign(socket, error: error_text(:not_found))}
+    end
+  end
+
   # A profile revision back: a new revision of the profile.
   def handle_event("restore_profile", %{"profile" => pid, "i" => i}, socket) do
-    %{cnc: cnc, controller: c, profiles: profiles, check: check} = socket.assigns
+    %{cnc: cnc, profiles: profiles, check: check} = socket.assigns
     i = String.to_integer(i)
     profile = Enum.find(profiles, &(&1.id == pid))
     rev = profile && Enum.at(profile.history, i)
@@ -421,7 +453,7 @@ defmodule CNCWeb.ConfigLive do
               "A new version of #{profile.name} (\"Restored v#{rev.version}\"). Stored only: the controller gets it when you switch to it."
           ),
         approve: if(selected?, do: "Restore and restart", else: "Restore"),
-        diffs: Profiles.restore_diff(cnc.db, c.id, pid, i),
+        diffs: Profiles.restore_diff(cnc.db, pid, i),
         from_label: "now",
         to_label: "v#{rev.version}",
         action: {:restore_profile, pid, i}
@@ -517,22 +549,8 @@ defmodule CNCWeb.ConfigLive do
                       <% end %>
                     </p>
                     <div :if={not @check.matches?} id="check-differences" class="cnc-warn-block">
-                      <ul :if={conflicts(@check) != []} class="cnc-changes">
-                        <li :for={d <- Enum.take(conflicts(@check), 12)} id={"diff-#{dom_id(d.path)}"}>
-                          <code>{d.path}</code>
-                          <span class="cnc-change-vals">
-                            profile {shown(d.profile) || "not in it"}, file
-                            <strong>{shown(d.controller)}</strong>
-                          </span>
-                        </li>
-                      </ul>
-                      <p :if={length(conflicts(@check)) > 12} class="cnc-sub">
-                        and {length(conflicts(@check)) - 12} more.
-                      </p>
-                      <p :if={left_out(@check) > 0} class="cnc-sub" id="diff-left-out">
-                        The file leaves out {left_out(@check)} settings the profile has (FluidNC uses
-                        its defaults for those).
-                      </p>
+                      <p class="cnc-sub">configuration → file:</p>
+                      <.diff_list diffs={check_diffs(@check)} id="check-diff" />
                       <div class="cnc-row">
                         <button
                           type="button"
@@ -589,7 +607,7 @@ defmodule CNCWeb.ConfigLive do
                   <%= if @editing_current? and not @check.override? do %>
                     <form id="axes-form" class="cnc-axes-form" phx-submit="apply_axes">
                       <.axes_table
-                        values={@check.profile.values}
+                        values={@current}
                         editable
                         id_prefix="set"
                         errors={@field_errors}
@@ -643,7 +661,7 @@ defmodule CNCWeb.ConfigLive do
                       </div>
                     </form>
                   <% else %>
-                    <.axes_table values={@check.profile.values} id_prefix="current" />
+                    <.axes_table values={@current} id_prefix="current" />
                     <div class="cnc-row">
                       <button
                         :if={not @check.override?}
@@ -674,6 +692,27 @@ defmodule CNCWeb.ConfigLive do
                       </button>
                       <button
                         type="button"
+                        class="cnc-btn"
+                        id="build-history"
+                        phx-click="profile_history"
+                        phx-value-profile="build"
+                      >
+                        {if @history_for == "build", do: "Hide build history", else: "Build history"}
+                      </button>
+                      <button
+                        :if={@wiring_history != []}
+                        type="button"
+                        class="cnc-btn"
+                        id="wiring-history"
+                        phx-click="profile_history"
+                        phx-value-profile="wiring"
+                      >
+                        {if @history_for == "wiring",
+                          do: "Hide wiring history",
+                          else: "Wiring history"}
+                      </button>
+                      <button
+                        type="button"
                         class="cnc-btn cnc-btn--quiet"
                         phx-click="rename"
                         phx-value-profile={@check.profile.id}
@@ -681,10 +720,28 @@ defmodule CNCWeb.ConfigLive do
                         Rename
                       </button>
                     </div>
+                    <.revisions
+                      :if={@history_for == "build"}
+                      id="history-build"
+                      entries={@build_history}
+                      prefix="b"
+                      expanded={@expanded}
+                      restore="restore_layer"
+                      profile="build"
+                    />
+                    <.revisions
+                      :if={@history_for == "wiring"}
+                      id="history-wiring"
+                      entries={@wiring_history}
+                      prefix="w"
+                      expanded={@expanded}
+                      restore="restore_layer"
+                      profile="wiring"
+                    />
                     <.yaml_view
                       :if={@showing_profile == @check.profile.id}
                       id="current-yaml"
-                      text={Profiles.render(@controller.board, @check.profile)}
+                      text={Configuration.render(@cnc.db, @controller, @check.profile)}
                     />
                     <.revisions
                       :if={@history_for == @check.profile.id}
@@ -724,8 +781,9 @@ defmodule CNCWeb.ConfigLive do
                     >
                       <input type="hidden" name="profile" value={p.id} />
                       <.axes_table
-                        values={p.values}
+                        values={Configuration.expected(@cnc.db, @controller, p)}
                         editable
+                        only_profile
                         id_prefix={"p-#{p.id}"}
                         errors={@field_errors}
                       />
@@ -809,7 +867,7 @@ defmodule CNCWeb.ConfigLive do
                       id={"diff-#{p.id}"}
                       class="cnc-diff"
                     >
-                      <%= case Profiles.diff(@controller.board, @check.profile, p) do %>
+                      <%= case Profiles.diff(@check.profile, p) do %>
                         <% [] -> %>
                           <p class="cnc-sub">Same settings as {@check.profile.name}.</p>
                         <% diffs -> %>
@@ -822,8 +880,14 @@ defmodule CNCWeb.ConfigLive do
                       <% end %>
                     </div>
                     <div :if={@showing_profile == p.id and @editing_profile != p.id}>
-                      <.axes_table values={p.values} id_prefix={"view-#{p.id}"} />
-                      <.yaml_view id={"yaml-#{p.id}"} text={Profiles.render(@controller.board, p)} />
+                      <.axes_table
+                        values={Configuration.expected(@cnc.db, @controller, p)}
+                        id_prefix={"view-#{p.id}"}
+                      />
+                      <.yaml_view
+                        id={"yaml-#{p.id}"}
+                        text={Configuration.render(@cnc.db, @controller, p)}
+                      />
                     </div>
                     <.revisions
                       :if={@history_for == p.id}
@@ -948,7 +1012,7 @@ defmodule CNCWeb.ConfigLive do
                   <h3 class="cnc-override-title">Use your own config</h3>
                   <p class="cnc-sub">
                     The escape hatch: a FluidNC config of your own in place of the profile's. It
-                    replaces {Profiles.file()} (wiring included) and the controller restarts with
+                    replaces {Configuration.file()} (wiring included) and the controller restarts with
                     it; the page then shows how it differs from the profile. You'll see the
                     changes before anything is written.
                   </p>
@@ -1046,7 +1110,7 @@ defmodule CNCWeb.ConfigLive do
     %{cnc: cnc, controller: c} = socket.assigns
     name = Enum.find_value(socket.assigns.profiles, &(&1.id == pid && &1.name))
 
-    case Profiles.switch(cnc.machine, cnc.db, c, pid) do
+    case Configuration.switch(cnc.machine, cnc.db, c, pid) do
       :ok ->
         {:noreply,
          assign(socket, working: "Writing #{name}: the controller restarts…", error: nil)}
@@ -1065,9 +1129,9 @@ defmodule CNCWeb.ConfigLive do
   end
 
   defp run(socket, {:save_profile, pid, changes}) do
-    %{cnc: cnc, controller: c} = socket.assigns
+    %{cnc: cnc} = socket.assigns
 
-    case Profiles.edit(cnc.db, c.id, pid, changes) do
+    case Profiles.edit(cnc.db, pid, changes) do
       {:ok, %{errors: errors}} when errors == %{} ->
         {:noreply, socket |> assign(editing_profile: nil, field_errors: %{}) |> maybe_load()}
 
@@ -1083,7 +1147,7 @@ defmodule CNCWeb.ConfigLive do
   defp run(socket, :take_file) do
     %{cnc: cnc, controller: c} = socket.assigns
 
-    case Profiles.take_file(cnc.machine, cnc.db, c) do
+    case Configuration.take_file(cnc.machine, cnc.db, c) do
       :ok ->
         {:noreply, assign(socket, working: "Writing it: the controller restarts…", error: nil)}
 
@@ -1095,7 +1159,7 @@ defmodule CNCWeb.ConfigLive do
   defp run(socket, :keep_drift) do
     %{cnc: cnc, controller: c} = socket.assigns
 
-    case Profiles.keep_drift(cnc.machine, cnc.db, c) do
+    case Configuration.keep_drift(cnc.machine, cnc.db, c) do
       :ok -> {:noreply, socket |> assign(error: nil) |> maybe_load()}
       {:error, reason} -> {:noreply, assign(socket, error: error_text(reason))}
     end
@@ -1104,7 +1168,7 @@ defmodule CNCWeb.ConfigLive do
   defp run(socket, {:override, text, reason}) do
     %{cnc: cnc, controller: c} = socket.assigns
 
-    case Profiles.replace_file(cnc.machine, cnc.db, c, text, reason) do
+    case Configuration.replace_file(cnc.machine, cnc.db, c, text, reason) do
       :ok ->
         {:noreply,
          assign(socket,
@@ -1123,8 +1187,9 @@ defmodule CNCWeb.ConfigLive do
     %{cnc: cnc, controller: c, history: history} = socket.assigns
 
     with %{} = rev <- Enum.at(history, i) || {:error, :not_found},
-         {:ok, file} <- Config.restore(cnc.machine, cnc.db, c.id, rev),
-         :ok <- if(file == Profiles.file(), do: Config.activate(cnc.machine, file), else: :ok) do
+         {:ok, file} <- History.restore(cnc.machine, cnc.db, c.id, rev),
+         :ok <-
+           if(file == Configuration.file(), do: FluidNC.activate(cnc.machine, file), else: :ok) do
       {:noreply,
        assign(socket, working: "Restoring v#{rev.version}: the controller restarts…", error: nil)}
     else
@@ -1135,7 +1200,7 @@ defmodule CNCWeb.ConfigLive do
   defp run(socket, {:restore_profile, pid, i}) do
     %{cnc: cnc, controller: c, check: check} = socket.assigns
 
-    case Profiles.restore(cnc.machine, cnc.db, c, pid, i) do
+    case Configuration.restore_profile(cnc.machine, cnc.db, c, pid, i) do
       :ok ->
         if check && check.profile.id == pid,
           do:
@@ -1148,9 +1213,21 @@ defmodule CNCWeb.ConfigLive do
     end
   end
 
+  defp run(socket, {:restore_layer, layer, i}) do
+    %{cnc: cnc, controller: c} = socket.assigns
+
+    case Configuration.restore_part(cnc.machine, cnc.db, c, layer, i) do
+      :ok ->
+        {:noreply, assign(socket, working: "Writing it: the controller restarts…", error: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: error_text(reason))}
+    end
+  end
+
   defp run(socket, :put_back) do
     %{cnc: cnc, controller: c} = socket.assigns
-    Profiles.put_back(cnc.machine, cnc.db, c.id)
+    Configuration.put_back(cnc.machine, cnc.db, c)
     {:noreply, socket |> assign(error: nil) |> maybe_load()}
   end
 
@@ -1159,17 +1236,32 @@ defmodule CNCWeb.ConfigLive do
     do: {:noreply, assign(socket, field_errors: %{}, error: nil)}
 
   defp ask_apply(socket, changes, other) do
-    %{check: check, settings: running} = socket.assigns
+    %{check: check, settings: running, current: current} = socket.assigns
     name = check.profile.name
+    layers = changes |> Enum.map(fn {p, _} -> Build.layer(p) end) |> Enum.uniq()
+    wiring? = :wiring in layers
+
+    where =
+      Enum.map_join(layers, ", ", fn
+        :profile -> "profile #{name}"
+        :build -> "the machine's build"
+        :wiring -> "this controller's wiring"
+        :label -> "the file's names"
+      end)
 
     ask(socket,
-      title: "Apply to #{name}",
-      note: "Set on the controller straight away and kept in #{name} (and its config file).",
-      approve: "Apply",
+      title: "Apply",
+      note:
+        if(wiring?,
+          do:
+            "Kept in #{where}, and written to the controller, which restarts: FluidNC only changes wiring at startup.",
+          else: "Set on the controller straight away, and kept in #{where} (and its config file)."
+        ),
+      approve: if(wiring?, do: "Apply and restart", else: "Apply"),
       diffs:
         for(
           {path, v} <- changes,
-          do: %{path: path, from: check.profile.values[path] || running[path], to: v}
+          do: %{path: path, from: current[path] || running[path], to: v}
         ),
       from_label: "now",
       to_label: "new",
@@ -1184,7 +1276,15 @@ defmodule CNCWeb.ConfigLive do
   defp apply_changes(socket, changes) do
     %{cnc: cnc, controller: c} = socket.assigns
 
-    case Profiles.set(cnc.machine, cnc.db, c, changes) do
+    case Configuration.set(cnc.machine, cnc.db, c, changes) do
+      {:ok, %{restart?: true}} ->
+        {:noreply,
+         assign(socket,
+           working: "Wiring changed: the controller restarts…",
+           editing_current?: false,
+           error: nil
+         )}
+
       {:ok, %{errors: errors}} ->
         errors = Map.new(errors, fn {path, reason} -> {path, error_text(reason)} end)
 
@@ -1201,6 +1301,7 @@ defmodule CNCWeb.ConfigLive do
   attr :values, :map, required: true
   attr :id_prefix, :string, required: true
   attr :editable, :boolean, default: false
+  attr :only_profile, :boolean, default: false
   attr :errors, :map, default: %{}
 
   # The usual per-axis settings, read-only or as inputs named set[path].
@@ -1215,9 +1316,24 @@ defmodule CNCWeb.ConfigLive do
       </thead>
       <tbody>
         <tr :for={{field, label} <- axis_rows(@values)}>
-          <th scope="row">{label}</th>
-          <td :for={a <- axes(@values)} class={[not @editable && "cnc-axes-value"]}>
-            <%= if @editable do %>
+          <th scope="row">
+            {label}
+            <span
+              :if={Build.layer("axes/x/#{field}") == :build}
+              class="cnc-layer"
+              title="Part of the machine's build: the same for every profile"
+            >
+              build
+            </span>
+          </th>
+          <td
+            :for={a <- axes(@values)}
+            class={[
+              (not @editable or (@only_profile and not Profiles.editable?("axes/#{a}/#{field}"))) &&
+                "cnc-axes-value"
+            ]}
+          >
+            <%= if @editable and not (@only_profile and not Profiles.editable?("axes/#{a}/#{field}")) do %>
               <input
                 name={"set[axes/#{a}/#{field}]"}
                 id={"#{@id_prefix}-#{a}-#{field}"}
@@ -1317,7 +1433,7 @@ defmodule CNCWeb.ConfigLive do
     ~H"""
     <div class="cnc-difflist" id={@id}>
       <ul :if={@changed != []} class="cnc-changes">
-        <.diff_row :for={d <- @changed} d={d} />
+        <.diff_row :for={d <- @changed} d={d} list={@id} />
       </ul>
       <p :if={@changed == []} class="cnc-sub">No values changed.</p>
       <details :if={@added != []} class="cnc-diff-more">
@@ -1325,7 +1441,7 @@ defmodule CNCWeb.ConfigLive do
           {settings_count(length(@added))} added (FluidNC's defaults were in use for them)
         </summary>
         <ul class="cnc-changes">
-          <.diff_row :for={d <- @added} d={d} />
+          <.diff_row :for={d <- @added} d={d} list={@id} />
         </ul>
       </details>
       <details :if={@removed != []} class="cnc-diff-more">
@@ -1333,7 +1449,7 @@ defmodule CNCWeb.ConfigLive do
           {settings_count(length(@removed))} removed (left to FluidNC's defaults)
         </summary>
         <ul class="cnc-changes">
-          <.diff_row :for={d <- @removed} d={d} />
+          <.diff_row :for={d <- @removed} d={d} list={@id} />
         </ul>
       </details>
     </div>
@@ -1341,10 +1457,12 @@ defmodule CNCWeb.ConfigLive do
   end
 
   attr :d, :map, required: true
+  attr :list, :string, default: nil
 
+  # Rows get ids only in a list with one (a value can be in several lists).
   defp diff_row(assigns) do
     ~H"""
-    <li>
+    <li id={@list && "#{@list}-" <> String.replace(@d.path, ~r/[^A-Za-z0-9_-]/, "-")}>
       <code>{@d.path}</code>
       <span class="cnc-change-vals">
         <span class="cnc-diff-from">{shown(@d.from) || "not set"}</span>
@@ -1385,9 +1503,10 @@ defmodule CNCWeb.ConfigLive do
     """
   end
 
-  # Differences where the file has a value; the rest it leaves out.
-  defp conflicts(check), do: Enum.reject(check.differences, &is_nil(&1.controller))
-  defp left_out(check), do: Enum.count(check.differences, &is_nil(&1.controller))
+  # The check's differences as a diff: from what the configuration says to
+  # what the file holds.
+  defp check_diffs(check),
+    do: for(d <- check.differences, do: %{path: d.path, from: d.profile, to: d.controller})
 
   defp others(profiles, %{profile: %{id: id}}), do: Enum.reject(profiles, &(&1.id == id))
   defp others(profiles, _), do: profiles
@@ -1408,22 +1527,25 @@ defmodule CNCWeb.ConfigLive do
     %{cnc: cnc, controller: c} = socket.assigns
 
     if connected?(socket) and ready?(socket.assigns) do
-      with :ok <- Profiles.ensure(cnc.machine, cnc.db, c.id),
-           {:ok, check} <- Profiles.check(cnc.machine, cnc.db, c),
-           {:ok, %{files: files}} <- Config.files(cnc.machine),
-           {:ok, running} <- Config.running(cnc.machine),
-           {:ok, drift} <- Profiles.drift(cnc.machine, cnc.db, c.id) do
-        settings = Config.parse(running)
+      with :ok <- Configuration.ensure(cnc.machine, cnc.db, c),
+           {:ok, check} <- Configuration.check(cnc.machine, cnc.db, c),
+           {:ok, %{files: files}} <- FluidNC.files(cnc.machine),
+           {:ok, running} <- FluidNC.running(cnc.machine),
+           {:ok, drift} <- Configuration.drift(cnc.machine, cnc.db, c) do
+        settings = Values.parse(running)
 
         assign(socket,
-          profiles: Profiles.list(cnc.db, c.id),
+          profiles: Profiles.list(cnc.db),
+          build_history: Build.history(cnc.db),
+          wiring_history: Wiring.history(cnc.db, c.id),
           check: check,
           files: files,
           settings: Map.new(settings),
-          paths: for({p, _} <- settings, Profiles.editable?(p), do: p),
+          paths: for({p, _} <- settings, Build.layer(p) != :label, do: p),
+          current: Configuration.expected(cnc.db, c, check.profile),
           drift: drift,
-          wiring: Config.wiring_check(c.board, settings),
-          history: Config.history(cnc.db, c.id)
+          wiring: Configuration.wiring_check(c.board, settings),
+          history: History.list(cnc.db, c.id)
         )
       else
         {:error, reason} -> assign(socket, error: error_text(reason))
@@ -1477,7 +1599,7 @@ defmodule CNCWeb.ConfigLive do
   end
 
   defp same_value?(nil, _), do: false
-  defp same_value?(a, b), do: Config.same?(a, String.trim(b))
+  defp same_value?(a, b), do: Values.same?(a, String.trim(b))
 
   defp upload_error(:too_large), do: "That file is over 256 KB: not a config file?"
   defp upload_error(:too_many_files), do: "One file at a time."
@@ -1494,6 +1616,12 @@ defmodule CNCWeb.ConfigLive do
   defp error_text(:exists), do: "There's already one with that name."
   defp error_text(:in_use), do: "That's the selected profile: switch to another first."
   defp error_text(:no_profile), do: "No profile is selected."
+
+  defp error_text(:not_profile_setting),
+    do:
+      "That's part of the machine's build or the wiring, the same for every profile: change it in the current configuration."
+
+  defp error_text(:not_editable), do: "That's a name in the file, not a setting."
   defp error_text(:nothing_to_use), do: "Choose a file, or paste a config."
   defp error_text(:no_file), do: "That version has no file (a live change)."
   defp error_text(:not_yaml), do: "Choose a FluidNC config file (.yaml or .yml)."

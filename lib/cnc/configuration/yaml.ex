@@ -1,4 +1,4 @@
-defmodule CNC.Controllers.Yaml do
+defmodule CNC.Configuration.Yaml do
   @moduledoc """
   The small part of YAML FluidNC configs use: nested `key: value` maps by
   indentation, no lists. Enough to read a config into a tree, set values by
@@ -16,7 +16,7 @@ defmodule CNC.Controllers.Yaml do
   @doc ~S"""
   Read a config's text into a tree.
 
-      iex> CNC.Controllers.Yaml.parse("name: \"R\"\naxes:\n  X:\n    steps_per_mm: 80\n")
+      iex> CNC.Configuration.Yaml.parse("name: \"R\"\naxes:\n  X:\n    steps_per_mm: 80\n")
       [{"name", {:value, "R"}}, {"axes", {:map, [{"X", {:map, [{"steps_per_mm", {:value, "80"}}]}}]}}]
   """
   @spec parse(String.t()) :: tree

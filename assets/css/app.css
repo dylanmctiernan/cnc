@@ -2242,4 +2242,13 @@ body {
 .cnc-diff-more[open] summary {
   margin-bottom: 0.25rem;
 }
+.cnc-layer {
+  margin-left: 0.4em;
+  padding: 0 0.35em;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  vertical-align: 1px;
+}
 

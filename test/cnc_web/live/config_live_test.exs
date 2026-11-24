@@ -53,13 +53,14 @@ defmodule CNCWeb.ConfigLiveTest do
     assert has_element?(view, "#set-x-max_rate_mm_per_min[value='2500']")
     assert has_element?(view, "#set-y-max_travel_mm.is-error")
 
+    # Wiring: the dialog says the controller restarts
     view
     |> form("#other-form", other: %{path: "stepping/engine", value: "RMT"})
     |> render_submit()
 
-    approve(view)
-
-    assert has_element?(view, ".cnc-set-error", "wiring")
+    assert has_element?(view, "#approve-modal", "restarts")
+    assert has_element?(view, "#approve", "Apply and restart")
+    view |> element("#cancel-approve") |> render_click()
     refute has_element?(view, "#config-drift")
   end
 
@@ -108,7 +109,7 @@ defmodule CNCWeb.ConfigLiveTest do
       approve(view)
     end
 
-    assert has_element?(view, "#controller-history #c-v2", "Changed 1 setting in profile Default")
+    assert has_element?(view, "#controller-history #c-v2", "Changed 1 value (profile Default)")
     view |> element("#c-v1 .cnc-rev-head") |> render_click()
     assert has_element?(view, "#c-v1 li", "axes/x/max_rate_mm_per_min")
 
