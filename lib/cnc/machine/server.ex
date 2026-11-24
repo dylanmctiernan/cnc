@@ -420,6 +420,17 @@ defmodule CNC.Machine.Server do
 
   ## Settings
 
+  # $22 is a bitmask in grblHAL (bit 0 = homing on); plain 0/1 in Grbl.
+  # nil when the controller doesn't report it (e.g. FluidNC may not).
+  defp homing_enabled?(%{22 => value}) do
+    case Integer.parse(value) do
+      {n, _} -> Bitwise.band(n, 1) == 1
+      :error -> nil
+    end
+  end
+
+  defp homing_enabled?(_settings), do: nil
+
   defp maybe_read_settings(%{settings_wanted?: true} = d, reported)
        when reported in [:idle, :alarm] do
     send_line(%{d | settings_wanted?: false, settings: %{}}, Command.settings(), :settings)
@@ -603,7 +614,8 @@ defmodule CNC.Machine.Server do
       jog: d.vector,
       travel: d.travel,
       travel_source: d.travel_source,
-      travel_issues: d.travel_issues
+      travel_issues: d.travel_issues,
+      homing_enabled?: homing_enabled?(d.settings)
     }
   end
 

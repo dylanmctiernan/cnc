@@ -235,10 +235,28 @@ defmodule CNCWeb.MachineLive do
         <div class="cnc-messages">
           <div :if={@machine.state == :alarm} class="cnc-lock" role="alert">
             <span class="cnc-lock-tag">Locked</span>
-            <p>{alarm_text(@machine.alarm)}</p>
+            <p>
+              {alarm_text(@machine.alarm)}
+              <span :if={@machine.homing_enabled? == false}>
+                This controller has homing turned off ($22), so unlock to continue.
+              </span>
+            </p>
             <div class="cnc-row">
-              <button type="button" class="cnc-btn cnc-btn--primary" phx-click="home">Home</button>
-              <button type="button" class="cnc-btn" phx-click="unlock">Unlock</button>
+              <button
+                type="button"
+                class={["cnc-btn", @machine.homing_enabled? != false && "cnc-btn--primary"]}
+                phx-click="home"
+                disabled={@machine.homing_enabled? == false}
+              >
+                Home
+              </button>
+              <button
+                type="button"
+                class={["cnc-btn", @machine.homing_enabled? == false && "cnc-btn--primary"]}
+                phx-click="unlock"
+              >
+                Unlock
+              </button>
             </div>
           </div>
           <p :if={note = error_text(@machine.last_error)} class="cnc-note">{note}</p>

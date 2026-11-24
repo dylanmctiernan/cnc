@@ -27,6 +27,8 @@ defmodule CNC.Machine.State do
       clamps jogs to (the controller's soft limits remain authoritative)
     * `travel_source` — `:controller` once read from `$130`–`$132` after
       connecting, otherwise `:config` (the fallback)
+    * `homing_enabled?` — from the controller's `$22`: `false` means `$H`
+      will be refused (`error:5`); `nil` if it doesn't report `$22`
     * `travel_issues` — `[{axis, reported_mm, max_mm}]` for axes where the
       controller claimed more travel than the machine physically has (capped)
   """
@@ -51,5 +53,6 @@ defmodule CNC.Machine.State do
             jog: {0, 0, 0},
             travel: nil,
             travel_source: :config,
-            travel_issues: []
+            travel_issues: [],
+            homing_enabled?: nil
 end

@@ -65,6 +65,18 @@ defmodule CNC.MachineTest do
       assert Machine.status(m).travel_source == :controller
     end
 
+    test "homing enabled comes from $22 (a bitmask in grblHAL)", %{m: m} do
+      assert Machine.status(m).homing_enabled? == nil
+      connect(m, "Alarm", {0, 0}, ["$22=0", "$130=500.000", "$131=500.000", "$132=50.000"])
+      assert Machine.status(m).homing_enabled? == false
+      :ok = Machine.send_raw(m, "$22=5")
+      assert_receive {:line, "$22=5"}
+      ok(m)
+      assert_receive {:line, "$$"}
+      for l <- ["$22=5", "ok"], do: send(m, {:transport, :line, l})
+      assert Machine.status(m).homing_enabled? == true
+    end
+
     test "keeps configured travel if the controller's is incomplete", %{m: m} do
       connect(m, "Alarm", {0, 0}, ["$130=500.000", "$131=0"])
       assert %State{travel_source: :config, travel: {{+0.0, 1250.0}, _, _}} = Machine.status(m)

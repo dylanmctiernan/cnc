@@ -30,8 +30,12 @@ defmodule CNC.GrblhalSimTest do
   end
 
   test "connects locked, reads travel from $130-$132, unlocks", %{m: m} do
-    assert %State{state: :alarm, alarm: :connect, travel: {{+0.0, 1250.0}, {+0.0, 1250.0}, _}} =
-             Machine.status(m)
+    assert %State{
+             state: :alarm,
+             alarm: :connect,
+             travel: {{+0.0, 1250.0}, {+0.0, 1250.0}, _},
+             homing_enabled?: false
+           } = Machine.status(m)
 
     :ok = Machine.unlock(m)
     assert eventually(fn -> Machine.status(m).state == :idle end)
