@@ -74,8 +74,8 @@ export default {
       this.pathKey = null
       this.fit()
     })
-    // "bed": the whole bed. "file": the loaded file's area plus the tool,
-    // fixed when zoomed (so the cached toolpath isn't redrawn on every move).
+    // "bed": the whole bed. "file": the loaded file's area, following the
+    // work zero but not the tool (which may be off view).
     this.zoomMode = this.el.dataset.zoom || "bed"
     this.handleEvent("zoom", ({mode}) => {
       this.zoomMode = mode
@@ -175,17 +175,12 @@ export default {
   },
 
   // The loaded file's X/Y area in machine coordinates (at the current work
-  // zero), with the tool, padded. Null if there's nothing to zoom to.
+  // zero), padded. Null if there's nothing to zoom to.
   fileWindow() {
     if (!this.program || !this.program.box) return null
     const [ox, oy] = this.wco || [0, 0, 0]
     const b = this.program.box
     let x0 = b.x0 + ox, x1 = b.x1 + ox, y0 = b.y0 + oy, y1 = b.y1 + oy
-    const t = this.shown || this.to
-    if (t) {
-      x0 = Math.min(x0, t.x); x1 = Math.max(x1, t.x)
-      y0 = Math.min(y0, t.y); y1 = Math.max(y1, t.y)
-    }
     const pad = Math.max(0.08 * Math.max(x1 - x0, y1 - y0), 5)
     x0 -= pad; x1 += pad; y0 -= pad; y1 += pad
     // At least 20 mm across, so a tiny file isn't blown up absurdly
