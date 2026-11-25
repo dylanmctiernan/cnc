@@ -3877,3 +3877,32 @@ body {
   margin: 0;
 }
 
+/* The right column in one piece beside the map; the console docks under
+   the map only, so it always has its room and never moves the right column */
+.cnc {
+  grid-template-columns: minmax(0, 1fr) 24rem;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "status status"
+    "msgs msgs"
+    "view right"
+    "console right";
+}
+.cnc-right {
+  grid-area: right;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border-faint);
+  background: var(--surface-1);
+}
+.cnc-right > .cnc-dro,
+.cnc-right > .cnc-ctl,
+.cnc-right > .cnc-side {
+  border-left: 0;
+}
+.cnc-right > .cnc-side {
+  flex: 1 0 auto;
+}
+

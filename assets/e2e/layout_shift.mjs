@@ -99,6 +99,10 @@ for (const [w, h] of SIZES) {
   await step(page, where, "Resume", M, () => click(page, "#bar-resume"))
   await step(page, where, "Zero X/Y", M, () => click(page, ".cnc-dro-tools button:has-text('Zero X/Y')"))
   await step(page, where, "Undo the zero", M, () => click(page, "#undo-zero"))
+  // The console docks under the map: the right column doesn't move
+  const R = ["#bar-hold", "#rail-hold", ".cnc-dro", ".cnc-ctl", "#messages"]
+  await step(page, where, "open the console", R, () => click(page, "button[aria-controls=console]"))
+  await step(page, where, "close the console", R, () => click(page, "button[aria-controls=console]"))
   // The Start check is a dialog: opening and closing it moves nothing
   await step(page, where, "Start check, then Not yet", M, async () => {
     await click(page, "#bar-resume")
