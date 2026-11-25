@@ -24,7 +24,8 @@ defmodule CNC.Link.FakeSim.Model do
       during Run holds (`Hold:0`), `~` resumes; a reset while running is
       `ALARM:3`. A move outside the travel is a soft limit, `ALARM:2`; a
       feed move with no `F` yet is `error:22`. Feed override (`0x90`–`0x94`)
-      scales feed moves and is reported as `Ov:`.
+      scales feed moves, rapid override (`0x95`–`0x97`: 100/50/25%) rapids;
+      both are reported as `Ov:`.
     * check mode (`$C`), as FluidNC's: `Check` state, every line validated
       and its position followed but nothing moves; outside the travel is
       `ALARM:2`; `$C` again restarts the controller (banner, locked, no ok)
@@ -105,6 +106,7 @@ defmodule CNC.Link.FakeSim.Model do
             gcode: %{absolute?: true, units: 1.0, motion: nil, feed: nil},
             waiting: :queue.new(),
             feed_ov: 100,
+            rapid_ov: 100,
             # check mode: where the program would be (nothing moves)
             check_pos: nil,
             files: %{"config.yaml" => @config},
@@ -464,6 +466,9 @@ defmodule CNC.Link.FakeSim.Model do
       byte in 0x90..0x94 ->
         {%{m | feed_ov: feed_override(m.feed_ov, byte)}, []}
 
+      byte in 0x95..0x97 ->
+        {%{m | rapid_ov: %{0x95 => 100, 0x96 => 50, 0x97 => 25}[byte]}, []}
+
       byte in [Realtime.jog_cancel(), Realtime.feed_hold()] ->
         {cancel_jog(m), []}
 
@@ -512,7 +517,13 @@ defmodule CNC.Link.FakeSim.Model do
         stop(m, :idle)
 
       {:value, {target, feed}} ->
-        feed = if m.state == :run and feed < m.max_feed, do: feed * m.feed_ov / 100, else: feed
+        feed =
+          cond do
+            m.state != :run -> feed
+            feed < m.max_feed -> feed * m.feed_ov / 100
+            true -> feed * m.rapid_ov / 100
+          end
+
         mm_per_ms = feed / 60_000
         dist = distance(m.pos, target)
         step = mm_per_ms * dt
@@ -548,7 +559,7 @@ defmodule CNC.Link.FakeSim.Model do
         feed: m.feed,
         spindle: 0.0,
         buffer: {planner_free, 128},
-        overrides: {m.feed_ov, 100, 100},
+        overrides: {m.feed_ov, m.rapid_ov, 100},
         wco: if(m.wco_in == 0, do: m.wco)
       })
 

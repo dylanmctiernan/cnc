@@ -192,6 +192,11 @@ defmodule CNCWeb.MachineLive do
     {:noreply, socket}
   end
 
+  def handle_event("rapid_override", %{"percent" => p}, socket) when p in ~w(100 50 25) do
+    Machine.rapid_override(srv(socket), String.to_integer(p))
+    {:noreply, socket}
+  end
+
   def handle_event("dismiss", %{"note" => "job"}, socket),
     do: {:noreply, dismiss(socket, :job)}
 
@@ -1142,6 +1147,11 @@ defmodule CNCWeb.MachineLive do
         on_cancel="cancel_start"
       >
         <.start_checks program={@program} machine={@machine} fit={fit(@program, @machine)} />
+        <div class="cnc-job-ov" id="start-rapids">
+          <span class="cnc-h">Rapids</span>
+          <.rapid_seg machine={@machine} id="start-rapid" />
+        </div>
+        <p class="cnc-sub">A new program's first run is usually at 25% rapids.</p>
         <:actions>
           <UI.button
             variant="primary"
@@ -1319,6 +1329,10 @@ defmodule CNCWeb.MachineLive do
           </button>
         </div>
       </div>
+      <div :if={@job.mode == :run} class="cnc-job-ov">
+        <span class="cnc-h">Rapids</span>
+        <.rapid_seg machine={@machine} id="job-rapid" />
+      </div>
       <button
         type="button"
         id="abort-job"
@@ -1328,6 +1342,31 @@ defmodule CNCWeb.MachineLive do
         Abort the job
       </button>
     </section>
+    """
+  end
+
+  attr :machine, State, required: true
+  attr :id, :string, required: true
+
+  # Rapid override: 25 / 50 / 100%, showing what the controller reports
+  defp rapid_seg(assigns) do
+    assigns = assign(assigns, :current, elem(assigns.machine.overrides || {100, 100, 100}, 1))
+
+    ~H"""
+    <div class="cnc-seg cnc-seg--small" role="group" aria-label="Rapid override">
+      <button
+        :for={p <- [25, 50, 100]}
+        type="button"
+        class="cnc-btn num"
+        id={"#{@id}-#{p}"}
+        phx-click="rapid_override"
+        phx-value-percent={p}
+        aria-pressed={to_string(@current == p)}
+        disabled={not @machine.connected?}
+      >
+        {p}%
+      </button>
+    </div>
     """
   end
 

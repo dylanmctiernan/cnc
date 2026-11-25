@@ -61,6 +61,9 @@ defmodule CNC.Machine.Console do
       byte == 0x92 -> "0x92 feed -10%"
       byte == 0x93 -> "0x93 feed +1%"
       byte == 0x94 -> "0x94 feed -1%"
+      byte == 0x95 -> "0x95 rapids 100%"
+      byte == 0x96 -> "0x96 rapids 50%"
+      byte == 0x97 -> "0x97 rapids 25%"
       true -> "0x" <> Integer.to_string(byte, 16)
     end
   end

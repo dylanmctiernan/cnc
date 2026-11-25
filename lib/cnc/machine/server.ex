@@ -539,6 +539,10 @@ defmodule CNC.Machine.Server do
   end
 
   # Overrides are instant commands: fine in any state, running included.
+  defp event({:call, from}, {:rapid_override, percent}, s, %{connected?: true} = d)
+       when percent in [100, 50, 25],
+       do: {s, realtime(d, Realtime.rapid_override(percent)), [{:reply, from, :ok}]}
+
   defp event({:call, from}, {:feed_override, op}, s, %{connected?: true} = d)
        when op in [:reset, :plus10, :minus10, :plus1, :minus1],
        do: {s, realtime(d, Realtime.feed_override(op)), [{:reply, from, :ok}]}

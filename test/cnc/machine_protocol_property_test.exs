@@ -83,6 +83,7 @@ defmodule CNC.Machine.ProtocolPropertyTest do
       {1, constant(:go_to_work_zero)},
       {1, constant({:outline, {{0.0, 5.0}, {0.0, 5.0}}})},
       {1, member_of([{:feed_override, :plus10}, {:feed_override, :reset}])},
+      {1, member_of([{:rapid_override, 25}, {:rapid_override, 100}])},
       {1, constant({:upload, "a.yaml", "a: 1\n"})},
       {1, constant({:connect, {CNC.Link.FakeSim, homing_ms: 30}})},
       {3, map(integer(0..120), &{:sleep, &1})},

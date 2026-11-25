@@ -126,6 +126,25 @@ defmodule CNCWeb.MachineJobLiveTest do
     assert eventually(fn -> has_element?(view, "#note-job", "Aborted square.nc") end)
   end
 
+  test "rapids set before Start, shown and changeable while running", %{
+    conn: conn,
+    m: m,
+    program: program
+  } do
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+    view |> element("#bar-resume") |> render_click()
+    view |> element("#start-rapid-25") |> render_click()
+    assert eventually(fn -> has_element?(view, "#start-rapid-25[aria-pressed=true]") end)
+
+    view |> element("#confirm-start") |> render_click()
+    assert eventually(fn -> has_element?(view, "#job-rapid-25[aria-pressed=true]") end)
+    view |> element("#job-rapid-100") |> render_click()
+    assert eventually(fn -> Machine.status(m).overrides == {100, 100, 100} end)
+    Machine.abort(m)
+  end
+
   test "feed override from the job panel", %{conn: conn, m: m, program: program} do
     {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
     {:ok, view, _} = live(conn, ~p"/")

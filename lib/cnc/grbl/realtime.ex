@@ -28,4 +28,12 @@ defmodule CNC.Grbl.Realtime do
   def feed_override(:minus10), do: 0x92
   def feed_override(:plus1), do: 0x93
   def feed_override(:minus1), do: 0x94
+
+  @doc """
+  Rapid override: rapids (G0) at 100%, 50% or 25%. The usual first run of a
+  new program is at 25%. Kept until the controller restarts.
+  """
+  def rapid_override(100), do: 0x95
+  def rapid_override(50), do: 0x96
+  def rapid_override(25), do: 0x97
 end

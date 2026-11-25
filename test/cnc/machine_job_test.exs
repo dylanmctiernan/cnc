@@ -152,6 +152,13 @@ defmodule CNC.Machine.JobTest do
       assert %{result: :error, error: {22, 2, _}} = Machine.status(m).last_job
     end
 
+    test "rapid override: rapids at 25% until set back", %{m: m} do
+      :ok = Machine.rapid_override(m, 25)
+      assert eventually(fn -> Machine.status(m).overrides == {100, 25, 100} end)
+      :ok = Machine.rapid_override(m, 100)
+      assert eventually(fn -> Machine.status(m).overrides == {100, 100, 100} end)
+    end
+
     test "feed override goes out at once and is reported", %{m: m} do
       :ok = Machine.feed_override(m, :plus10)
       assert eventually(fn -> Machine.status(m).overrides == {110, 100, 100} end)

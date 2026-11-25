@@ -77,6 +77,10 @@ defmodule CNC.Machine do
   @doc "Abort the running job: a soft reset (the machine comes back locked)."
   def abort(server \\ __MODULE__), do: call(server, :abort)
 
+  @doc "Rapid override: rapids (G0) at `100`, `50` or `25` percent."
+  def rapid_override(server \\ __MODULE__, percent) when percent in [100, 50, 25],
+    do: call(server, {:rapid_override, percent})
+
   @doc "Feed override: `:reset` (100%), `:plus10`, `:minus10`, `:plus1`, `:minus1`."
   def feed_override(server \\ __MODULE__, op), do: call(server, {:feed_override, op})
 

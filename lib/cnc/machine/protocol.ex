@@ -68,6 +68,7 @@ defmodule CNC.Machine.Protocol do
     resume: {:connected, @connected},
     reset: {:connected, @connected},
     feed_override: {:connected, @connected},
+    rapid_override: {:connected, @connected},
     abort: {:connected, [:running]}
   }
 
