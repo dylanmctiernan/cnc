@@ -273,6 +273,8 @@ defmodule CNCWeb.UI do
   attr :label, :string, default: "3D view of the machine, the toolpath and the tool"
   attr :class, :any, default: nil
 
+  attr :trail, :boolean, default: false, doc: "draw the jog trail (the Jog trail setting)"
+
   attr :views, :boolean,
     default: true,
     doc:
@@ -291,6 +293,7 @@ defmodule CNCWeb.UI do
       phx-hook="Viewport"
       phx-update="ignore"
       data-travel={@travel}
+      data-trail={to_string(@trail)}
     >
       <canvas role="img" aria-label={@label}></canvas>
       <.viewport_views :if={@views} for={@id} class="ui-viewport-views" />

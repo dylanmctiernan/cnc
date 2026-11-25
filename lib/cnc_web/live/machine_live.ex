@@ -722,6 +722,7 @@ defmodule CNCWeb.MachineLive do
             travel={travel_json(@machine.travel)}
             class="cnc-bed"
             views={false}
+            trail={@settings.jog_trail}
           />
           <div
             :if={@view_mode == :top}
@@ -963,10 +964,15 @@ defmodule CNCWeb.MachineLive do
             <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
           </dl>
           <button
-            :if={@view_mode == :top and @settings.jog_trail}
+            :if={@settings.jog_trail}
             type="button"
             class="cnc-btn cnc-btn--quiet"
-            phx-click={JS.dispatch("bed:clear-trail", to: "#bed")}
+            phx-click={
+              if(@view_mode == :top,
+                do: JS.dispatch("bed:clear-trail", to: "#bed"),
+                else: JS.dispatch("viewport:clear-trail", to: "#viewport")
+              )
+            }
           >
             Clear trail
           </button>

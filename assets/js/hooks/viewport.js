@@ -15,6 +15,9 @@ import * as THREE from "three"
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js"
 import {Progress} from "./progress"
 
+// Points kept in the jog trail
+const TRAIL_MAX = 1500
+
 const token = (name, fallback) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
 
@@ -57,6 +60,7 @@ export default {
       // The trace (cut so far), green as in 2D; the plan dims to a ghost under it
       done: new THREE.Color(token("--path-done", "#6cc58a")),
       tool: new THREE.Color(token("--text", "#e4e7e9")),
+      move: new THREE.Color(token("--move", "#4dabf7")),
     }
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.9))
@@ -78,13 +82,15 @@ export default {
     this.progress = new Progress()
     this.handleEvent("pos", ({x, y, z, wco, job}) => {
       this.tool.position.set(x, y, z)
+      // The jog trail (the Jog trail setting): only while jogging by hand
+      if (this.el.dataset.trail === "true" && !job) this.pushTrail(x, y, z)
+      else if (this.trail.length) this.clearTrail()
       if (this.pathData) {
         const before = this.progress.done
         if (this.progress.update(this.pathData, job, {x, y, z}, wco || this.wco) !== before) this.paintDone()
       }
       if (wco && (wco[0] !== this.wco[0] || wco[1] !== this.wco[1] || wco[2] !== this.wco[2])) {
         this.setWork(wco)
-        this.buildShadow()
         return this.reframe()
       }
       this.render()
@@ -99,9 +105,11 @@ export default {
     this.handleEvent("travel", ({travel}) => {
       this.travel = travel
       this.buildMachine()
-      this.buildShadow()
       this.reframe()
     })
+
+    this.trail = []
+    this.el.addEventListener("viewport:clear-trail", () => this.clearTrail())
 
     // Iso / Top / Front buttons (JS.dispatch from the component)
     this.onView = (e) => this.view(e.detail.view)
@@ -284,33 +292,42 @@ export default {
     }
   },
 
-  // Height made readable: the cut's shadow on the bed (where it is in X/Y)
-  // and a dashed line from the work zero down to the bed (how high it is).
-  // Before Z is touched off, the work Z zero is still at the top of travel,
-  // so the path really is up in the air.
-  buildShadow() {
-    if (this.shadow) this.scene.remove(this.shadow)
-    this.shadow = new THREE.Group()
-    const bedZ = this.travel[2][0]
-    const [wx, wy, wz] = this.wco
-    const v = this.pathData
-    if (v && v.length) {
-      const flat = []
-      for (let i = 4; i < v.length; i += 4)
-        if (v[i] === 1) flat.push(v[i - 3] + wx, v[i - 2] + wy, bedZ + 0.2, v[i + 1] + wx, v[i + 2] + wy, bedZ + 0.2)
-      // Neutral, so it never reads as a second toolpath
-      this.shadow.add(lines(flat, this.colors.edge, 0.3))
+
+  // The jog trail: the tool's recent path, newest brightest, fading with age
+  pushTrail(x, y, z) {
+    const last = this.trail[this.trail.length - 1]
+    if (last && Math.hypot(last[0] - x, last[1] - y, last[2] - z) < 0.05) return
+    this.trail.push([x, y, z])
+    if (this.trail.length > TRAIL_MAX) this.trail.shift()
+    this.buildTrail()
+  },
+
+  clearTrail() {
+    this.trail = []
+    this.buildTrail()
+    this.render()
+  },
+
+  buildTrail() {
+    if (this.trailLine) {
+      this.scene.remove(this.trailLine)
+      this.trailLine.geometry.dispose()
+      this.trailLine = null
     }
-    const drop = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(wx, wy, wz),
-        new THREE.Vector3(wx, wy, bedZ),
-      ]),
-      new THREE.LineDashedMaterial({color: this.colors.z, dashSize: 4, gapSize: 3, transparent: true, opacity: 0.7})
-    )
-    drop.computeLineDistances()
-    this.shadow.add(drop)
-    this.scene.add(this.shadow)
+    const n = this.trail.length
+    if (n < 2) return
+    const bg = new THREE.Color(token("--surface-0", "#1c1f22"))
+    const pos = [], col = []
+    this.trail.forEach(([x, y, z], i) => {
+      pos.push(x, y, z)
+      const c = this.colors.move.clone().lerp(bg, 1 - (i + 1) / n)
+      col.push(c.r, c.g, c.b)
+    })
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3))
+    this.trailLine = new THREE.Line(geo, new THREE.LineBasicMaterial({vertexColors: true}))
+    this.scene.add(this.trailLine)
   },
 
   // Fade the segments a running job has finished (only the new ones)
@@ -391,7 +408,6 @@ export default {
     this.pathLines = [this.pathSegs]
     this.work.add(...this.pathLines)
     if (!this.axes) this.setWork(this.wco)
-    this.buildShadow()
   },
 }
 

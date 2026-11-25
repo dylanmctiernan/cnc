@@ -23,7 +23,8 @@ defmodule CNCWeb.SettingsLive do
   def handle_info({:machine, _}, socket), do: {:noreply, socket}
 
   @impl true
-  def handle_event("set", %{"key" => "jog_trail", "value" => v}, socket)
+  # (Not phx-value-value: a button's own value would be sent under "value" too)
+  def handle_event("set", %{"key" => "jog_trail", "to" => v}, socket)
       when v in ~w(true false) do
     {:ok, settings} = Settings.put(socket.assigns.cnc.db, :jog_trail, v == "true")
     {:noreply, assign(socket, settings: settings)}
@@ -57,7 +58,7 @@ defmodule CNCWeb.SettingsLive do
                 id={"jog-trail-#{if v, do: "on", else: "off"}"}
                 phx-click="set"
                 phx-value-key="jog_trail"
-                phx-value-value={to_string(v)}
+                phx-value-to={to_string(v)}
                 aria-pressed={to_string(@settings.jog_trail == v)}
               >
                 {label}
