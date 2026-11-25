@@ -3498,10 +3498,14 @@ body {
   vertical-align: 0.35em;
 }
 
-/* Hold is never covered: the rail sits above dialogs and the
-   pending-changes bar, so Hold stays visible and usable */
+/* Hold is never covered: the rail and every Hold button sit above
+   dialogs and the pending-changes bar, so Hold stays visible and usable */
 .ui-rail {
   z-index: 70;
+}
+.ui-hold {
+  position: relative;
+  z-index: 71;
 }
 
 /* Diffs: the old value muted and struck through, the new one plain. A

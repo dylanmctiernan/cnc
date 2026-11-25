@@ -13,7 +13,6 @@ defmodule CNCWeb.Layouts do
 
   @nav [
     {:machine, "Machine", "hero-cube", "/"},
-    {:configuration, "Configuration", "hero-adjustments-horizontal", "/configuration"},
     {:controllers, "Controllers", "hero-cpu-chip", "/controllers"}
   ]
 
@@ -65,6 +64,20 @@ defmodule CNCWeb.Layouts do
           </.link>
         </nav>
         <div class="ui-rail-foot">
+          <.link navigate="/pendant" id="nav-pendant" class="ui-nav-item" title="Pendant">
+            <.icon name="hero-device-phone-mobile" class="ui-nav-icon" />
+            <span class="ui-nav-label">Pendant</span>
+          </.link>
+          <.link
+            navigate="/configuration"
+            id="nav-configuration"
+            class={["ui-nav-item", @current == :configuration && "is-current"]}
+            aria-current={if(@current == :configuration, do: "page", else: "false")}
+            title="Configuration"
+          >
+            <.icon name="hero-adjustments-horizontal" class="ui-nav-icon" />
+            <span class="ui-nav-label">Configuration</span>
+          </.link>
           <.link
             navigate="/settings"
             id="nav-settings"
@@ -74,10 +87,6 @@ defmodule CNCWeb.Layouts do
           >
             <.icon name="hero-cog-6-tooth" class="ui-nav-icon" />
             <span class="ui-nav-label">Settings</span>
-          </.link>
-          <.link navigate="/pendant" id="nav-pendant" class="ui-nav-item" title="Pendant">
-            <.icon name="hero-device-phone-mobile" class="ui-nav-icon" />
-            <span class="ui-nav-label">Pendant</span>
           </.link>
           <div :if={@machine} class="ui-rail-machine">
             <CNCWeb.UI.machine_state machine={@machine} id="rail-state" />
