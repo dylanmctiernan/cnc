@@ -15,6 +15,12 @@ import * as THREE from "three"
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js"
 import {Progress} from "./progress"
 
+// The tool drawn to scale (mm): a 1/4" bit, its stick-out, the collet nut
+const BIT_D = 6.35
+const BIT_OUT = 25
+const NUT_D = 20
+const NUT_H = 12
+
 // Points kept in the jog trail
 const TRAIL_MAX = 1500
 
@@ -81,7 +87,7 @@ export default {
 
     this.progress = new Progress()
     this.handleEvent("pos", ({x, y, z, wco, job}) => {
-      this.tool.position.set(x, y, z)
+      this.glideTo(x, y, z)
       // The jog trail (the Jog trail setting): only while jogging by hand
       if (this.el.dataset.trail === "true" && !job) this.pushTrail(x, y, z)
       else if (this.trail.length) this.clearTrail()
@@ -123,6 +129,37 @@ export default {
     this.el.removeEventListener("viewport:view", this.onView)
     this.controls.dispose()
     this.renderer.dispose()
+  },
+
+  // Status reports come 5 times a second during a job (20 while jogging):
+  // glide from where the tool is drawn to each new report over about the
+  // time between them, at frame rate, rather than jumping (as the 2D view).
+  glideTo(x, y, z) {
+    const now = performance.now()
+    const p = this.tool.position
+    this.glide = {
+      from: {x: p.x, y: p.y, z: p.z},
+      to: {x, y, z},
+      t0: now,
+      dur: this.lastSample ? Math.min(Math.max(now - this.lastSample, 16), 250) : 0,
+    }
+    this.lastSample = now
+    this.animate()
+  },
+
+  animate() {
+    if (this.gliding) return
+    this.gliding = true
+    const step = (now) => {
+      const g = this.glide
+      const k = g.dur > 0 ? Math.min((now - g.t0) / g.dur, 1) : 1
+      const lerp = (a, b) => a + (b - a) * k
+      this.tool.position.set(lerp(g.from.x, g.to.x), lerp(g.from.y, g.to.y), lerp(g.from.z, g.to.z))
+      this.renderer.render(this.scene, this.camera)
+      if (k < 1) requestAnimationFrame(step)
+      else this.gliding = false
+    }
+    requestAnimationFrame(step)
   },
 
   render() {
@@ -261,17 +298,24 @@ export default {
     this.machine.add(box)
   },
 
-  // The tool: a cone pointing down at its tip, and the spindle above it.
+  // The tool, to scale: a 6.35 mm (1/4") bit, 25 mm sticking out, its tip
+  // at the reported position; above it the collet nut, translucent so it
+  // doesn't hide the cut.
   buildTool() {
     this.tool = new THREE.Group()
-    const mat = new THREE.MeshLambertMaterial({color: this.colors.tool})
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(6, 20, 24), mat)
-    tip.rotation.x = -Math.PI / 2
-    tip.position.z = 10
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 40, 24), mat)
-    body.rotation.x = Math.PI / 2
-    body.position.z = 40
-    this.tool.add(tip, body)
+    const bit = new THREE.Mesh(
+      new THREE.CylinderGeometry(BIT_D / 2, BIT_D / 2, BIT_OUT, 24),
+      new THREE.MeshLambertMaterial({color: this.colors.tool}),
+    )
+    bit.rotation.x = Math.PI / 2
+    bit.position.z = BIT_OUT / 2
+    const nut = new THREE.Mesh(
+      new THREE.CylinderGeometry(NUT_D / 2, NUT_D / 2, NUT_H, 6),
+      new THREE.MeshLambertMaterial({color: this.colors.tool, transparent: true, opacity: 0.35}),
+    )
+    nut.rotation.x = Math.PI / 2
+    nut.position.z = BIT_OUT + NUT_H / 2
+    this.tool.add(bit, nut)
     this.scene.add(this.tool)
   },
 
