@@ -7,10 +7,9 @@ defmodule CNC.FluidNCSim.JogTest do
   (see test_helper.exs). Each test starts its own FluidNC in a temporary
   directory, at machine position 0,0,0.
 
-  The native sim's console reads signed chars and drops bytes >= 0x80, so
-  the jog cancel (0x85) never reaches it: here a jog stops when its few
-  queued increments run out. The board (and FluidNC's UTF-8 decoder, which
-  passes 0x80-0xBE through raw for Grbl senders) cancels at once.
+  The sim is built with `priv/fluidnc/patches/sim-console-unsigned.patch`
+  (stock, its console dropped bytes >= 0x80, so the jog cancel never
+  reached it), so a release cancels at once here, as on the board.
   """
   use CNC.FluidNCSimCase, async: true
 
@@ -36,6 +35,19 @@ defmodule CNC.FluidNCSim.JogTest do
     # Stopped means stopped: nothing left queued.
     Process.sleep(300)
     assert elem(Machine.status(m).mpos, 0) == x1
+  end
+
+  test "a stop cancels the firmware's jog at once, not at its end", %{m: m} do
+    unlock(m)
+    # One 50 mm step: a single jog line, so only the cancel can cut it short
+    :ok = Machine.jog_step(m, {1, 0, 0}, 50)
+    assert eventually(fn -> Machine.status(m).controller == :jog end)
+    Process.sleep(300)
+    :ok = Machine.jog_stop(m)
+
+    assert eventually(fn -> Machine.status(m).controller == :idle end, 5000)
+    {x, _, _} = Machine.status(m).mpos
+    assert x < 40, "ran on to #{x} mm: the jog cancel (0x85) didn't reach the firmware"
   end
 
   test "losing the heartbeat stops the firmware", %{m: m} do

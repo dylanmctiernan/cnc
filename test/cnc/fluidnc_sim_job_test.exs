@@ -61,4 +61,30 @@ defmodule CNC.FluidNCSim.JobTest do
     assert eventually(fn -> Machine.status(m).state == :idle end, 15_000)
     assert %{result: :done, acked: 5} = Machine.status(m).last_job
   end
+
+  test "feed and rapid overrides reach the firmware mid-job, and it reports them", %{m: m} do
+    unlock(m)
+    # 60 mm at 10 mm/s: 6 s at 100%; a pause there (so a report sees it), a rapid back
+    program = "G21 G90\nG1 X60 F600\nG4 P1\nG0 X0\n"
+    t0 = System.monotonic_time(:millisecond)
+    :ok = Machine.run(m, "ov.nc", program)
+    assert eventually(fn -> Machine.status(m).controller == :run end, 3000)
+
+    for _ <- 1..5, do: :ok = Machine.feed_override(m, :plus10)
+    assert eventually(fn -> match?({150, _, _}, Machine.status(m).overrides) end, 3000)
+    assert eventually(fn -> elem(Machine.status(m).mpos, 0) >= 59.9 end, 10_000)
+    cut = System.monotonic_time(:millisecond) - t0
+    # At 150% the cut is 4 s (plus the moment before the override): well
+    # under the 6 s it takes at 100%
+    assert cut < 5500, "the cut took #{cut} ms: the feed override didn't take"
+
+    :ok = Machine.rapid_override(m, 25)
+    assert eventually(fn -> match?({150, 25, _}, Machine.status(m).overrides) end, 3000)
+    assert eventually(fn -> Machine.status(m).state == :idle end, 15_000)
+    assert %{result: :done} = Machine.status(m).last_job
+
+    :ok = Machine.feed_override(m, :reset)
+    :ok = Machine.rapid_override(m, 100)
+    assert eventually(fn -> match?({100, 100, _}, Machine.status(m).overrides) end, 3000)
+  end
 end

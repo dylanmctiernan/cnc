@@ -1,0 +1,15 @@
+diff --git a/FluidNC/posix/Console.cpp b/FluidNC/posix/Console.cpp
+index 48950ab1..b1d5d983 100644
+--- a/FluidNC/posix/Console.cpp
++++ b/FluidNC/posix/Console.cpp
+@@ -219,7 +219,9 @@ public:
+ 
+         char c;
+         auto ret = ::read(STDIN_FILENO, &c, 1);
+-        return ret == 1 ? c : -1;
++        // Unsigned: as signed char, bytes >= 0x80 (Grbl's extended realtime
++        // commands: overrides, jog cancel) came back negative and were dropped
++        return ret == 1 ? (uint8_t)c : -1;
+     }
+ 
+     // Channel methods

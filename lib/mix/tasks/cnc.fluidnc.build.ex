@@ -8,6 +8,10 @@ defmodule Mix.Tasks.Cnc.Fluidnc.Build do
 
       mix cnc.fluidnc.build        # -> .fluidnc/bin/fluidnc
 
+  Stock FluidNC plus the sim-only fixes in `priv/fluidnc/patches/` (they
+  touch only the native build's own I/O, never what runs on the board; the
+  board's flash checks out clean stock source).
+
   Needs git and python3. The first build installs PlatformIO into
   `.fluidnc/venv` and fetches libraries (~2 min); rebuilds take ~30 s.
   Restart the dev server afterwards.
@@ -27,6 +31,7 @@ defmodule Mix.Tasks.Cnc.Fluidnc.Build do
       end
 
     FluidNC.checkout!()
+    FluidNC.apply_sim_patches!()
     FluidNC.pio!(["run", "-e", env])
 
     # Replace, don't overwrite: macOS ties a program's code signature to the

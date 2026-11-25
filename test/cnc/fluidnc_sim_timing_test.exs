@@ -4,8 +4,8 @@ defmodule CNC.FluidNCSim.TimingTest do
   against real FluidNC firmware, timed: the estimate is close to how long
   it actually takes, progress only climbs, and time left tracks the truth.
 
-  (The native sim's console drops bytes >= 0x80, so overrides can't be
-  sent to it; their effect on the estimate is tested in isolation.)
+  (That overrides reach the firmware is in fluidnc_sim_job_test; their
+  effect on the estimate is tested in isolation.)
   """
   use CNC.FluidNCSimCase, async: true
   @moduletag timeout: 120_000

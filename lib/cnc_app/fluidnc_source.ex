@@ -34,6 +34,24 @@ defmodule CNCApp.FluidNCSource do
     ensure_platformio!()
   end
 
+  @doc """
+  Apply the sim-only patches (`priv/fluidnc/patches/*.patch`, in name
+  order) to a fresh checkout. Each fixes the native build's own I/O, code
+  the board never runs:
+
+    * `sim-console-unsigned` — its console read bytes as signed chars, so
+      Grbl's extended realtime commands (0x80 and up: overrides, jog
+      cancel) arrived negative and were dropped
+  """
+  def apply_sim_patches! do
+    for patch <- Path.wildcard(Path.join(patches_dir(), "*.patch")) |> Enum.sort(),
+        do: cmd!("git", ["-C", src_dir(), "apply", patch])
+
+    :ok
+  end
+
+  defp patches_dir, do: Path.expand("priv/fluidnc/patches")
+
   @doc "Run PlatformIO in the FluidNC source tree, streaming its output."
   def pio!(args), do: cmd!(pio_path(), args, cd: src_dir())
 
