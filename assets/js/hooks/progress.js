@@ -26,6 +26,13 @@ export function advance(data, done, [tx, ty, tz]) {
   return best > done ? best : done
 }
 
+// Whether the tool (work coordinates) is on the segment from vertex i to
+// i + 1: the live trace draws only then
+export function onSegment(data, i, [tx, ty, tz]) {
+  if (i < 0 || (i + 1) * 4 >= data.length) return false
+  return segDist2(data, i, i + 1, tx, ty, tz) <= NEAR * NEAR
+}
+
 // Squared distance from a point to the segment between vertices a and b
 function segDist2(v, a, b, px, py, pz) {
   const ax = v[a * 4 + 1], ay = v[a * 4 + 2], az = v[a * 4 + 3]

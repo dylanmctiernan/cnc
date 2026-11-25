@@ -369,6 +369,23 @@ defmodule CNCWeb.MachineLive do
   def handle_event("close_file", _, socket), do: {:noreply, assign(socket, file?: false)}
   # A file picked or dropped (on the map or in the dialog): show Auto, where
   # its upload and then its summary appear
+  # Never while a job runs: the loaded file is the one being cut (its
+  # progress, its trace); a dropped file is turned away, saying why.
+  def handle_event("validate_upload", _, %{assigns: %{machine: %{job: job}}} = socket)
+      when job != nil do
+    socket =
+      Enum.reduce(socket.assigns.uploads.gcode.entries, socket, fn entry, socket ->
+        cancel_upload(socket, :gcode, entry.ref)
+      end)
+
+    {:noreply,
+     assign(socket,
+       file_error: "A job is running: open another file once it's finished.",
+       panel: :auto
+     )
+     |> sync_console()}
+  end
+
   def handle_event("validate_upload", _, socket),
     do: {:noreply, assign(socket, file_error: nil, panel: :auto) |> sync_console()}
 
@@ -2021,6 +2038,19 @@ defmodule CNCWeb.MachineLive do
   defp upload_error(:not_accepted), do: "Choose a G-code file (.nc, .gcode, .ngc, .tap)."
   defp upload_error(:too_many_files), do: "One file at a time."
   defp upload_error(err), do: "Upload failed (#{inspect(err)})."
+
+  # (A job may have started while it uploaded: still never replace its file)
+  defp handle_progress(
+         :gcode,
+         %{done?: true} = entry,
+         %{assigns: %{machine: %{job: job}}} = socket
+       )
+       when job != nil do
+    consume_uploaded_entry(socket, entry, fn _ -> {:ok, nil} end)
+
+    {:noreply,
+     assign(socket, file_error: "A job is running: open another file once it's finished.")}
+  end
 
   defp handle_progress(:gcode, entry, socket) do
     if entry.done? do

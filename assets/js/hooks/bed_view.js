@@ -1,4 +1,4 @@
-import {Progress} from "./progress"
+import {Progress, onSegment} from "./progress"
 // Top-down bed view plus a Z gauge. Draws only positions the server reports
 // ("pos" events), interpolating between samples so the marker moves
 // smoothly at frame rate. Colour means state only: yellow moving, red alarm.
@@ -140,6 +140,7 @@ export default {
     if (this.el.dataset.trail === "true" && !job) this.pushTrail(x, y)
     else this.trailLen = 0
     if (this.program) this.progress.update(this.program.data, job, {x, y, z}, wco)
+    this.running = !!job
   },
 
   pushTrail(x, y) {
@@ -271,6 +272,29 @@ export default {
     this.ctx.drawImage(this.pathCache, 0, 0, v.width, v.height)
     this.ctx.globalAlpha = 1
     if (tracing) this.drawDone(key, dpr, wco)
+    if (tracing && this.running) this.drawLive(wco)
+  },
+
+  // The segment being cut, traced from its start to the tool as drawn, so
+  // the trace grows right behind the bit (drawDone has whole segments).
+  drawLive([ox, oy]) {
+    const d = this.program.data
+    const i = this.progress.done
+    if (i < 0 || (i + 1) * 4 >= d.length || d[(i + 1) * 4] !== 1) return
+    const [, , oz] = this.wco || [0, 0, 0]
+    if (!onSegment(d, i, [this.shown.x - ox, this.shown.y - oy, this.shown.z - oz])) return
+    const [ax, ay] = this.px(d[i * 4 + 1] + ox, d[i * 4 + 2] + oy)
+    const [bx, by] = this.px(this.shown.x, this.shown.y)
+    const ctx = this.ctx
+    ctx.save()
+    ctx.lineCap = "round"
+    ctx.strokeStyle = this.colors.done
+    ctx.lineWidth = 1.75
+    ctx.beginPath()
+    ctx.moveTo(ax, ay)
+    ctx.lineTo(bx, by)
+    ctx.stroke()
+    ctx.restore()
   },
 
   // The trace: what the job has cut, a solid green line over the ghosted

@@ -13,7 +13,7 @@
 // On mount it pushes "viewport_ready" so the page sends what it has now.
 import * as THREE from "three"
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js"
-import {Progress} from "./progress"
+import {Progress, onSegment} from "./progress"
 
 // The tool drawn to scale (mm): a 1/4" bit, its stick-out, the collet nut
 const BIT_D = 6.35
@@ -87,6 +87,7 @@ export default {
 
     this.progress = new Progress()
     this.handleEvent("pos", ({x, y, z, wco, job}) => {
+      this.running = !!job
       this.glideTo(x, y, z)
       // The jog trail (the Jog trail setting): only while jogging by hand
       if (this.el.dataset.trail === "true" && !job) this.pushTrail(x, y, z)
@@ -155,11 +156,41 @@ export default {
       const k = g.dur > 0 ? Math.min((now - g.t0) / g.dur, 1) : 1
       const lerp = (a, b) => a + (b - a) * k
       this.tool.position.set(lerp(g.from.x, g.to.x), lerp(g.from.y, g.to.y), lerp(g.from.z, g.to.z))
+      this.traceLive()
       this.renderer.render(this.scene, this.camera)
       if (k < 1) requestAnimationFrame(step)
       else this.gliding = false
     }
     requestAnimationFrame(step)
+  },
+
+  // The segment being cut, traced from its start to the tool as drawn, so
+  // the trace grows right behind the bit (paintDone colours whole segments).
+  traceLive() {
+    const d = this.pathData
+    const i = this.progress.done
+    const p = this.tool.position
+    const w = this.work.position
+    const live =
+      this.running && d && i >= 0 && (i + 1) * 4 < d.length && d[(i + 1) * 4] === 1 &&
+      onSegment(d, i, [p.x - w.x, p.y - w.y, p.z - w.z])
+    if (!live) {
+      if (this.live) this.live.visible = false
+      return
+    }
+    if (!this.live) {
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(6), 3))
+      this.live = new THREE.Line(geometry, new THREE.LineBasicMaterial({color: this.colors.done}))
+    }
+    // In the work group (work coordinates), as the path is
+    if (this.live.parent !== this.work) this.work.add(this.live)
+    const pos = this.live.geometry.attributes.position
+    pos.setXYZ(0, d[i * 4 + 1], d[i * 4 + 2], d[i * 4 + 3])
+    pos.setXYZ(1, p.x - w.x, p.y - w.y, p.z - w.z)
+    pos.needsUpdate = true
+    this.live.geometry.computeBoundingSphere()
+    this.live.visible = true
   },
 
   render() {

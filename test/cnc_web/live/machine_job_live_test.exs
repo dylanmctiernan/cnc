@@ -164,6 +164,27 @@ defmodule CNCWeb.MachineJobLiveTest do
     assert eventually(fn -> has_element?(view, "#program-panel", "quick.nc") end)
   end
 
+  test "a file dropped while a job runs is turned away; the job's file stays loaded", %{
+    conn: conn,
+    m: m,
+    program: program
+  } do
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    :ok = Machine.run(m, "square.nc", @square)
+    assert eventually(fn -> has_element?(view, "#job-panel", "square.nc") end)
+
+    file =
+      file_input(view, "#upload-form", :gcode, [
+        %{name: "quick.nc", content: File.read!("test/fixtures/quick.nc"), type: "text/plain"}
+      ])
+
+    render_upload(file, "quick.nc")
+    assert has_element?(view, "#program-panel", "A job is running")
+    assert CNC.Program.current(program).name == "square.nc"
+    :ok = Machine.abort(m)
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")
