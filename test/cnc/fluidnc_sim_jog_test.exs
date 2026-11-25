@@ -6,6 +6,11 @@ defmodule CNC.FluidNCSim.JogTest do
   Runs when FluidNC has been built (`mix cnc.fluidnc.build`); skipped otherwise
   (see test_helper.exs). Each test starts its own FluidNC in a temporary
   directory, at machine position 0,0,0.
+
+  The native sim's console reads signed chars and drops bytes >= 0x80, so
+  the jog cancel (0x85) never reaches it: here a jog stops when its few
+  queued increments run out. The board (and FluidNC's UTF-8 decoder, which
+  passes 0x80-0xBE through raw for Grbl senders) cancels at once.
   """
   use CNC.FluidNCSimCase, async: true
 

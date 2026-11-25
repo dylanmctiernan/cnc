@@ -34,6 +34,13 @@ defmodule CNC.Machine.State do
       Z vertical. `{0.0, 0.0}` when stopped.
     * `max_rate` — `{x, y, z}` max rates in mm/min, from the controller's
       `$110`–`$112`, else the configured machine maximum
+    * `accel` — `{x, y, z}` accelerations in mm/s², from the controller's
+      `$120`–`$122`, else the configured machine's
+    * `junction` — junction deviation in mm (`$11`, else configured): how
+      fast the planner takes corners. With `max_rate` and `accel`, what the
+      time estimate plans with (`CNC.GCode.Timing`)
+    * `arc_tolerance` — mm (`$12`, else 0.002): how finely the controller
+      splits arcs into planner moves
     * `jog` — current held-key vector `{dx, dy, dz}`, `{0, 0, 0}` when not jogging
     * `travel` — `{{x0, x1}, {y0, y1}, {z0, z1}}` in mm, the limits the host
       clamps jogs to (the controller's soft limits remain authoritative)
@@ -64,6 +71,9 @@ defmodule CNC.Machine.State do
             feed: nil,
             speed: {0.0, 0.0},
             max_rate: nil,
+            accel: nil,
+            junction: nil,
+            arc_tolerance: nil,
             buffer: nil,
             overrides: nil,
             job: nil,

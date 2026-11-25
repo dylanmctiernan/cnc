@@ -19,7 +19,7 @@ defmodule CNCWeb.PendantLive do
   """
   use CNCWeb, :live_view
 
-  import CNCWeb.Run, only: [fit: 2, fit_issue: 1, fraction: 2, time_left: 4, duration: 1]
+  import CNCWeb.Run, only: [fit: 2, fit_issue: 1, progress: 3, duration: 1]
 
   alias CNC.{Machine, Program}
 
@@ -521,10 +521,9 @@ defmodule CNCWeb.PendantLive do
   attr :program, :any, required: true
 
   defp job_mode(%{machine: %{job: job}} = assigns) when job != nil do
-    pct = round(fraction(job, assigns.machine) * 100)
-    elapsed = DateTime.diff(DateTime.utc_now(), job.started_at)
+    %{fraction: fraction, left: left} = progress(job, assigns.machine, assigns.program)
+    pct = round(fraction * 100)
     {feed_ov, rapid_ov, _} = assigns.machine.overrides || {100, 100, 100}
-    left = time_left(pct / 100, elapsed, assigns.program, feed_ov)
 
     assigns =
       assign(assigns, pct: pct, left: left, feed_ov: feed_ov, rapid_ov: rapid_ov, job: job)

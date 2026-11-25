@@ -54,10 +54,12 @@ defmodule CNC.GCodeTest do
     assert :inches in kinds(p)
   end
 
-  test "time: feeds at their F, rapids at the rapid rate, dwells" do
-    p = parse("G0 X0 Y0\nG1 X100 F600\nG0 X0\nG4 P2", rapid_rate: 6000)
-    # 100 mm at 600 mm/min = 10 s; 100 mm at 6000 = 1 s; dwell 2 s
-    assert_in_delta p.seconds, 13.0, 1.0e-9
+  test "time: feeds at their F, rapids at the max rate, with acceleration; dwells" do
+    p = parse("G0 X0 Y0\nG1 X100 F600\nG0 X0\nG4 P2", max_rate: {6000.0, 6000.0, 1200.0})
+    # 100 mm at 10 mm/s, 0.02 s up and down at 500 mm/s² (0.1 mm each):
+    # 10.02 s. It reverses, so stops. 100 mm rapid at 100 mm/s: 0.2 s up
+    # and down (10 mm each), 80 mm at speed: 1.2 s. Dwell 2 s.
+    assert_in_delta p.seconds, 10.02 + 1.2 + 2.0, 1.0e-6
   end
 
   test "a quarter arc (G3, I/J) ends exactly and stays on the circle" do

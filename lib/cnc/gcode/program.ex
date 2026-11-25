@@ -13,8 +13,12 @@ defmodule CNC.GCode.Program do
       {z_min, z_max}}` over all moves / feed (cutting) moves only; `nil` if
       none
     * `cut_mm`, `rapid_mm` — path lengths
-    * `seconds` — rough run time: feeds at their F, rapids at the rapid rate,
-      plus dwells; acceleration ignored, so real jobs take longer
+    * `seconds` — run time at 100% feed and rapids, as the controller's
+      planner would move it: feeds, max rates, acceleration, corners,
+      dwells (`CNC.GCode.Timing`)
+    * `timeline` — the same, line by line, cumulative and split into
+      feed, rapid and fixed time (`CNC.GCode.Timing.at/2`), so progress
+      can be measured in time and overrides applied
     * `tools` — tool numbers in `M6` order; `max_spindle` — highest `S`
     * `warnings` — `[%{kind, line, count}]`: things the preview can't show
       faithfully, first occurrence first
@@ -31,6 +35,7 @@ defmodule CNC.GCode.Program do
           cut_mm: float,
           rapid_mm: float,
           seconds: float,
+          timeline: binary,
           tools: [integer | nil],
           max_spindle: float,
           warnings: [%{kind: term, line: non_neg_integer, count: pos_integer}]
@@ -44,6 +49,7 @@ defmodule CNC.GCode.Program do
             cut_mm: 0.0,
             rapid_mm: 0.0,
             seconds: 0.0,
+            timeline: <<>>,
             tools: [],
             max_spindle: 0.0,
             warnings: []

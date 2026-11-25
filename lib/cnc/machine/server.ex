@@ -540,7 +540,11 @@ defmodule CNC.Machine.Server do
         {:idle, d, [{:reply, from, {:error, :busy}}]}
 
       true ->
-        case Job.new(name, text, mode: mode, single_block?: d.single_block_next?) do
+        case Job.new(name, text,
+               mode: mode,
+               single_block?: d.single_block_next?,
+               start: d.status && d.status.wpos
+             ) do
           {:ok, job} ->
             d =
               log(
@@ -594,11 +598,18 @@ defmodule CNC.Machine.Server do
 
   ## Controller responses
 
-  # WCO only comes every few reports: carry the last one forward so work
-  # positions don't flicker. It's dropped with the rest of the status on
-  # reconnect or controller reset.
+  # WCO and the overrides (Ov) only come every few reports: carry the last
+  # ones forward so work positions and override percentages don't flicker.
+  # They're dropped with the rest of the status on reconnect or controller
+  # reset.
   defp response({:status, status}, s, d) do
     status = Status.with_wco(status, d.status && d.status.wco)
+
+    status =
+      if status.overrides == nil and d.status,
+        do: %{status | overrides: d.status.overrides},
+        else: status
+
     prev_mpos = d.status && d.status.mpos
 
     # A work-position report before any offset is known can't be placed on
@@ -668,12 +679,15 @@ defmodule CNC.Machine.Server do
   # Running: done once everything is sent and acked and the controller has
   # come to rest (Idle). Hold, Run and the rest are part of the job.
   defp on_status(:running, :idle, d) do
+    d = track_pause(d, :idle)
+
     if Job.drained?(d.job) and not d.motion_unsettled?,
       do: {:idle, end_job(d, if(d.job.error, do: :error, else: :done)), []},
       else: {:running, d, []}
   end
 
-  defp on_status(:running, _reported, d), do: {:running, d, []}
+  defp on_status(:running, reported, d), do: {:running, track_pause(d, reported), []}
+
   defp on_status(s, _, d) when s in [:alarm, :homing], do: {s, d, []}
 
   # Stopping: a Jog report means a line ran past the cancel; cancel again.
@@ -1094,7 +1108,9 @@ defmodule CNC.Machine.Server do
       Job.waiting?(job) and d.status != nil and d.status.state == :idle and
         not d.motion_unsettled?
 
-    Map.put(Job.summary(job), :waiting?, waiting?)
+    job
+    |> Job.summary()
+    |> Map.merge(%{waiting?: waiting?, paused_s: Job.paused_ms(job, now()) / 1000})
   end
 
   # Send job lines while they fit in the controller's buffer.
@@ -1198,6 +1214,9 @@ defmodule CNC.Machine.Server do
       feed: d.status && d.status.feed,
       speed: speed(d),
       max_rate: max_rate(d),
+      accel: accel(d),
+      junction: junction(d),
+      arc_tolerance: rate(d.settings[12], machine_config(:arc_tolerance, 0.002)),
       buffer: d.status && d.status.buffer,
       overrides: d.status && d.status.overrides,
       job: job_snapshot(d),
@@ -1273,6 +1292,14 @@ defmodule CNC.Machine.Server do
 
   defp speed(_), do: {0.0, 0.0}
 
+  # Time the job isn't taking: on hold, door open, or waiting for Next line
+  defp track_pause(%{job: nil} = d, _reported), do: d
+
+  defp track_pause(%{job: job} = d, reported) do
+    paused? = reported in [:hold, :door] or (reported == :idle and Job.waiting?(job))
+    %{d | job: Job.pause(job, paused?, now())}
+  end
+
   # Max rates in mm/min: the controller's $110-$112 when it reports them,
   # else the configured machine maximum.
   defp max_rate(d) do
@@ -1280,6 +1307,18 @@ defmodule CNC.Machine.Server do
 
     {rate(d.settings[110], cx), rate(d.settings[111], cy), rate(d.settings[112], cz)}
   end
+
+  # Accelerations in mm/s² ($120-$122) and junction deviation in mm ($11),
+  # else the configured machine's (as the FluidNC config's defaults here).
+  defp accel(d) do
+    {cx, cy, cz} = machine_config(:accel, {500.0, 500.0, 200.0})
+    {rate(d.settings[120], cx), rate(d.settings[121], cy), rate(d.settings[122], cz)}
+  end
+
+  defp junction(d), do: rate(d.settings[11], machine_config(:junction_deviation, 0.01))
+
+  defp machine_config(key, default),
+    do: :cnc |> Application.get_env(:machine, []) |> Keyword.get(key, default)
 
   defp rate(nil, fallback), do: fallback
 

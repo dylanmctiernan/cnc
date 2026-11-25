@@ -2,8 +2,8 @@ defmodule CNCWeb.Run do
   @moduledoc """
   What the screens say about running a program, shared by the machine
   screen and the pendant: whether it fits the travel from the work zero
-  (and what to do if not), how far a running job has got, how long is
-  left, and durations as a clock reads.
+  (and what to do if not), how far a running job has got and how long is
+  left (by time, not lines: `CNC.GCode.Timing`), and durations as a clock reads.
   """
 
   alias CNC.Machine.State
@@ -51,36 +51,198 @@ defmodule CNCWeb.Run do
       "Move the work zero #{mm(out)} mm #{opposite(edge)}."
   end
 
-  # How much has actually run: the controller accepts lines into its
-  # planner well ahead of the tool, so the lines acked minus the moves still
-  # waiting there (its status: Bf, planner blocks free) estimate what's
-  # been done. On a short file the planner can hold most of it.
+  # The controller acks a line when it's planned, well ahead of the tool:
+  # its planner holds up to 15 moves (status: Bf, blocks free), and an arc
+  # is many of them, some planned before the arc's line is acked. So which
+  # line is being cut comes from where the tool is: the nearest of the
+  # lines that can be running (those recently acked, and the one being
+  # taken in) within @near mm, and how far along it. If the tool isn't on
+  # any of them, from the planner: walking back from the newest line acked
+  # past the blocks still waiting.
   @planner_blocks 15
-
-  @doc "How much of a running job has run, 0.0..1.0."
-  def fraction(%{total: total}, _machine) when total == 0, do: 0.0
-
-  def fraction(job, %State{buffer: buffer}) do
-    waiting =
-      case buffer do
-        {free, _} when is_integer(free) -> max(@planner_blocks - free, 0)
-        _ -> 0
-      end
-
-    min(max(job.acked - waiting, 0) / job.total, 1.0)
-  end
+  @near 0.5
 
   @doc """
-  Seconds left: early on, from the file's estimate (at the feed override);
-  once a few percent are done, from the pace so far. nil if unknown.
+  A running job's progress: `%{fraction, left, elapsed}`.
+
+    * `fraction` (0.0..1.0) — the time the program has run, at 100%, over
+      its whole time (`CNC.GCode.Timing`): a line of a long slow cut counts
+      for more than one of a quick move. By lines when there's no timeline
+      for it (another file, or a check run, where nothing moves).
+    * `left` — seconds: what remains of the timeline at the current feed
+      and rapid overrides, scaled by how the machine's actual pace compares
+      with the estimate so far (between ½ and 2×), trusted more as more of
+      it has run.
+      nil for a check run.
+    * `elapsed` — seconds the job has been running, not counting time
+      paused (on hold, door open, waiting for Next line).
   """
-  def time_left(fraction, _elapsed, %Program{gcode: %{seconds: secs}}, ov) when fraction < 0.05,
-    do: round(secs * (1 - fraction) * 100 / max(ov, 10))
+  def progress(job, %State{} = machine, program) do
+    elapsed = max(DateTime.diff(DateTime.utc_now(), job.started_at) - (job[:paused_s] || 0), 0)
+    {feed_ov, rapid_ov, _} = machine.overrides || {100, 100, 100}
 
-  def time_left(fraction, elapsed, _program, _ov) when fraction > 0 and fraction < 1,
-    do: round(elapsed / fraction - elapsed)
+    case timed(job, program) do
+      nil ->
+        %{fraction: line_fraction(job, machine), left: nil, elapsed: round(elapsed)}
 
-  def time_left(_, _, _, _), do: nil
+      program ->
+        {lead, lead_done} = lead_in(program, job, machine)
+
+        on_path =
+          done(
+            program,
+            job,
+            machine,
+            &(Program.seconds(add(lead, &1), feed_ov, rapid_ov) - elapsed)
+          )
+
+        total = add(lead, Program.time_total(program))
+
+        # Before the program's first move: how far through the lead-in
+        done =
+          if on_path == {0.0, 0.0, 0.0},
+            do: scale(lead, lead_done),
+            else: add(lead, on_path)
+
+        total_100 = Program.seconds(total)
+        fraction = if total_100 > 0, do: min(Program.seconds(done) / total_100, 1.0), else: 0.0
+
+        total_now = Program.seconds(total, feed_ov, rapid_ov)
+        done_now = Program.seconds(done, feed_ov, rapid_ov)
+        left = max(total_now - done_now, 0.0)
+
+        # The machine's own pace (how long the part done has actually
+        # taken, against the estimate), trusted more the further it's got:
+        # early on a fixed delay (the spindle spinning up, the first status)
+        # would skew it
+        pace =
+          if done_now >= 5.0 and elapsed > 0,
+            do: 1 + (min(max(elapsed / done_now, 0.5), 2.0) - 1) * fraction,
+            else: 1.0
+
+        %{fraction: fraction, left: round(left * pace), elapsed: round(elapsed)}
+    end
+  end
+
+  # The program, if it's the job's file and has a timeline
+  defp timed(%{mode: :check}, _program), do: nil
+
+  defp timed(%{name: name}, %Program{name: name} = program),
+    do: if(Program.time_total(program), do: program)
+
+  defp timed(_job, _program), do: nil
+
+  # Time done, through the line being cut. off_by: how far a time done is
+  # from the time the job has actually been running.
+  defp done(program, job, machine, off_by) do
+    recent = job[:recent] || []
+    {floor, from_blocks} = walk(program, recent, waiting(machine))
+
+    case locate(program, job, machine, floor, off_by) do
+      nil -> from_blocks
+      done -> done
+    end
+  end
+
+  # From the planner: walking back from the newest line acked past the
+  # blocks still waiting. {the line that gives, the time done}. A lower
+  # bound: an arc being taken in has blocks waiting that aren't its acked
+  # lines'.
+  defp walk(_program, [], _waiting), do: {0, {0.0, 0.0, 0.0}}
+  defp walk(program, recent, waiting), do: walk(program, recent, waiting, nil)
+
+  # More waiting than lines remembered: up to the oldest
+  defp walk(program, [], _waiting, oldest), do: {oldest, Program.time_at(program, oldest - 1)}
+
+  defp walk(program, [line | older], waiting, _) do
+    blocks = Program.time_blocks(program, line)
+
+    cond do
+      waiting <= 0 ->
+        {line, Program.time_at(program, line)}
+
+      # Being cut: (blocks - waiting) of its blocks done
+      blocks >= waiting ->
+        {line,
+         lerp(
+           Program.time_at(program, line - 1),
+           Program.time_at(program, line),
+           (blocks - waiting) / blocks
+         )}
+
+      true ->
+        walk(program, older, waiting - blocks, line)
+    end
+  end
+
+  # From where the tool is: of the lines that can be running (from the
+  # planner's lower bound up to the one being taken in), those whose moves
+  # it's on (within @near mm), and how far along. Where more than one is
+  # (a point two passes share), the one whose time done is nearest the
+  # time the job has been running: they're usually a whole pass apart.
+  defp locate(program, job, %State{wpos: {x, y, z}}, floor, off_by) do
+    # A dry run cuts the same path, Z lifted
+    lift = lift(job)
+
+    [job[:feeding] | job[:recent] || []]
+    |> Enum.reject(&(is_nil(&1) or &1 < floor))
+    |> Enum.uniq()
+    |> Enum.flat_map(fn line ->
+      case Program.locate(program, line, {x, y, z - lift}) do
+        {d, along} when d <= @near ->
+          [lerp(Program.time_at(program, line - 1), Program.time_at(program, line), along)]
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.min_by(&abs(off_by.(&1)), fn -> nil end)
+  end
+
+  defp locate(_program, _job, _machine, _floor, _off_by), do: nil
+
+  # The lead-in: from where the tool was at Start to the program's first
+  # move (the file's opening moves, which can't be timed until it starts).
+  # {its time, how far through it the tool is}.
+  defp lead_in(program, %{start: {_, _, _} = start} = job, %State{wpos: {_, _, _} = now} = m) do
+    lift = lift(job)
+
+    case Program.lead_in(program, start,
+           max_rate: m.max_rate,
+           accel: m.accel,
+           junction: m.junction
+         ) do
+      {lead, {x, y, z}} ->
+        to = {x, y, z + lift}
+        whole = distance(start, to)
+        {lead, if(whole > 0, do: min(max(1 - distance(now, to) / whole, 0.0), 1.0), else: 1.0)}
+
+      nil ->
+        {{0.0, 0.0, 0.0}, 1.0}
+    end
+  end
+
+  defp lead_in(_program, _job, _machine), do: {{0.0, 0.0, 0.0}, 1.0}
+
+  defp lift(%{mode: {:dry, mm}}), do: mm
+  defp lift(_job), do: 0
+
+  defp distance({ax, ay, az}, {bx, by, bz}),
+    do: :math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by) + (az - bz) * (az - bz))
+
+  defp add({f0, r0, x0}, {f1, r1, x1}), do: {f0 + f1, r0 + r1, x0 + x1}
+  defp scale({f, r, x}, t), do: {f * t, r * t, x * t}
+
+  defp lerp({f0, r0, x0}, {f1, r1, x1}, t),
+    do: {f0 + (f1 - f0) * t, r0 + (r1 - r0) * t, x0 + (x1 - x0) * t}
+
+  defp waiting(%State{buffer: {free, _}}) when is_integer(free),
+    do: max(@planner_blocks - free, 0)
+
+  defp waiting(_), do: 0
+
+  defp line_fraction(%{total: total}, _machine) when total == 0, do: 0.0
+  defp line_fraction(job, machine), do: min(max(job.acked - waiting(machine), 0) / job.total, 1.0)
 
   @doc "Seconds as a clock reads: 4:05, 1:02:03."
   def duration(seconds) when is_integer(seconds) and seconds >= 3600,

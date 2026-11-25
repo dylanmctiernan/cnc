@@ -8,7 +8,7 @@ defmodule CNCWeb.MachineLive do
   use CNCWeb, :live_view
 
   alias CNC.{Machine, Program}
-  import CNCWeb.Run, only: [fit: 2, fit: 3, fit_issue: 1, fraction: 2, time_left: 4, duration: 1]
+  import CNCWeb.Run, only: [fit: 2, fit: 3, fit_issue: 1, progress: 3, duration: 1]
 
   alias CNC.Machine.State
 
@@ -1544,17 +1544,13 @@ defmodule CNCWeb.MachineLive do
 
   # The running job: how far, how long, the feed override, Abort.
   defp job_panel(assigns) do
-    fraction = fraction(assigns.job, assigns.machine)
-    elapsed = DateTime.diff(DateTime.utc_now(), assigns.job.started_at)
+    %{fraction: fraction, left: left, elapsed: elapsed} =
+      progress(assigns.job, assigns.machine, assigns.program)
+
     {feed_ov, _, _} = assigns.machine.overrides || {100, 100, 100}
 
     assigns =
-      assign(assigns,
-        pct: round(fraction * 100),
-        elapsed: elapsed,
-        left: time_left(fraction, elapsed, assigns.program, feed_ov),
-        feed_ov: feed_ov
-      )
+      assign(assigns, pct: round(fraction * 100), elapsed: elapsed, left: left, feed_ov: feed_ov)
 
     ~H"""
     <section class="cnc-job" id="job-panel" aria-label="Job">
@@ -2075,10 +2071,14 @@ defmodule CNCWeb.MachineLive do
       text =
         consume_uploaded_entry(socket, entry, fn %{path: path} -> {:ok, File.read!(path)} end)
 
-      {mx, my, _} = socket.assigns.machine.max_rate || {3000.0, 3000.0, 1200.0}
+      # Timed as this machine's planner would move it
+      m = socket.assigns.machine
 
       case Program.load(entry.client_name, text,
-             rapid_rate: min(mx, my),
+             max_rate: m.max_rate,
+             accel: m.accel,
+             junction: m.junction,
+             arc_tolerance: m.arc_tolerance,
              server: socket.assigns.cnc.program
            ) do
         {:ok, _} ->

@@ -71,6 +71,36 @@ defmodule CNC.Machine.JobTest do
     end
   end
 
+  describe "Job: what progress needs" do
+    test "recent: the file line numbers acked, newest first, the last 32" do
+      text = "(header)\n" <> Enum.map_join(1..40, "\n", &"G1 X#{&1} F100")
+      {:ok, job} = Job.new("a.nc", text)
+      {_, job} = take_all(job, [])
+      job = Enum.reduce(1..3, job, fn _, j -> Job.ack(j, :ok) end)
+      # File lines 2, 3, 4 (line 1 is the comment)
+      assert job.recent == [4, 3, 2]
+
+      # Send and ack the rest, a line at a time as the buffer allows
+      job = ack_all(job)
+      assert job.acked == 40
+      assert length(job.recent) == 32
+      assert hd(job.recent) == 41
+    end
+
+    test "pauses are summed, a pause in progress counted up to now" do
+      {:ok, job} = Job.new("a.nc", "G1 X1 F100\n")
+      job = Job.pause(job, true, 1_000)
+      # Repeated reports while held don't restart it
+      job = Job.pause(job, true, 1_500)
+      assert Job.paused_ms(job, 3_000) == 2_000
+      job = Job.pause(job, false, 4_000)
+      job = Job.pause(job, false, 9_000)
+      assert Job.paused_ms(job, 9_000) == 3_000
+      job = job |> Job.pause(true, 10_000) |> Job.pause(false, 10_500)
+      assert job.paused_ms == 3_500
+    end
+  end
+
   describe "running a file (FakeSim)" do
     setup do
       m = start_machine({CNC.Link.FakeSim, homing_ms: 50}, "job-#{System.unique_integer()}")
@@ -98,6 +128,23 @@ defmodule CNC.Machine.JobTest do
       assert {:error, {:invalid_state, :running}} = Machine.jog(m, {1, 0}, :normal)
       assert {:error, {:invalid_state, :running}} = Machine.send_raw(m, "G0 X100")
       assert {:error, {:invalid_state, :running}} = Machine.set_work_zero(m, [:x])
+    end
+
+    test "time on hold is kept apart (for time left): it grows while held, not after", %{m: m} do
+      :ok = Machine.run(m, "square.nc", @square)
+      assert eventually(fn -> Machine.status(m).controller == :run end)
+      assert Machine.status(m).job.paused_s == 0
+
+      :ok = Machine.feed_hold(m)
+      assert eventually(fn -> Machine.status(m).job.paused_s >= 0.3 end, 3000)
+
+      :ok = Machine.resume(m)
+      assert eventually(fn -> Machine.status(m).controller == :run end)
+      settled = Machine.status(m).job.paused_s
+      assert eventually(fn -> Machine.status(m).job.paused_s == settled end)
+      _ = :sys.get_state(m)
+      assert Machine.status(m).job.paused_s == settled
+      :ok = Machine.abort(m)
     end
 
     test "Hold pauses inside the job, Resume carries on", %{m: m} do
@@ -212,6 +259,14 @@ defmodule CNC.Machine.JobTest do
       :ok = Machine.feed_override(m, :reset)
       assert eventually(fn -> Machine.status(m).overrides == {100, 100, 100} end)
     end
+  end
+
+  defp ack_all(job) do
+    {_, job} = take_all(job, [])
+
+    if :queue.is_empty(job.in_flight),
+      do: job,
+      else: job |> Job.ack(:ok) |> ack_all()
   end
 
   defp take_all(job, acc) do

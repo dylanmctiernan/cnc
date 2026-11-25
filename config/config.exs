@@ -37,7 +37,13 @@ config :cnc, :data_dir, Path.expand("../.cnc", __DIR__)
 config :cnc, :machine,
   travel: {{0.0, 1250.0}, {0.0, 1250.0}, {-100.0, 0.0}},
   # Max rates in mm/min, until the controller reports its own ($110-$112).
-  max_rate: {3000.0, 3000.0, 1200.0}
+  max_rate: {3000.0, 3000.0, 1200.0},
+  # For the time estimate, until the controller reports its own:
+  # accelerations in mm/s² ($120-$122) and junction deviation in mm ($11)
+  accel: {500.0, 500.0, 200.0},
+  junction_deviation: 0.01,
+  # How finely the controller splits arcs into planner moves, mm ($12)
+  arc_tolerance: 0.002
 
 # G-code file extensions, so uploads can accept them (and the browser's file
 # picker filters for them). Changing this needs `mix deps.clean mime --build`.

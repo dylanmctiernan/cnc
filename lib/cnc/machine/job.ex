@@ -31,6 +31,13 @@ defmodule CNC.Machine.Job do
       relative to it; machine-coordinate G53 lines are left alone), and
       spindle on (M3/M4) is dropped.
 
+  For progress and time left: `recent`, the file line numbers of the last
+  #{32} lines acked, newest first (the controller acks a line when it's
+  planned, well before it runs: with the planner's waiting moves, these say
+  which line is actually being cut), and the time spent paused (on hold,
+  door open, or waiting for Next line in single block), which isn't
+  time the job is taking.
+
   Single block (`single_block?`, switchable mid-job): one line per Cycle
   Start. The job holds a `credit` of lines it may send; with single block
   on, each Start grants one (the server only grants it once the controller
@@ -57,7 +64,11 @@ defmodule CNC.Machine.Job do
           mode: :run | :check | {:dry, number},
           errors: [{code :: term, line_no :: pos_integer, text :: String.t()}],
           single_block?: boolean,
-          credit: non_neg_integer | :infinity
+          credit: non_neg_integer | :infinity,
+          recent: [pos_integer],
+          paused_ms: non_neg_integer,
+          paused_since: integer | nil,
+          start: {float, float, float} | nil
         }
 
   defstruct [
@@ -78,8 +89,16 @@ defmodule CNC.Machine.Job do
     mode: :run,
     errors: [],
     single_block?: false,
-    credit: :infinity
+    credit: :infinity,
+    recent: [],
+    paused_ms: 0,
+    paused_since: nil,
+    # Where the tool was (work coordinates) at Start: the file's first moves
+    # go from here, so their time can only be known now
+    start: nil
   ]
+
+  @recent 32
 
   @doc """
   A job from a file's text. `{:error, :empty}` if nothing would be sent,
@@ -123,7 +142,8 @@ defmodule CNC.Machine.Job do
            started_at: now,
            mode: mode,
            single_block?: single_block?,
-           credit: if(single_block?, do: 1, else: :infinity)
+           credit: if(single_block?, do: 1, else: :infinity),
+           start: Keyword.get(opts, :start)
          }}
     end
   end
@@ -216,7 +236,8 @@ defmodule CNC.Machine.Job do
       | in_flight: in_flight,
         bytes: job.bytes - size,
         acked: job.acked + 1,
-        last_line: n
+        last_line: n,
+        recent: Enum.take([n | job.recent], @recent)
     }
 
     case {result, job.mode} do
@@ -225,6 +246,31 @@ defmodule CNC.Machine.Job do
       {{:error, code}, :run} -> %{job | error: job.error || {code, n, text}, halted?: true}
     end
   end
+
+  # The oldest line sent and not yet acked: the one the controller is
+  # taking in (an arc's first moves can be in its planner already)
+  defp feeding(job) do
+    case :queue.peek(job.in_flight) do
+      {:value, {n, _, _}} -> n
+      :empty -> nil
+    end
+  end
+
+  @doc """
+  Whether the job is paused now (`now` in monotonic ms): pauses are
+  summed, so the time the job is taking can leave them out.
+  """
+  @spec pause(t, boolean, integer) :: t
+  def pause(%__MODULE__{paused_since: nil} = job, true, now), do: %{job | paused_since: now}
+
+  def pause(%__MODULE__{paused_since: since} = job, false, now) when since != nil,
+    do: %{job | paused_ms: job.paused_ms + (now - since), paused_since: nil}
+
+  def pause(job, _paused?, _now), do: job
+
+  @doc "Milliseconds paused so far, counting a pause still going on."
+  def paused_ms(%__MODULE__{paused_since: nil, paused_ms: ms}, _now), do: ms
+  def paused_ms(%__MODULE__{paused_since: since, paused_ms: ms}, now), do: ms + (now - since)
 
   @doc "Single block: may the next line go? (one more)"
   def grant(%__MODULE__{single_block?: true} = job), do: %{job | credit: 1}
@@ -268,7 +314,10 @@ defmodule CNC.Machine.Job do
       mode: job.mode,
       errors: job.errors,
       single_block?: job.single_block?,
-      next: peek(job)
+      next: peek(job),
+      recent: job.recent,
+      feeding: feeding(job),
+      start: job.start
     }
   end
 end

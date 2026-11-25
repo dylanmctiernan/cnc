@@ -17,29 +17,34 @@ defmodule CNC.GCode do
 
   Arcs are drawn as chords at most `@chord_tolerance` mm off the true arc.
   """
-  use Boundary, deps: [], exports: [Program]
+  use Boundary, deps: [], exports: [Program, Timing]
 
-  alias CNC.GCode.Program
+  alias CNC.GCode.{Program, Timing}
 
   # Preview resolution: the 1250 mm bed is ~1.5 mm a pixel on most screens.
   @chord_tolerance 0.1
   @max_arc_chords 128
 
   @doc """
-  Parse a G-code file. Options:
+  Parse a G-code file. Options, for the time estimate (`CNC.GCode.Timing`):
 
-    * `:rapid_rate` — mm/min used for G0 in the time estimate (default 3000)
+    * `:max_rate` — `{x, y, z}` mm/min (default `{3000, 3000, 1200}`)
+    * `:accel` — `{x, y, z}` mm/s² (default `{500, 500, 200}`)
+    * `:junction` — junction deviation, mm (default 0.01)
+    * `:arc_tolerance` — mm (default 0.002, `$12`): how finely the
+      controller splits an arc into planner moves, for progress
   """
   @spec parse(binary, keyword) :: Program.t()
   def parse(text, opts \\ []) when is_binary(text) do
-    rapid_rate = Keyword.get(opts, :rapid_rate, 3000.0)
-
     {state, _} =
       text
       |> String.split(["\r\n", "\n", "\r"])
-      |> Enum.reduce({initial(), 1}, fn line, {st, n} -> {interpret(st, line, n), n + 1} end)
+      |> Enum.reduce(
+        {%{initial() | arc_tol: Keyword.get(opts, :arc_tolerance, 0.002)}, 1},
+        fn line, {st, n} -> {interpret(st, line, n), n + 1} end
+      )
 
-    finish(state, rapid_rate)
+    finish(state, opts)
   end
 
   ## Interpreter state
@@ -65,6 +70,10 @@ defmodule CNC.GCode do
       cut_mm: 0.0,
       cut_minutes: 0.0,
       dwell_s: 0.0,
+      # For the time estimate: every move (arcs as their chords) and dwell,
+      # reversed
+      moves: [],
+      arc_tol: 0.002,
       tools: [],
       tool: nil,
       max_spindle: 0.0,
@@ -157,7 +166,7 @@ defmodule CNC.GCode do
     st = if s = get.("S"), do: %{st | max_spindle: max(st.max_spindle, s)}, else: st
     st = if t = get.("T"), do: %{st | tool: trunc(t)}, else: st
     st = Enum.reduce(ms, st, &m_code(&2, &1, n))
-    st = if Enum.any?(gs, &(&1 == 4.0)), do: dwell(st, get.("P")), else: st
+    st = if Enum.any?(gs, &(&1 == 4.0)), do: dwell(st, get.("P"), n), else: st
 
     unknown = for l <- Map.keys(values), l not in ~w(G M X Y Z I J K R F S T P N), do: l
     st = Enum.reduce(unknown, st, &warn(&2, {:unknown_word, &1}, n))
@@ -210,8 +219,10 @@ defmodule CNC.GCode do
     end
   end
 
-  defp dwell(st, nil), do: st
-  defp dwell(st, p), do: %{st | dwell_s: st.dwell_s + p}
+  defp dwell(st, nil, _n), do: st
+
+  defp dwell(st, p, n),
+    do: %{st | dwell_s: st.dwell_s + p, moves: [{n, :dwell, p * 1.0} | st.moves]}
 
   ## Motion
 
@@ -246,7 +257,7 @@ defmodule CNC.GCode do
 
       true ->
         case arc_points(st, from, to, get) do
-          {:ok, points} -> add(st, :feed, points, n)
+          {:ok, points, blocks} -> add(st, :feed, points, n, blocks)
           :error -> st |> warn(:bad_arc, n) |> add(:feed, [from, to], n)
         end
     end
@@ -256,7 +267,11 @@ defmodule CNC.GCode do
   defp target(%{absolute?: true, units: u}, v, _current), do: v * u
   defp target(%{absolute?: false, units: u}, v, current), do: current + v * u
 
-  defp add(st, kind, [first | rest], n) do
+  # blocks: the controller's planner moves for this (an arc is many, however
+  # many chords it's drawn with here); nil, one per segment.
+  defp add(st, kind, points, n, blocks \\ nil)
+
+  defp add(st, kind, [first | rest], n, blocks) do
     code = if kind == :rapid, do: 0.0, else: 1.0
     cut? = kind == :feed
 
@@ -264,19 +279,39 @@ defmodule CNC.GCode do
       {first, st.path, 0.0, 0, grow(first, st.all),
        if(cut?, do: grow(first, st.cut), else: st.cut)}
 
-    # One pass: pack each segment, sum its length, grow the bounds.
-    {_, path, len, count, all, cut} =
-      Enum.reduce(rest, acc0, fn {x1, y1, z1} = b,
-                                 {{x0, y0, z0} = a, path, len, count, all, cut} ->
+    # One pass: pack each segment, sum its length, grow the bounds, note
+    # the move for the time estimate.
+    {{_, path, len, count, all, cut}, moves} =
+      Enum.reduce(rest, {acc0, st.moves}, fn {x1, y1, z1} = b,
+                                             {{{x0, y0, z0} = a, path, len, count, all, cut},
+                                              moves} ->
         packed =
           <<code::float-32-little, x0::float-32-little, y0::float-32-little, z0::float-32-little,
             x1::float-32-little, y1::float-32-little, z1::float-32-little, n::float-32-little>>
 
-        {b, [path | packed], len + dist(a, b), count + 1, grow(b, all),
-         if(cut?, do: grow(b, cut), else: cut)}
+        d = dist(a, b)
+
+        # An arc's blocks go with its first chord
+        b_here =
+          cond do
+            blocks == nil -> 1
+            count == 0 -> blocks
+            true -> 0
+          end
+
+        moves =
+          if d > 1.0e-6,
+            do: [
+              {n, kind, d, {(x1 - x0) / d, (y1 - y0) / d, (z1 - z0) / d}, st.feed, b_here}
+              | moves
+            ],
+            else: moves
+
+        {{b, [path | packed], len + d, count + 1, grow(b, all),
+          if(cut?, do: grow(b, cut), else: cut)}, moves}
       end)
 
-    st = %{st | path: path, count: st.count + count, all: all, cut: cut}
+    st = %{st | path: path, count: st.count + count, all: all, cut: cut, moves: moves}
 
     case kind do
       :rapid ->
@@ -332,7 +367,16 @@ defmodule CNC.GCode do
             else: {cx + r * :math.cos(a), cy + r * :math.sin(a), z0 + (z1 - z0) * t}
         end
 
-      {:ok, [from | points]}
+      # The controller's split (Grbl's mc_arc, kept by FluidNC): chords at
+      # most arc_tolerance off the arc, each a planner block
+      tol = st.arc_tol
+
+      blocks =
+        if r > tol,
+          do: max(floor(abs(0.5 * sweep * r) / :math.sqrt(tol * (2 * r - tol))), 1),
+          else: 1
+
+      {:ok, [from | points], blocks}
     end
   end
 
@@ -370,7 +414,9 @@ defmodule CNC.GCode do
 
   ## Result
 
-  defp finish(st, rapid_rate) do
+  defp finish(st, opts) do
+    timeline = st.moves |> Enum.reverse() |> Timing.plan(opts)
+
     st = if st.inches?, do: warn(st, :inches, 0), else: st
     st = if st.no_feed?, do: warn(st, :no_feed, 0), else: st
 
@@ -382,7 +428,8 @@ defmodule CNC.GCode do
       bounds: st.all,
       cut_mm: st.cut_mm,
       rapid_mm: st.rapid_mm,
-      seconds: st.cut_minutes * 60 + st.rapid_mm / rapid_rate * 60 + st.dwell_s,
+      seconds: timeline |> Timing.total() |> Timing.seconds(),
+      timeline: timeline,
       tools: Enum.uniq(st.tools),
       max_spindle: st.max_spindle,
       warnings:
@@ -396,6 +443,87 @@ defmodule CNC.GCode do
 
   defp grow({x, y, z}, {{x0, x1}, {y0, y1}, {z0, z1}}),
     do: {{min(x0, x), max(x1, x)}, {min(y0, y), max(y1, y)}, {min(z0, z), max(z1, z)}}
+
+  @doc "Where the program's drawn (and timed) moves begin, or nil."
+  def first_point(%Program{
+        path: <<_::32, x::float-32-little, y::float-32-little, z::float-32-little, _::binary>>
+      }),
+      do: {x, y, z}
+
+  def first_point(%Program{}), do: nil
+
+  @doc """
+  Where `point` (work coordinates) is on file line `line`'s moves:
+  `{distance_mm, fraction}`, the distance to the nearest point of them and
+  how far along the line's whole length that point is (0.0..1.0). nil if
+  the line has no moves drawn.
+  """
+  def locate(%Program{path: path}, line, {px, py, pz}) do
+    case line_segments(path, line) do
+      [] ->
+        nil
+
+      segs ->
+        total = segs |> Enum.map(fn {a, b} -> dist(a, b) end) |> Enum.sum()
+
+        {best, _} =
+          Enum.reduce(segs, {nil, 0.0}, fn {{ax, ay, az} = a, {bx, by, bz} = b}, {best, before} ->
+            len = dist(a, b)
+            {dx, dy, dz} = {bx - ax, by - ay, bz - az}
+
+            t =
+              if len > 0,
+                do:
+                  max(
+                    0.0,
+                    min(1.0, ((px - ax) * dx + (py - ay) * dy + (pz - az) * dz) / (len * len))
+                  ),
+                else: 0.0
+
+            d = dist({ax + t * dx, ay + t * dy, az + t * dz}, {px, py, pz})
+            here = {d, if(total > 0, do: (before + t * len) / total, else: 1.0)}
+            {if(best == nil or d < elem(best, 0), do: here, else: best), before + len}
+          end)
+
+        best
+    end
+  end
+
+  # The segments drawn for one line: they're in line order, so a binary
+  # search finds the first, then read on while the line matches.
+  @seg 32
+  defp line_segments(path, line) do
+    count = div(byte_size(path), @seg)
+    first = first_seg(path, line, 0, count - 1, count)
+    take_segs(path, line, first, count, [])
+  end
+
+  defp seg_line(path, i) do
+    <<n::float-32-little>> = binary_part(path, i * @seg + 28, 4)
+    trunc(n)
+  end
+
+  defp first_seg(_path, _line, lo, hi, best) when lo > hi, do: best
+
+  defp first_seg(path, line, lo, hi, best) do
+    mid = div(lo + hi, 2)
+
+    if seg_line(path, mid) >= line,
+      do: first_seg(path, line, lo, mid - 1, mid),
+      else: first_seg(path, line, mid + 1, hi, best)
+  end
+
+  defp take_segs(_path, _line, i, count, acc) when i >= count, do: Enum.reverse(acc)
+
+  defp take_segs(path, line, i, count, acc) do
+    <<_::float-32-little, x0::float-32-little, y0::float-32-little, z0::float-32-little,
+      x1::float-32-little, y1::float-32-little, z1::float-32-little, n::float-32-little>> =
+      binary_part(path, i * @seg, @seg)
+
+    if trunc(n) == line,
+      do: take_segs(path, line, i + 1, count, [{{x0, y0, z0}, {x1, y1, z1}} | acc]),
+      else: Enum.reverse(acc)
+  end
 
   @doc """
   The segments of a parsed program as tuples:

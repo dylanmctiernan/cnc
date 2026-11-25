@@ -30,9 +30,63 @@ defmodule CNC.Program do
   end
 
   @doc """
+  The program's time, as the controller's planner would run it
+  (`CNC.GCode.Timing`): `{feed, rapid, fixed}` seconds through file line
+  `line` (`time_at/2`), or the whole file (`time_total/1`), and those as
+  seconds at given feed and rapid overrides (`seconds/3`). nil when there's
+  no timeline.
+  """
+  def time_at(%__MODULE__{gcode: %{timeline: t}}, line) when byte_size(t) > 0,
+    do: CNC.GCode.Timing.at(t, line)
+
+  def time_at(_program, _line), do: nil
+
+  def time_total(%__MODULE__{gcode: %{timeline: t}}) when byte_size(t) > 0,
+    do: CNC.GCode.Timing.total(t)
+
+  def time_total(_program), do: nil
+
+  @doc "The controller's planner blocks for file line `line` (an arc is many)."
+  def time_blocks(%__MODULE__{gcode: %{timeline: t}}, line), do: CNC.GCode.Timing.blocks(t, line)
+
+  @doc "Where `point` is on file line `line`: `{distance_mm, fraction_along}`, or nil."
+  def locate(%__MODULE__{gcode: gcode}, line, point), do: CNC.GCode.locate(gcode, line, point)
+
+  @doc """
+  The lead-in: from `from` (where the tool was at Start) to where the
+  program's timed moves begin, as the file's opening moves take it (Z, then
+  X/Y, at rapid). `{{feed, rapid, fixed} seconds, the point}`, or nil.
+  Options as `CNC.GCode.Timing.plan/2`.
+  """
+  def lead_in(%__MODULE__{gcode: gcode}, {fx, fy, fz}, opts) do
+    case CNC.GCode.first_point(gcode) do
+      nil ->
+        nil
+
+      {tx, ty, tz} = to ->
+        dz = tz - fz
+        dxy = :math.sqrt((tx - fx) * (tx - fx) + (ty - fy) * (ty - fy))
+
+        moves =
+          [
+            dz != 0 && {1, :rapid, abs(dz), {0.0, 0.0, dz / abs(dz)}, nil, 1},
+            dxy > 0 && {2, :rapid, dxy, {(tx - fx) / dxy, (ty - fy) / dxy, 0.0}, nil, 1}
+          ]
+          |> Enum.filter(& &1)
+
+        {moves |> CNC.GCode.Timing.plan(opts) |> CNC.GCode.Timing.total(), to}
+    end
+  end
+
+  def lead_in(_program, _from, _opts), do: nil
+
+  defdelegate seconds(times, feed_ov \\ 100, rapid_ov \\ 100), to: CNC.GCode.Timing
+
+  @doc """
   Parse and load a file, replacing any loaded one. Parsing runs in the
   caller. Options: `:server` (default `CNC.Program`); the rest go to
-  `CNC.GCode.parse/2` (e.g. `:rapid_rate`).
+  `CNC.GCode.parse/2` (`:max_rate`, `:accel`, `:junction`: what the time
+  estimate plans with).
   """
   @spec load(String.t(), binary, keyword) :: {:ok, t} | {:error, :not_text}
   def load(name, text, opts \\ []) do
