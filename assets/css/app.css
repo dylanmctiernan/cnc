@@ -3906,3 +3906,55 @@ body {
   flex: 1 0 auto;
 }
 
+
+/* Jog | Program: the operator panel's mode, one fixed height for both
+   (Stick/Step, the speeds and the joystick), so switching never moves
+   what's below; Program scrolls inside if it needs more */
+.cnc-modes .cnc-btn {
+  min-height: 2.5rem;
+  font-weight: 600;
+}
+.cnc-mode-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: calc(var(--joy) + 3.25rem + 2.75rem + 0.5rem);
+  min-height: 0;
+}
+.cnc-program {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  height: 100%;
+  overflow-y: auto;
+}
+.cnc-program .cnc-job,
+.cnc-program .cnc-file-side {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.cnc-program-empty {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  text-align: center;
+}
+.cnc-program-empty p {
+  margin: 0;
+}
+.cnc-program-empty-icon {
+  width: 2rem;
+  height: 2rem;
+  color: var(--text-faint);
+}
+
+/* A file dragged over the map: the map says it will take it */
+.cnc-view.phx-drop-target-active {
+  box-shadow: inset 0 0 0 2px var(--info);
+}

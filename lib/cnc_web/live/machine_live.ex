@@ -34,6 +34,10 @@ defmodule CNCWeb.MachineLive do
      socket
      |> assign(cnc: cnc, machine: machine, controller: controller, tier: :normal, step: 10)
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, step_axis: :x)
+     # The panel's mode, as on a machine's operator panel: Jog (by hand) or
+     # Program (the loaded file and the job)
+     # (Program if a file is already loaded)
+     |> assign(panel: if(program, do: :program, else: :jog))
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
@@ -73,6 +77,12 @@ defmodule CNCWeb.MachineLive do
         do: forget_note(socket, :job),
         else: socket
 
+    # A job started: the panel shows it (Jog can't be used meanwhile)
+    socket =
+      if machine.job && !socket.assigns.machine.job,
+        do: assign(socket, panel: :program),
+        else: socket
+
     {:noreply, socket |> assign(machine: machine) |> push_pos(machine)}
   end
 
@@ -86,6 +96,8 @@ defmodule CNCWeb.MachineLive do
   # A new file is shown zoomed to; clearing it goes back to the whole bed.
   def handle_info({:program, program}, socket) do
     zoom = if program, do: :file, else: :bed
+
+    socket = if program, do: assign(socket, panel: :program), else: socket
 
     {:noreply,
      socket
@@ -384,6 +396,9 @@ defmodule CNCWeb.MachineLive do
   def handle_event("dismiss", %{"note" => "travel"}, socket),
     do: {:noreply, dismiss(socket, :travel)}
 
+  def handle_event("panel", %{"mode" => mode}, socket) when mode in ~w(jog program),
+    do: {:noreply, assign(socket, panel: String.to_existing_atom(mode))}
+
   def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step),
     do: {:noreply, assign(socket, control_mode: String.to_existing_atom(mode))}
 
@@ -490,6 +505,11 @@ defmodule CNCWeb.MachineLive do
            Hold dock); a wide screen with a mouse gets the workstation (map,
            readout and jog panel, details, docked console, Hold in the bar). --%>
       <div class={["cnc", @details? && "has-console"]} data-mode={@control_mode}>
+        <%!-- The file input, always on the page: the file dialog's drop zone,
+             the map and the Program panel all feed it --%>
+        <form id="upload-form" class="cnc-sr-only" phx-change="validate_upload" phx-submit="upload">
+          <.live_file_input upload={@uploads.gcode} />
+        </form>
         <header class="cnc-bar">
           <%!-- Coded by icon and words as well as colour (ISA-101): calm when
                normal, coloured when the machine needs attention. --%>
@@ -674,7 +694,12 @@ defmodule CNCWeb.MachineLive do
           </.note>
         </div>
 
-        <section class="cnc-view" aria-label="Bed and Z">
+        <section
+          class="cnc-view"
+          aria-label="Bed and Z"
+          id="map"
+          phx-drop-target={@uploads.gcode.ref}
+        >
           <%!-- The map's own controls in a strip above it, so they never
                cover what it shows (the speed gauges, the Z scale) --%>
           <div class="cnc-view-bar">
@@ -818,133 +843,146 @@ defmodule CNCWeb.MachineLive do
             </div>
           </section>
 
-          <section class="cnc-ctl" aria-label="Jog and zero">
-            <div class="cnc-seg cnc-tabs" role="group" aria-label="Control mode">
+          <section class="cnc-ctl" aria-label="Jog and program">
+            <div class="cnc-seg cnc-modes" role="group" aria-label="Mode">
               <button
-                :for={{mode, label} <- [joystick: "Stick", step: "Step"]}
+                :for={{mode, label} <- [jog: "Jog", program: "Program"]}
                 type="button"
-                class={["cnc-btn", "cnc-tab--#{mode}"]}
-                aria-pressed={to_string(@control_mode == mode)}
-                phx-click="control_mode"
+                class="cnc-btn"
+                id={"panel-#{mode}"}
+                aria-pressed={to_string(@panel == mode)}
+                phx-click="panel"
                 phx-value-mode={mode}
               >
                 {label}
               </button>
             </div>
-
-            <%!-- Same height in every mode, so switching never moves the map --%>
-            <div class="cnc-ctl-body">
-              <div
-                :if={@control_mode != :zero}
-                class="cnc-seg cnc-speed"
-                role="group"
-                aria-label="Jog speed"
-              >
-                <button
-                  :for={{tier, {xy, z}} <- @tiers}
-                  type="button"
-                  class="cnc-btn"
-                  aria-pressed={to_string(@tier == tier)}
-                  phx-click="tier"
-                  phx-value-tier={tier}
-                  title={"#{xy} mm/s X/Y, #{z} mm/s Z at full push"}
-                >
-                  {tier}<span class="cnc-unit">{xy}/{z}</span>
-                </button>
-              </div>
-
-              <div
-                :if={@control_mode == :joystick}
-                id="joystick"
-                class="cnc-joy"
-                phx-hook="Joystick"
-                phx-update="ignore"
-                data-tier={@tier}
-                data-enabled={to_string(@machine.state in [:idle, :jogging])}
-              >
-                <div
-                  class="cnc-joy-pad"
-                  role="application"
-                  aria-label="X/Y joystick: drag to jog, release to stop"
-                >
-                  <span class="cnc-joy-label is-y" style="top: 0.25rem; left: 50%">Y+</span>
-                  <span class="cnc-joy-label is-y" style="bottom: 0.25rem; left: 50%">Y−</span>
-                  <span class="cnc-joy-label is-x" style="left: 0.5rem; top: 50%">X−</span>
-                  <span class="cnc-joy-label is-x" style="right: 0.5rem; top: 50%">X+</span>
-                  <span class="cnc-joy-knob"></span>
-                </div>
-                <div
-                  class="cnc-joy-z"
-                  role="application"
-                  aria-label="Z slider: drag up or down to jog, release to stop"
-                >
-                  <span class="cnc-joy-label is-z" style="top: 0.25rem; left: 50%">Z+</span>
-                  <span class="cnc-joy-label is-z" style="bottom: 0.25rem; left: 50%">Z−</span>
-                  <span class="cnc-joy-knob"></span>
-                </div>
-              </div>
-
-              <%!-- Step: like a handwheel pendant. Pick the axis, pick the size,
-                 then − and +. --%>
-              <div :if={@control_mode == :step} class="cnc-pendant">
-                <div class="cnc-seg" role="group" aria-label="Axis">
+            <%!-- One fixed height for both modes: switching never moves what's below --%>
+            <div class="cnc-mode-body">
+              <%= if @panel == :jog do %>
+                <div class="cnc-seg cnc-tabs" role="group" aria-label="Control mode">
                   <button
-                    :for={axis <- [:x, :y, :z]}
+                    :for={{mode, label} <- [joystick: "Stick", step: "Step"]}
                     type="button"
-                    class={["cnc-btn", "is-#{axis}"]}
-                    aria-pressed={to_string(@step_axis == axis)}
-                    phx-click="step_axis"
-                    phx-value-axis={axis}
+                    class={["cnc-btn", "cnc-tab--#{mode}"]}
+                    aria-pressed={to_string(@control_mode == mode)}
+                    phx-click="control_mode"
+                    phx-value-mode={mode}
                   >
-                    {axis |> to_string() |> String.upcase()}
+                    {label}
                   </button>
                 </div>
-                <div class="cnc-seg" role="group" aria-label="Step size in mm">
-                  <button
-                    :for={mm <- @steps}
-                    type="button"
-                    class="cnc-btn"
-                    aria-pressed={to_string(@step == mm)}
-                    phx-click="step_size"
-                    phx-value-mm={mm}
+
+                <%!-- Same height in every mode, so switching never moves the map --%>
+                <div class="cnc-ctl-body">
+                  <div
+                    :if={@control_mode != :zero}
+                    class="cnc-seg cnc-speed"
+                    role="group"
+                    aria-label="Jog speed"
                   >
-                    {mm}
-                  </button>
-                </div>
-                <div class="cnc-pendant-go">
-                  <button
-                    :for={dir <- [-1, 1]}
-                    type="button"
-                    class={["cnc-btn", "cnc-pendant-btn", "is-#{@step_axis}"]}
-                    phx-click="step"
-                    phx-value-x={if @step_axis == :x, do: dir, else: 0}
-                    phx-value-y={if @step_axis == :y, do: dir, else: 0}
-                    phx-value-z={if @step_axis == :z, do: dir, else: 0}
-                    disabled={@machine.state != :idle}
-                    aria-label={"Move #{String.upcase(to_string(@step_axis))} #{if dir < 0, do: "minus", else: "plus"} #{@step} mm"}
+                    <button
+                      :for={{tier, {xy, z}} <- @tiers}
+                      type="button"
+                      class="cnc-btn"
+                      aria-pressed={to_string(@tier == tier)}
+                      phx-click="tier"
+                      phx-value-tier={tier}
+                      title={"#{xy} mm/s X/Y, #{z} mm/s Z at full push"}
+                    >
+                      {tier}<span class="cnc-unit">{xy}/{z}</span>
+                    </button>
+                  </div>
+
+                  <div
+                    :if={@control_mode == :joystick}
+                    id="joystick"
+                    class="cnc-joy"
+                    phx-hook="Joystick"
+                    phx-update="ignore"
+                    data-tier={@tier}
+                    data-enabled={to_string(@machine.state in [:idle, :jogging])}
                   >
-                    {String.upcase(to_string(@step_axis))}{if dir < 0, do: "−", else: "+"}
-                    <span class="cnc-unit">{@step} mm</span>
-                  </button>
+                    <div
+                      class="cnc-joy-pad"
+                      role="application"
+                      aria-label="X/Y joystick: drag to jog, release to stop"
+                    >
+                      <span class="cnc-joy-label is-y" style="top: 0.25rem; left: 50%">Y+</span>
+                      <span class="cnc-joy-label is-y" style="bottom: 0.25rem; left: 50%">Y−</span>
+                      <span class="cnc-joy-label is-x" style="left: 0.5rem; top: 50%">X−</span>
+                      <span class="cnc-joy-label is-x" style="right: 0.5rem; top: 50%">X+</span>
+                      <span class="cnc-joy-knob"></span>
+                    </div>
+                    <div
+                      class="cnc-joy-z"
+                      role="application"
+                      aria-label="Z slider: drag up or down to jog, release to stop"
+                    >
+                      <span class="cnc-joy-label is-z" style="top: 0.25rem; left: 50%">Z+</span>
+                      <span class="cnc-joy-label is-z" style="bottom: 0.25rem; left: 50%">Z−</span>
+                      <span class="cnc-joy-knob"></span>
+                    </div>
+                  </div>
+
+                  <%!-- Step: like a handwheel pendant. Pick the axis, pick the size,
+                     then − and +. --%>
+                  <div :if={@control_mode == :step} class="cnc-pendant">
+                    <div class="cnc-seg" role="group" aria-label="Axis">
+                      <button
+                        :for={axis <- [:x, :y, :z]}
+                        type="button"
+                        class={["cnc-btn", "is-#{axis}"]}
+                        aria-pressed={to_string(@step_axis == axis)}
+                        phx-click="step_axis"
+                        phx-value-axis={axis}
+                      >
+                        {axis |> to_string() |> String.upcase()}
+                      </button>
+                    </div>
+                    <div class="cnc-seg" role="group" aria-label="Step size in mm">
+                      <button
+                        :for={mm <- @steps}
+                        type="button"
+                        class="cnc-btn"
+                        aria-pressed={to_string(@step == mm)}
+                        phx-click="step_size"
+                        phx-value-mm={mm}
+                      >
+                        {mm}
+                      </button>
+                    </div>
+                    <div class="cnc-pendant-go">
+                      <button
+                        :for={dir <- [-1, 1]}
+                        type="button"
+                        class={["cnc-btn", "cnc-pendant-btn", "is-#{@step_axis}"]}
+                        phx-click="step"
+                        phx-value-x={if @step_axis == :x, do: dir, else: 0}
+                        phx-value-y={if @step_axis == :y, do: dir, else: 0}
+                        phx-value-z={if @step_axis == :z, do: dir, else: 0}
+                        disabled={@machine.state != :idle}
+                        aria-label={"Move #{String.upcase(to_string(@step_axis))} #{if dir < 0, do: "minus", else: "plus"} #{@step} mm"}
+                      >
+                        {String.upcase(to_string(@step_axis))}{if dir < 0, do: "−", else: "+"}
+                        <span class="cnc-unit">{@step} mm</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              <% else %>
+                <.program_panel
+                  program={@program}
+                  machine={@machine}
+                  uploads={@uploads}
+                  file_error={@file_error}
+                />
+              <% end %>
             </div>
           </section>
 
           <%!-- Workstation only: details and keyboard --%>
           <aside class="cnc-side" aria-label="Details and keyboard">
-            <.job_panel :if={@machine.job} job={@machine.job} program={@program} machine={@machine} />
-            <section :if={@program && !@machine.job} class="cnc-file-side" aria-label="Loaded file">
-              <.program_summary program={@program} fit={fit(@program, @machine)} />
-              <div class="cnc-row">
-                <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="open_file">
-                  Open another
-                </button>
-                <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_program">
-                  Clear
-                </button>
-              </div>
-            </section>
             <h2 class="cnc-h">Controller</h2>
             <dl class="cnc-facts" aria-label="Controller details">
               <dt>planner</dt>
@@ -1066,29 +1104,19 @@ defmodule CNCWeb.MachineLive do
         >
           <div class="cnc-review-box cnc-file-box" phx-click-away="close_file">
             <h2 id="file-title" class="cnc-page-title">G-code file</h2>
-            <form id="upload-form" phx-change="validate_upload" phx-submit="upload">
-              <label class="cnc-drop" phx-drop-target={@uploads.gcode.ref}>
-                <.live_file_input upload={@uploads.gcode} class="cnc-sr-only" />
+            <div id="upload-zone">
+              <label
+                class="cnc-drop"
+                for={@uploads.gcode.ref}
+                phx-drop-target={@uploads.gcode.ref}
+              >
                 <span class="cnc-drop-main">Choose a file</span>
                 <span class="cnc-sub">
-                  or drop it here. .nc, .gcode, .ngc, .tap; up to 20 MB.
+                  or drop it here, or on the map. .nc, .gcode, .ngc, .tap; up to 20 MB.
                 </span>
               </label>
-              <%= for entry <- @uploads.gcode.entries do %>
-                <p class="cnc-sub">
-                  {entry.client_name}: {if entry.progress < 100,
-                    do: "uploading #{entry.progress}%",
-                    else: "reading"}
-                </p>
-                <p :for={err <- upload_errors(@uploads.gcode, entry)} class="cnc-set-error">
-                  {upload_error(err)}
-                </p>
-              <% end %>
-              <p :for={err <- upload_errors(@uploads.gcode)} class="cnc-set-error">
-                {upload_error(err)}
-              </p>
-              <p :if={@file_error} class="cnc-set-error">{@file_error}</p>
-            </form>
+              <.upload_status uploads={@uploads} file_error={@file_error} />
+            </div>
             <.program_summary :if={@program} program={@program} fit={fit(@program, @machine)} />
             <div class="cnc-row cnc-dialog-actions">
               <button :if={@program} type="button" class="cnc-btn" phx-click="clear_program">
@@ -1289,6 +1317,70 @@ defmodule CNCWeb.MachineLive do
     """
   end
 
+  attr :program, :any, required: true
+  attr :machine, State, required: true
+  attr :uploads, :any, required: true
+  attr :file_error, :any, required: true
+
+  # Program mode: the job while one runs; else the loaded file and Start;
+  # else an invitation to load one.
+  defp program_panel(assigns) do
+    ~H"""
+    <div class="cnc-program" id="program-panel">
+      <%= cond do %>
+        <% @machine.job -> %>
+          <.job_panel job={@machine.job} program={@program} machine={@machine} />
+        <% @program -> %>
+          <section class="cnc-file-side" aria-label="Loaded file">
+            <.program_summary program={@program} fit={fit(@program, @machine)} />
+            <div class="cnc-row">
+              <UI.button
+                variant="primary"
+                id="program-start"
+                phx-click="cycle_start"
+                disabled={cycle(@machine, @program) != :start}
+              >
+                <.icon name="hero-play" class="ui-btn-icon" /> Start…
+              </UI.button>
+              <UI.button variant="quiet" phx-click="open_file">Open another</UI.button>
+              <UI.button variant="quiet" id="program-clear" phx-click="clear_program">
+                Clear
+              </UI.button>
+            </div>
+          </section>
+        <% true -> %>
+          <div class="cnc-program-empty" id="program-empty">
+            <.icon name="hero-document-arrow-up" class="cnc-program-empty-icon" />
+            <p>No file loaded.</p>
+            <UI.button id="program-open" phx-click="open_file">Open file</UI.button>
+            <p class="cnc-sub">or drop a G-code file on the map</p>
+          </div>
+      <% end %>
+      <.upload_status uploads={@uploads} file_error={@file_error} />
+    </div>
+    """
+  end
+
+  attr :uploads, :any, required: true
+  attr :file_error, :any, required: true
+
+  defp upload_status(assigns) do
+    ~H"""
+    <%= for entry <- @uploads.gcode.entries do %>
+      <p class="cnc-sub">
+        {entry.client_name}: {if entry.progress < 100,
+          do: "uploading #{entry.progress}%",
+          else: "reading"}
+      </p>
+      <p :for={err <- upload_errors(@uploads.gcode, entry)} class="cnc-set-error">
+        {upload_error(err)}
+      </p>
+    <% end %>
+    <p :for={err <- upload_errors(@uploads.gcode)} class="cnc-set-error">{upload_error(err)}</p>
+    <p :if={@file_error} class="cnc-set-error">{@file_error}</p>
+    """
+  end
+
   attr :program, Program, required: true
   attr :machine, State, required: true
   attr :fit, :any, required: true
@@ -1342,7 +1434,7 @@ defmodule CNCWeb.MachineLive do
 
   # The running job: how far, how long, the feed override, Abort.
   defp job_panel(assigns) do
-    fraction = if assigns.job.total > 0, do: assigns.job.acked / assigns.job.total, else: 0.0
+    fraction = job_fraction(assigns.job, assigns.machine)
     elapsed = DateTime.diff(DateTime.utc_now(), assigns.job.started_at)
     {feed_ov, _, _} = assigns.machine.overrides || {100, 100, 100}
 
@@ -1379,8 +1471,10 @@ defmodule CNCWeb.MachineLive do
         <span style={"width: #{@pct}%"}></span>
       </div>
       <dl class="cnc-facts">
-        <dt>line</dt>
-        <dd class="num">{@job.line} of {(@program && @program.gcode.lines) || @job.total}</dd>
+        <dt>sent to</dt>
+        <dd class="num">
+          line {@job.line} of {(@program && @program.gcode.lines) || @job.total}
+        </dd>
         <dt>elapsed</dt>
         <dd class="num">{duration(@elapsed)}</dd>
         <dt>left</dt>
@@ -1484,6 +1578,23 @@ defmodule CNCWeb.MachineLive do
       </button>
     </div>
     """
+  end
+
+  # How much has actually run: the controller accepts lines into its
+  # planner well ahead of the tool, so the lines acked minus the moves still
+  # waiting there (its status: Bf, planner blocks free) estimate what's
+  # been done. On a short file the planner can hold most of it.
+  @planner_blocks 15
+  defp job_fraction(%{total: total}, _machine) when total == 0, do: 0.0
+
+  defp job_fraction(job, %State{buffer: buffer}) do
+    waiting =
+      case buffer do
+        {free, _} when is_integer(free) -> max(@planner_blocks - free, 0)
+        _ -> 0
+      end
+
+    min(max(job.acked - waiting, 0) / job.total, 1.0)
   end
 
   # Early on, from the file's estimate (at the feed override); once a few

@@ -21,7 +21,7 @@ const TOLERANCE = 0.5 // px
 const MACHINE = [
   "#machine-state", "#open-file", "#bar-resume", "#bar-hold", "#rail-hold",
   ".cnc-view-bar", "#view-top", "#view-3d", ".cnc-view", "#messages",
-  ".cnc-dro", ".cnc-dro-tools", ".cnc-ctl", ".cnc-ctl .cnc-tabs", ".cnc-side",
+  ".cnc-dro", ".cnc-dro-tools", ".cnc-ctl", ".cnc-modes", ".cnc-mode-body", ".cnc-side",
 ]
 const CONFIG = ["#rail-hold", ".ui-page-header", "#in-use", "#tabs"]
 
@@ -91,6 +91,10 @@ for (const [w, h] of SIZES) {
   await step(page, where, "zoom to the file", M, () => click(page, "#zoom-file"))
   await step(page, where, "3D", M, () => click(page, "#view-3d"))
   await step(page, where, "2D", M, () => click(page, "#view-top"))
+  // Jog | Program: one fixed height, so switching moves nothing else
+  await step(page, where, "Jog panel", M, () => click(page, "#panel-jog"))
+  await step(page, where, "Program panel", M, () => click(page, "#panel-program"))
+  await step(page, where, "back to Jog", M, () => click(page, "#panel-jog"))
   await step(page, where, "Step mode", M, () => click(page, ".cnc-tab--step"))
   await step(page, where, "Stick mode", M, () => click(page, ".cnc-tab--joystick"))
   await step(page, where, "machine coordinates", M, () => click(page, ".cnc-dro-head button[phx-value-frame=machine]"))
