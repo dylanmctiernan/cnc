@@ -9,12 +9,21 @@ defmodule CNC.Machine.Server do
       :alarm ─($X ok)─▶ :idle ◀─▶ :jogging
       :alarm | :idle ─($H)─▶ :homing ─(ok)─▶ :idle
       :idle | :jogging ─(status: hold/door/...)─▶ :busy ─(status: Idle)─▶ :idle
+      :idle ─(run)─▶ :running ─(all sent and acked, status Idle)─▶ :idle
+      :running ─(Abort: soft reset)─▶ :connecting ─▶ :alarm
       any ─(ALARM:N or status Alarm)─▶ :alarm
       any ─(banner = controller reset)─▶ :connecting
       any ─(link lost)─▶ :disconnected ─(backoff)─▶ reconnect
 
   Every (re)connect and reset lands in `:alarm`: even if the controller says
   Idle, the host requires an explicit Unlock or Home before moving.
+
+  `:running` streams a G-code file (`CNC.Machine.Job`): lines go out as the
+  controller's receive buffer has room. Hold and Resume happen inside it
+  (the controller pauses; the job is still the job). Nothing else that
+  sends lines (jogging, the console, settings, uploads) is accepted in it:
+  those calls only match the states they're for. However it ends (done,
+  error, Abort, alarm, lost link), the job's outcome is kept as `last_job`.
 
   State changes are driven by what the controller reports (status, acks,
   alarms), never by what we commanded, except `:jogging`, which is the host's
@@ -24,7 +33,7 @@ defmodule CNC.Machine.Server do
   require Logger
 
   alias CNC.Grbl.{Command, Realtime, Response, Status, XModem}
-  alias CNC.Machine.{Console, Jog, State}
+  alias CNC.Machine.{Console, Jog, Job, State}
 
   @poll_ms 200
   @poll_jog_ms 50
@@ -90,6 +99,9 @@ defmodule CNC.Machine.Server do
     request_lines: [],
     # A file going to the controller over XModem (state :uploading)
     upload: nil,
+    # The G-code file being streamed (state :running), and how the last one ended
+    job: nil,
+    last_job: nil,
     console: Console.new(),
     settings: %{},
     travel_source: :config,
@@ -162,7 +174,7 @@ defmodule CNC.Machine.Server do
     if d.upload, do: :gen_statem.reply(d.upload.from, {:error, :reset})
 
     d = %{
-      end_session(d)
+      end_session(end_job(d, :lost))
       | link: nil,
         connected?: false,
         status: nil,
@@ -473,6 +485,37 @@ defmodule CNC.Machine.Server do
     end
   end
 
+  # Run a file: only from Ready with nothing in flight, so the job owns the
+  # line stream from its first byte.
+  defp event({:call, from}, {:run, name, text}, :idle, d) do
+    cond do
+      d.motion_unsettled? or not :queue.is_empty(d.pending) ->
+        {:idle, d, [{:reply, from, {:error, :busy}}]}
+
+      true ->
+        case Job.new(name, text) do
+          {:ok, job} ->
+            d = log(%{d | job: job, last_job: nil, last_error: nil}, :out, :line, "(run #{name})")
+            {:running, feed_job(d), [{:reply, from, :ok}]}
+
+          {:error, _} = err ->
+            {:idle, d, [{:reply, from, err}]}
+        end
+    end
+  end
+
+  # Abort: a soft reset stops everything at once. The controller reboots
+  # (the banner ends the job) and comes back locked.
+  defp event({:call, from}, :abort, :running, %{connected?: true} = d) do
+    d = %{d | job: %{d.job | aborting?: true}}
+    {:running, realtime(d, Realtime.reset()), [{:reply, from, :ok}]}
+  end
+
+  # Overrides are instant commands: fine in any state, running included.
+  defp event({:call, from}, {:feed_override, op}, s, %{connected?: true} = d)
+       when op in [:reset, :plus10, :minus10, :plus1, :minus1],
+       do: {s, realtime(d, Realtime.feed_override(op)), [{:reply, from, :ok}]}
+
   # A command whose reply we want whole: answered when its ok/error arrives.
   defp event({:call, from}, {:request, line}, s, d) when s in [:alarm, :idle],
     do: {s, send_line(d, line, {:request, from, line}), []}
@@ -510,7 +553,7 @@ defmodule CNC.Machine.Server do
     settled = if :queue.is_empty(d.pending), do: false, else: d.motion_unsettled?
     d = %{d | status: status, motion_unsettled?: settled, status_at: now()}
     d = %{d | direction: direction(d.direction, prev_mpos, status.mpos)}
-    d = if s == :connecting, do: d, else: maybe_read_settings(d, status.state)
+    d = if s in [:connecting, :running], do: d, else: maybe_read_settings(d, status.state)
     on_status(s, status.state, d)
   end
 
@@ -520,7 +563,7 @@ defmodule CNC.Machine.Server do
   # The controller resets after an alarm and drops buffered lines: their acks
   # will never arrive.
   defp response({:alarm, code}, _s, d),
-    do: {:alarm, %{flush_pending(d) | alarm: {:alarm, code}}, []}
+    do: {:alarm, %{flush_pending(end_job(d, {:alarm, code})) | alarm: {:alarm, code}}, []}
 
   defp response({:setting, n, value}, s, d),
     do: {s, %{d | settings: Map.put(d.settings, n, value)}, []}
@@ -533,6 +576,8 @@ defmodule CNC.Machine.Server do
 
   defp response({:banner, banner}, _s, d) do
     Logger.info("controller reset: #{banner}")
+    reason = if d.job && d.job.aborting?, do: :aborted, else: :reset
+    d = end_job(d, reason)
     {:connecting, %{flush_pending(d) | alarm: :reset, status: nil, banner: banner}, []}
   end
 
@@ -551,7 +596,18 @@ defmodule CNC.Machine.Server do
     {:alarm, %{d | alarm: d.alarm || :connect, backoff: 0}, []}
   end
 
-  defp on_status(s, :alarm, d) when s != :alarm, do: {:alarm, %{d | alarm: :reported}, []}
+  defp on_status(s, :alarm, d) when s != :alarm,
+    do: {:alarm, %{end_job(d, :alarm) | alarm: :reported}, []}
+
+  # Running: done once everything is sent and acked and the controller has
+  # come to rest (Idle). Hold, Run and the rest are part of the job.
+  defp on_status(:running, :idle, d) do
+    if Job.drained?(d.job) and not d.motion_unsettled?,
+      do: {:idle, end_job(d, if(d.job.error, do: :error, else: :done)), []},
+      else: {:running, d, []}
+  end
+
+  defp on_status(:running, _reported, d), do: {:running, d, []}
   defp on_status(s, _, d) when s in [:alarm, :homing], do: {s, d, []}
 
   # Stopping: a Jog report means a line ran past the cancel; cancel again.
@@ -587,6 +643,21 @@ defmodule CNC.Machine.Server do
         on_ack(tag, result, s, d)
     end
   end
+
+  # A job line acked: free its bytes and send what now fits. An error stops
+  # the stream and holds, so the operator decides (Resume finishes what the
+  # controller has, Abort drops it).
+  defp on_ack({:job, _n}, result, :running, d) do
+    job = Job.ack(d.job, result)
+    d = %{d | job: job}
+
+    case result do
+      :ok -> {:running, feed_job(d), []}
+      {:error, _} -> {:running, %{realtime(d, Realtime.feed_hold()) | last_error: result}, []}
+    end
+  end
+
+  defp on_ack({:job, _n}, _result, s, d), do: {s, d, []}
 
   defp on_ack({:request, from, line}, result, s, d) do
     lines = Enum.reverse(d.request_lines)
@@ -898,12 +969,34 @@ defmodule CNC.Machine.Server do
     {u.back, %{d | upload: nil}, [{:reply, u.from, result}]}
   end
 
+  ## Jobs
+
+  # Send job lines while they fit in the controller's buffer.
+  defp feed_job(%{job: job} = d) do
+    case Job.next(job) do
+      {:send, {n, text}, job} -> feed_job(send_line(%{d | job: job}, text, {:job, n}))
+      :wait -> d
+    end
+  end
+
+  # However a job ends, keep how: :done, :error, :aborted, :reset, :alarm,
+  # {:alarm, code} or :lost.
+  defp end_job(%{job: nil} = d, _result), do: d
+
+  # An Abort ends as :aborted however the controller words it (a reset
+  # while moving is ALARM:3, then a reboot).
+  defp end_job(%{job: job} = d, result) do
+    result = if job.aborting?, do: :aborted, else: result
+    summary = Map.merge(Job.summary(job), %{result: result, ended_at: DateTime.utc_now()})
+    %{d | job: nil, last_job: summary}
+  end
+
   ## Link
 
   defp send_line(d, line, tag) do
     :ok = d.adapter.write_line(d.link, line)
     in_flight = if tag == :jog, do: d.in_flight + 1, else: d.in_flight
-    moves? = tag in [:jog, :step, :raw]
+    moves? = tag in [:jog, :step, :raw] or match?({:job, _}, tag)
 
     d = %{
       d
@@ -980,6 +1073,9 @@ defmodule CNC.Machine.Server do
       speed: speed(d),
       max_rate: max_rate(d),
       buffer: d.status && d.status.buffer,
+      overrides: d.status && d.status.overrides,
+      job: Job.summary(d.job),
+      last_job: d.last_job,
       awaiting_ack: :queue.len(d.pending),
       moving?: d.motion_unsettled? or (d.status != nil and d.status.state in [:run, :jog, :home]),
       alarm: d.alarm,

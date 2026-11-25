@@ -56,6 +56,21 @@ defmodule CNC.Machine do
   @spec home(server) :: reply
   def home(server \\ __MODULE__), do: call(server, :home)
 
+  @doc """
+  Run a G-code file: stream it to the controller (state `:running`). Only
+  from `:idle` with nothing in flight (`{:error, :busy}` otherwise). Hold
+  and Resume pause it; `abort/1` stops it. Progress is in the status's
+  `job`, the outcome in `last_job`.
+  """
+  @spec run(server, String.t(), binary) :: reply | {:error, term}
+  def run(server \\ __MODULE__, name, text), do: call(server, {:run, name, text})
+
+  @doc "Abort the running job: a soft reset (the machine comes back locked)."
+  def abort(server \\ __MODULE__), do: call(server, :abort)
+
+  @doc "Feed override: `:reset` (100%), `:plus10`, `:minus10`, `:plus1`, `:minus1`."
+  def feed_override(server \\ __MODULE__, op), do: call(server, {:feed_override, op})
+
   def feed_hold(server \\ __MODULE__), do: call(server, :feed_hold)
   def resume(server \\ __MODULE__), do: call(server, :resume)
   def reset(server \\ __MODULE__), do: call(server, :reset)

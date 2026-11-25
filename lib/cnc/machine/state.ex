@@ -5,6 +5,7 @@ defmodule CNC.Machine.State do
 
     * `state` — host view: `:disconnected | :connecting | :alarm | :idle |
       :jogging | :homing | :busy | :uploading` (a file going to the controller)
+      `| :running` (streaming a G-code file; on Hold the controller says `:hold`)
     * `controller` — the controller's own last reported state
       (`CNC.Grbl.Status` state atom), `nil` until the first report
     * `substate` — e.g. the `1` in `Hold:1` / `Door:1`
@@ -12,6 +13,12 @@ defmodule CNC.Machine.State do
     * `wco` — work coordinate offset, once the controller has reported it
     * `feed` — reported feed rate (mm/min)
     * `buffer` — `{planner_blocks_free, serial_bytes_free}` (`Bf`), if reported
+    * `overrides` — `{feed, rapid, spindle}` percent (`Ov`), once reported
+    * `job` — the file running (`CNC.Machine.Job.summary/1`: name, total,
+      sent, acked, line, started_at, error, halted?), or nil
+    * `last_job` — how the last one ended: its summary plus `result`
+      (`:done | :error | :aborted | :reset | :alarm | {:alarm, code} | :lost`)
+      and `ended_at`
     * `awaiting_ack` — lines sent that the controller hasn't acked yet
     * `moving?` — the machine may still be moving: the controller reports
       Run, Jog or Home, or motion was sent since the last report that
@@ -58,6 +65,9 @@ defmodule CNC.Machine.State do
             speed: {0.0, 0.0},
             max_rate: nil,
             buffer: nil,
+            overrides: nil,
+            job: nil,
+            last_job: nil,
             awaiting_ack: 0,
             moving?: false,
             alarm: nil,
