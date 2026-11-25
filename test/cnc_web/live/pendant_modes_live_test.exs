@@ -64,6 +64,19 @@ defmodule CNCWeb.PendantModesLiveTest do
     assert has_element?(view, "#pendant-undo-zero[disabled]")
   end
 
+  test "Inc: touch off on an edge; Zero: Trace the stock once there is one", %{conn: conn, m: m} do
+    {:ok, view, _} = live(conn, ~p"/pendant")
+    view |> element("#pendant-mode-inc") |> render_click()
+    %{mpos: {mx, _, _}} = Machine.status(m)
+    view |> element("#pendant-touch-left") |> render_click()
+    assert eventually(fn -> abs(elem(Machine.status(m).wco, 0) - mx) < 0.001 end)
+    assert has_element?(view, "#pendant-info", "no bit set, so taken at the tool's centre")
+    assert has_element?(view, "#pendant-touch-right[disabled]")
+
+    view |> element("#pendant-mode-zero") |> render_click()
+    assert has_element?(view, "#pendant-trace-stock[disabled]")
+  end
+
   test "Job: Start after the check; overrides, single block; Abort asks first", %{
     conn: conn,
     m: m,

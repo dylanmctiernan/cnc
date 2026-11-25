@@ -274,6 +274,57 @@ defmodule CNCWeb.MachineJobLiveTest do
     refute has_element?(view, "#stock-issues")
   end
 
+  test "Inc: touch off on the stock's edges, the bit's radius allowed for; Undo; Trace the stock",
+       %{conn: conn, m: m} do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element("#panel-inc") |> render_click()
+    # No stock: the near edges only
+    assert has_element?(view, "#touch-left:not([disabled])")
+    assert has_element?(view, "#touch-right[disabled]")
+    refute has_element?(view, "#stock-trace:not([disabled])")
+
+    view |> element("#panel-auto") |> render_click()
+    view |> element("#bit-edit") |> render_click()
+    view |> form("#bit-form", %{diameter: "6"}) |> render_submit()
+    view |> element("#stock-edit") |> render_click()
+    view |> form("#stock-form", %{width: "100", depth: "50", thickness: "12"}) |> render_submit()
+
+    assert eventually(fn ->
+             has_element?(view, "#bit-label") and has_element?(view, "#stock-label")
+           end)
+
+    view |> element("#panel-inc") |> render_click()
+    %{mpos: {mx, _, _}, wco: before} = Machine.status(m)
+    view |> element("#touch-left") |> render_click()
+    assert eventually(fn -> abs(elem(Machine.status(m).wco, 0) - (mx + 3.0)) < 0.001 end)
+
+    assert has_element?(
+             view,
+             "#note-undo-zero",
+             "X0 on the left edge (the bit's 3 mm radius allowed for)"
+           )
+
+    view |> element("#undo-zero") |> render_click()
+    assert eventually(fn -> Machine.status(m).wco == before end)
+
+    # Y: front and back; Z: the surface
+    view |> element(".cnc-pendant button[phx-value-axis=y]") |> render_click()
+    assert has_element?(view, "#touch-front")
+    assert has_element?(view, "#touch-back:not([disabled])")
+    view |> element(".cnc-pendant button[phx-value-axis=z]") |> render_click()
+    assert has_element?(view, "#touch-z", "Zero Z on the surface")
+
+    # Trace: round the stock at a safe height (a jog: it moves)
+    view |> element("#panel-auto") |> render_click()
+    view |> element("#stock-trace") |> render_click()
+    assert eventually(fn -> Machine.status(m).controller == :jog end)
+    assert eventually(fn -> not Machine.status(m).moving? end, 20_000)
+    # Round and back to the first corner
+    {x, y, _} = Machine.status(m).mpos
+    assert_in_delta x, 0.0, 0.01
+    assert_in_delta y, 0.0, 0.01
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")

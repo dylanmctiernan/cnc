@@ -4145,3 +4145,23 @@ body {
   overflow-y: auto;
   min-height: 0;
 }
+
+/* Inc: the touch-off row under - and + (always two cells high's worth,
+   whichever axis, so it never shifts) */
+.cnc-touch {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+}
+.cnc-touch .cnc-btn {
+  min-height: 2.5rem;
+}
+/* The pendant's message line: an error in amber, a confirmation quieter */
+.ui-pendant-msg .is-info {
+  color: var(--text-muted);
+}
+.ui-pendant .ui-seg.is-plain {
+  text-transform: none;
+}

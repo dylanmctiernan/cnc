@@ -72,6 +72,8 @@ defmodule CNCWeb.MachineLive do
      |> assign(stock: CNCApp.Stock.get(cnc.db), stock_edit: nil)
      |> assign(bit: CNCApp.Bit.get(cnc.db), bit_edit: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
+     # Edges touched this session (machine coordinates): CNCWeb.TouchOff
+     |> assign(touched: %{})
      |> assign(dry_lift: nil, single_block?: false)
      |> assign(settings: CNCApp.Settings.all(cnc.db))
      |> assign(zoom: if(program, do: :file, else: :bed), view_mode: :top)
@@ -537,6 +539,57 @@ defmodule CNCWeb.MachineLive do
   def handle_event("dismiss", %{"note" => "error"}, socket),
     do: {:noreply, dismiss(socket, :error)}
 
+  # Inc: the bit is touching this edge of the stock: set X0 / Y0 from it
+  def handle_event("touch_edge", %{"side" => side}, socket)
+      when side in ~w(left right front back) do
+    side = String.to_existing_atom(side)
+    %{machine: m, stock: stock, bit: bit, touched: touched} = socket.assigns
+
+    with {:ok, %{axis: axis, zero: zero} = t} <-
+           CNCWeb.TouchOff.touch(side, m.mpos, stock, bit, touched),
+         :ok <- Machine.set_work_offset(srv(socket), [{axis, zero}]) do
+      undo =
+        m.wco && %{axes: [axis], wco: m.wco, text: CNCWeb.TouchOff.describe(side, t, stock, bit)}
+
+      {:noreply, socket |> assign(touched: t.touched, undo_zero: undo) |> set_action_error(nil)}
+    else
+      {:error, :needs_stock} ->
+        {:noreply, set_action_error(socket, "Set the stock first: the far edges need its size.")}
+
+      {:error, :outside_travel} ->
+        {:noreply, set_action_error(socket, "That puts the zero off the machine.")}
+
+      {:error, _} ->
+        {:noreply, set_action_error(socket, "Only when the machine is Ready and stopped.")}
+    end
+  end
+
+  # The stock's outline, traced at a safe height: where it really is, and
+  # whether anything (a clamp) is in the way
+  def handle_event("trace_stock", _, %{assigns: %{stock: stock}} = socket) when stock != nil do
+    {{x0, x1}, {y0, y1}, _} = CNCApp.Stock.box(stock)
+
+    error =
+      case Machine.outline(srv(socket), {{x0, x1}, {y0, y1}}) do
+        :ok ->
+          nil
+
+        {:error, :outside_travel} ->
+          "The stock's outline would leave the travel from this work zero."
+
+        {:error, :no_work_offset} ->
+          "The controller hasn't reported a work zero yet."
+
+        {:error, :moving} ->
+          "Wait for the machine to stop, then Trace."
+
+        {:error, _} ->
+          "Only when the machine is Ready."
+      end
+
+    {:noreply, set_action_error(socket, error)}
+  end
+
   def handle_event("undo_zero", _, socket) do
     %{axes: axes, wco: wco} = socket.assigns.undo_zero
     values = for a <- axes, do: {a, elem(wco, Enum.find_index([:x, :y, :z], &(&1 == a)))}
@@ -848,7 +901,8 @@ defmodule CNCWeb.MachineLive do
           </.note>
           <.note :if={@action_error} id="note-action" key="action">{@action_error}</.note>
           <.note :if={@undo_zero} id="note-undo-zero" key="undo">
-            Zeroed {@undo_zero.axes |> Enum.map(&String.upcase(to_string(&1))) |> Enum.join("/")}.
+            {@undo_zero[:text] ||
+              "Zeroed #{@undo_zero.axes |> Enum.map(&String.upcase(to_string(&1))) |> Enum.join("/")}."}
             <button type="button" id="undo-zero" class="cnc-link" phx-click="undo_zero">
               Undo
             </button>
@@ -1121,6 +1175,41 @@ defmodule CNCWeb.MachineLive do
                         {String.upcase(to_string(@step_axis))}{if dir < 0, do: "−", else: "+"}
                         <span class="cnc-unit">{@step} mm</span>
                       </button>
+                    </div>
+                    <%!-- Touch off: step the bit onto an edge from outside, then
+                       say which. Z has no edges: its row zeroes on the surface. --%>
+                    <div class="cnc-touch" role="group" aria-label="The bit is touching">
+                      <%= if @step_axis == :z do %>
+                        <button
+                          type="button"
+                          id="touch-z"
+                          class="cnc-btn"
+                          phx-click="zero"
+                          phx-value-axes="z"
+                          disabled={@machine.state != :idle}
+                        >
+                          Zero Z on the surface
+                        </button>
+                      <% else %>
+                        <button
+                          :for={side <- CNCWeb.TouchOff.sides_for(@step_axis)}
+                          type="button"
+                          id={"touch-#{side}"}
+                          class="cnc-btn"
+                          phx-click="touch_edge"
+                          phx-value-side={side}
+                          disabled={
+                            @machine.state != :idle or not CNCWeb.TouchOff.usable?(side, @stock)
+                          }
+                          title={
+                            if CNCWeb.TouchOff.usable?(side, @stock),
+                              do: "The bit is touching the stock's #{side} edge, from outside",
+                              else: "Set the stock first: the far edges need its size"
+                          }
+                        >
+                          On the {side} edge
+                        </button>
+                      <% end %>
                     </div>
                   </div>
                 </div>
@@ -2211,6 +2300,15 @@ defmodule CNCWeb.MachineLive do
       <span :if={!@stock} class="cnc-stock-label cnc-sub">
         not set: cuts aren't checked against it
       </span>
+      <UI.button
+        variant="quiet"
+        id="stock-trace"
+        phx-click="trace_stock"
+        disabled={@disabled or @stock == nil}
+        title="Trace the stock's outline at a safe height: where it is, and whether a clamp is in the way"
+      >
+        Trace
+      </UI.button>
       <UI.button variant="quiet" id="stock-edit" phx-click="open_stock" disabled={@disabled}>
         {if @stock, do: "Change…", else: "Set…"}
       </UI.button>

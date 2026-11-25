@@ -47,7 +47,7 @@ defmodule CNCWeb.PendantLive do
      # A job running when the pendant opens: show it
      |> assign(mode: if(socket.assigns.shell_machine.job, do: :job, else: :jog))
      |> assign(seen_job: (job = socket.assigns.shell_machine.job) && job.started_at)
-     |> assign(step_axis: :x, step: 1, undo_zero: nil, error: nil)
+     |> assign(step_axis: :x, step: 1, undo_zero: nil, error: nil, info: nil, touched: %{})
      |> assign(start_check?: false, abort_check?: false)
      # This page's own manifest: added to a home screen, it opens here
      |> assign(manifest: ~p"/pendant.webmanifest", app_title: "Pendant")}
@@ -74,7 +74,45 @@ defmodule CNCWeb.PendantLive do
 
   @impl true
   def handle_event("mode", %{"mode" => mode}, socket) when mode in ~w(jog inc zero job),
-    do: {:noreply, assign(socket, mode: String.to_existing_atom(mode), error: nil)}
+    do: {:noreply, assign(socket, mode: String.to_existing_atom(mode), error: nil, info: nil)}
+
+  # Inc: the bit is touching this edge of the stock (CNCWeb.TouchOff)
+  def handle_event("touch_edge", %{"side" => side}, socket)
+      when side in ~w(left right front back) do
+    side = String.to_existing_atom(side)
+    %{shell_machine: m, stock: stock, bit: bit, touched: touched} = socket.assigns
+
+    with {:ok, %{axis: axis, zero: zero} = t} <-
+           CNCWeb.TouchOff.touch(side, m.mpos, stock, bit, touched),
+         :ok <- Machine.set_work_offset(machine(socket), [{axis, zero}]) do
+      {:noreply,
+       assign(socket,
+         touched: t.touched,
+         undo_zero: m.wco && %{axes: [axis], wco: m.wco},
+         info: CNCWeb.TouchOff.describe(side, t, stock, bit),
+         error: nil
+       )}
+    else
+      {:error, :needs_stock} ->
+        {:noreply, assign(socket, error: "Set the stock first.", info: nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: zero_error(reason), info: nil)}
+    end
+  end
+
+  def handle_event("trace_stock", _, %{assigns: %{stock: stock}} = socket) when stock != nil do
+    {{x0, x1}, {y0, y1}, _} = CNCApp.Stock.box(stock)
+
+    case Machine.outline(machine(socket), {{x0, x1}, {y0, y1}}) do
+      :ok ->
+        {:noreply,
+         assign(socket, error: nil, info: "Tracing the stock's outline at a safe height.")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, error: zero_error(reason), info: nil)}
+    end
+  end
 
   # Jog: the stick
   def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier} = params, socket) do
@@ -254,6 +292,7 @@ defmodule CNCWeb.PendantLive do
         <%!-- Always there, one line high: an error never pushes the controls down --%>
         <p class="ui-pendant-msg" id="pendant-msg" role="status" aria-live="polite">
           <span :if={@error} id="pendant-error">{@error}</span>
+          <span :if={!@error && @info} id="pendant-info" class="is-info">{@info}</span>
         </p>
 
         <div class={"ui-pendant-body is-#{@mode}"} id="pendant-body">
@@ -261,9 +300,15 @@ defmodule CNCWeb.PendantLive do
             <% :jog -> %>
               <.jog_mode machine={@shell_machine} tier={@tier} tiers={@tiers} />
             <% :inc -> %>
-              <.inc_mode machine={@shell_machine} axis={@step_axis} step={@step} steps={@steps} />
+              <.inc_mode
+                machine={@shell_machine}
+                axis={@step_axis}
+                step={@step}
+                steps={@steps}
+                stock={@stock}
+              />
             <% :zero -> %>
-              <.zero_mode machine={@shell_machine} undo={@undo_zero} />
+              <.zero_mode machine={@shell_machine} undo={@undo_zero} stock={@stock} />
             <% :job -> %>
               <.job_mode machine={@shell_machine} program={@program} />
           <% end %>
@@ -422,6 +467,7 @@ defmodule CNCWeb.PendantLive do
   attr :axis, :atom, required: true
   attr :step, :any, required: true
   attr :steps, :list, required: true
+  attr :stock, :any, required: true
 
   defp inc_mode(assigns) do
     assigns = assign(assigns, ready?: assigns.machine.state == :idle)
@@ -470,12 +516,42 @@ defmodule CNCWeb.PendantLive do
           <span class="ui-seg-unit num">{@step} mm</span>
         </button>
       </div>
+      <%!-- Touch off: step onto an edge from outside, then say which. Z has
+           no edges: its row zeroes on the surface. --%>
+      <p class="ui-pendant-label">The bit is touching</p>
+      <div class="ui-pendant-row" role="group" aria-label="The bit is touching">
+        <%= if @axis == :z do %>
+          <button
+            type="button"
+            id="pendant-touch-z"
+            class="ui-seg is-plain"
+            phx-click="zero"
+            phx-value-axes="z"
+            disabled={not @ready?}
+          >
+            The surface: Zero Z
+          </button>
+        <% else %>
+          <button
+            :for={side <- CNCWeb.TouchOff.sides_for(@axis)}
+            type="button"
+            id={"pendant-touch-#{side}"}
+            class="ui-seg is-plain"
+            phx-click="touch_edge"
+            phx-value-side={side}
+            disabled={not @ready? or not CNCWeb.TouchOff.usable?(side, @stock)}
+          >
+            The {side} edge
+          </button>
+        <% end %>
+      </div>
     </div>
     """
   end
 
   attr :machine, :map, required: true
   attr :undo, :any, required: true
+  attr :stock, :any, required: true
 
   defp zero_mode(assigns) do
     assigns = assign(assigns, ready?: assigns.machine.state == :idle)
@@ -527,6 +603,17 @@ defmodule CNCWeb.PendantLive do
         title="Moves the machine: rapid to X0 Y0 at a safe height"
       >
         <.icon name="hero-arrow-down-left" class="ui-btn-icon" /> Go to X0 Y0
+      </button>
+      <%!-- Always there (disabled with no stock set): no shift --%>
+      <button
+        type="button"
+        id="pendant-trace-stock"
+        class="ui-btn ui-btn--secondary ui-btn--lg"
+        phx-click="trace_stock"
+        disabled={not @ready? or @stock == nil}
+        title="Moves the machine: round the stock's outline at a safe height"
+      >
+        <.icon name="hero-square-2-stack" class="ui-btn-icon" /> Trace the stock
       </button>
     </div>
     """
