@@ -38,35 +38,36 @@ function segDist2(v, a, b, px, py, pz) {
   return ex * ex + ey * ey + ez * ez
 }
 
-// Track a job across position reports: starts at 0 when a job starts, keeps
-// what was cut when it ends (until the file changes or another job starts).
+// How far the current job has got, shared by the 2D and 3D views and kept
+// when a view is switched away and back (it's built anew each time): keyed
+// to the job (its start time), reset only when the file itself changes.
+const shared = {file: null, job: null, done: -1}
+
 export class Progress {
-  constructor() {
-    this.done = -1 // -1: no job since the file was loaded
-    this.running = false
-  }
-
-  reset() {
-    this.done = -1
-    this.running = false
-  }
-
-  // Returns true if the done part changed.
-  update(data, running, pos, wco) {
-    let changed = false
-    if (running && !this.running) {
-      this.done = 0
-      changed = true
+  // data: the path (a new file resets); job: the running job's key, or null
+  // Returns the last vertex passed (-1: no job since the file was loaded).
+  update(data, job, pos, wco) {
+    const file = data ? `${data.length}:${data[1]},${data[2]},${data[data.length - 1]}` : null
+    if (file !== shared.file) {
+      shared.file = file
+      shared.job = null
+      shared.done = -1
     }
-    this.running = running
-    if (running && data && pos) {
+    if (job && job !== shared.job) {
+      shared.job = job
+      shared.done = 0
+    }
+    if (job && data && pos) {
       const [ox, oy, oz] = wco || [0, 0, 0]
-      const next = advance(data, this.done, [pos.x - ox, pos.y - oy, pos.z - oz])
-      if (next !== this.done) {
-        this.done = next
-        changed = true
-      }
+      shared.done = advance(data, shared.done, [pos.x - ox, pos.y - oy, pos.z - oz])
     }
-    return changed
+    return shared.done
   }
+
+  get done() {
+    return shared.done
+  }
+
+  // A new file was loaded
+  reset() {}
 }

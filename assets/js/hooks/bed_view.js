@@ -105,6 +105,9 @@ export default {
     this.resize.observe(this.el)
     this.fit()
 
+    // Built anew when the view switches back: ask for the file and position
+    if (!this.mini) this.pushEvent("viewport_ready", {})
+
     const frame = (now) => {
       this.draw(now)
       this.raf = requestAnimationFrame(frame)
@@ -133,7 +136,7 @@ export default {
     if (wcoChanged && this.view && this.view.zoomed) this.fit()
     if (speed) this.speed = speed
     this.pushTrail(x, y)
-    if (this.program) this.progress.update(this.program.data, !!job, {x, y, z}, wco)
+    if (this.program) this.progress.update(this.program.data, job, {x, y, z}, wco)
   },
 
   pushTrail(x, y) {

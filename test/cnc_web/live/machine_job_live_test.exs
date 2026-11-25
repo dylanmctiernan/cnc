@@ -42,6 +42,10 @@ defmodule CNCWeb.MachineJobLiveTest do
     # Hold: the reminder, and the same button resumes
     view |> element("#bar-hold") |> render_click()
     assert eventually(fn -> has_element?(view, "#note-held", "spindle keeps turning") end)
+    # Ending the job is offered right there; it asks first
+    view |> element("#held-abort") |> render_click()
+    assert has_element?(view, "#abort-dialog")
+    view |> element("#cancel-abort") |> render_click()
     assert has_element?(view, "#bar-resume:not([disabled])", "Resume")
     view |> element("#bar-resume") |> render_click()
 

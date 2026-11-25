@@ -78,8 +78,10 @@ export default {
     this.progress = new Progress()
     this.handleEvent("pos", ({x, y, z, wco, job}) => {
       this.tool.position.set(x, y, z)
-      if (this.pathData && this.progress.update(this.pathData, !!job, {x, y, z}, wco || this.wco))
-        this.paintDone()
+      if (this.pathData) {
+        const before = this.progress.done
+        if (this.progress.update(this.pathData, job, {x, y, z}, wco || this.wco) !== before) this.paintDone()
+      }
       if (wco && (wco[0] !== this.wco[0] || wco[1] !== this.wco[1] || wco[2] !== this.wco[2])) {
         this.setWork(wco)
         this.buildShadow()
@@ -89,8 +91,9 @@ export default {
     })
     this.handleEvent("program", ({path}) => {
       this.pathData = path ? decode(path) : null
-      this.progress.reset()
       this.buildPath()
+      // Coming back mid-job: show what's been cut so far
+      this.paintDone()
       this.reframe()
     })
     this.handleEvent("travel", ({travel}) => {

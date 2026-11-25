@@ -614,8 +614,11 @@ defmodule CNCWeb.MachineLive do
           >
             <p>
               On hold: motion paused, the position kept. The spindle keeps turning.
-              Resume to carry on, or Abort.
+              Resume to carry on, or end the job.
             </p>
+            <button type="button" id="held-abort" class="cnc-btn cnc-abort" phx-click="abort_job">
+              Abort the job
+            </button>
           </div>
           <div
             :if={@machine.state == :running and match?(%{waiting?: true}, @machine.job)}
@@ -1631,7 +1634,8 @@ defmodule CNCWeb.MachineLive do
       jog: [jx, jy, jz],
       wco: wco,
       speed: speed_payload(m, socket.assigns.tier),
-      job: m.state == :running
+      # The running job's key (its start), so the views can follow it
+      job: m.job && DateTime.to_iso8601(m.job.started_at)
     })
   end
 
