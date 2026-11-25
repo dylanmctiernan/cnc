@@ -54,8 +54,8 @@ export default {
       z: new THREE.Color(token("--z", "#4dabf7")),
       path: new THREE.Color(token("--path", "#c792ea")),
       rapid: new THREE.Color(token("--text-faint", "#5a636b")),
-      // Cut so far: a muted green, as in 2D
-      done: new THREE.Color(token("--path-done", "#5f9e74")),
+      // The trace (cut so far), green as in 2D; the plan dims to a ghost under it
+      done: new THREE.Color(token("--path-done", "#6cc58a")),
       tool: new THREE.Color(token("--text", "#e4e7e9")),
     }
 
@@ -298,7 +298,8 @@ export default {
       const flat = []
       for (let i = 4; i < v.length; i += 4)
         if (v[i] === 1) flat.push(v[i - 3] + wx, v[i - 2] + wy, bedZ + 0.2, v[i + 1] + wx, v[i + 2] + wy, bedZ + 0.2)
-      this.shadow.add(lines(flat, this.colors.path, 0.22))
+      // Neutral, so it never reads as a second toolpath
+      this.shadow.add(lines(flat, this.colors.edge, 0.3))
     }
     const drop = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([
@@ -321,6 +322,18 @@ export default {
     if (this.painted > 0 && this.segEnd[this.painted - 1] > done) this.buildPath()
     const colors = this.pathSegs.geometry.attributes.color
     const faint = this.colors.done
+    // Tracing: the plan's cuts fade to a ghost, once
+    if (!this.ghosted) {
+      const ghost = this.colors.path.clone().lerp(new THREE.Color(token("--surface-0", "#1c1f22")), 0.68)
+      for (let k = 0; k < this.segCut.length; k++)
+        if (this.segCut[k]) {
+          colors.setXYZ(k * 2, ghost.r, ghost.g, ghost.b)
+          colors.setXYZ(k * 2 + 1, ghost.r, ghost.g, ghost.b)
+        }
+      this.ghosted = true
+      colors.needsUpdate = true
+      this.render()
+    }
     let k = this.painted
     while (k < this.segEnd.length && this.segEnd[k] <= done) {
       // Only cuts turn green; rapids keep their colour
@@ -371,6 +384,7 @@ export default {
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
     geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3))
     this.pathSegs = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({vertexColors: true}))
+    this.ghosted = false
     this.segEnd = segEnd
     this.segCut = segCut
     this.painted = 0

@@ -735,7 +735,7 @@ defmodule CNCWeb.MachineLive do
             data-z={pos(@machine, 2)}
             data-state={@machine.state}
             data-zoom={@zoom}
-            data-trail={to_string(@settings.trail)}
+            data-trail={to_string(@settings.jog_trail)}
           >
             <canvas
               role="img"
@@ -963,7 +963,7 @@ defmodule CNCWeb.MachineLive do
             <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
           </dl>
           <button
-            :if={@view_mode == :top and @settings.trail}
+            :if={@view_mode == :top and @settings.jog_trail}
             type="button"
             class="cnc-btn cnc-btn--quiet"
             phx-click={JS.dispatch("bed:clear-trail", to: "#bed")}

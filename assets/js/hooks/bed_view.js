@@ -136,7 +136,8 @@ export default {
     this.wco = wco
     if (wcoChanged && this.view && this.view.zoomed) this.fit()
     if (speed) this.speed = speed
-    if (this.el.dataset.trail === "true") this.pushTrail(x, y)
+    // The jog trail: only while jogging by hand (a job draws its own trace)
+    if (this.el.dataset.trail === "true" && !job) this.pushTrail(x, y)
     else this.trailLen = 0
     if (this.program) this.progress.update(this.program.data, job, {x, y, z}, wco)
   },
@@ -264,13 +265,18 @@ export default {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       this.renderProgram(ctx, wco)
     }
+    // While a job traces, the plan is a faint ghost under the trace
+    const tracing = this.progress.done >= 0
+    this.ctx.globalAlpha = tracing ? 0.28 : 1
     this.ctx.drawImage(this.pathCache, 0, 0, v.width, v.height)
-    this.drawDone(key, dpr, wco)
+    this.ctx.globalAlpha = 1
+    if (tracing) this.drawDone(key, dpr, wco)
   },
 
-  // Cut so far: each finished segment painted over in the bed's colour and
-  // redrawn in a muted green ("done"), so what's left stands out. Only new segments are drawn;
-  // the cache is rebuilt when the view or the job starts over.
+  // The trace: what the job has cut, a solid green line over the ghosted
+  // plan (as CAM and sender previews do). Rapids aren't traced: they stay
+  // as the plan draws them. Only new segments are drawn; the cache is
+  // rebuilt when the view or the job starts over.
   drawDone(key, dpr, [ox, oy]) {
     const done = this.progress.done
     if (done <= 0) return
@@ -286,26 +292,19 @@ export default {
       const ctx = cache.getContext("2d")
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       const d = this.program.data
-      const erase = new Path2D(), faint = new Path2D()
+      const trace = new Path2D()
       for (let i = Math.max(1, this.doneDrawn + 1); i <= done; i++) {
-        // Only cuts turn green; rapids stay as they're drawn (dashed, faint)
         if (d[i * 4] !== 1) continue
         const [ax, ay] = this.px(d[(i - 1) * 4 + 1] + ox, d[(i - 1) * 4 + 2] + oy)
         const [bx, by] = this.px(d[i * 4 + 1] + ox, d[i * 4 + 2] + oy)
-        for (const p of [erase, faint]) {
-          p.moveTo(ax, ay)
-          p.lineTo(bx, by)
-        }
+        trace.moveTo(ax, ay)
+        trace.lineTo(bx, by)
       }
       ctx.lineCap = "round"
-      ctx.strokeStyle = c.bed
-      ctx.lineWidth = 3
-      ctx.stroke(erase)
+      ctx.lineJoin = "round"
       ctx.strokeStyle = c.done
-      ctx.globalAlpha = 0.85
-      ctx.lineWidth = 1.25
-      ctx.stroke(faint)
-      ctx.globalAlpha = 1
+      ctx.lineWidth = 1.75
+      ctx.stroke(trace)
       this.doneDrawn = done
     }
     this.ctx.drawImage(cache, 0, 0, v.width, v.height)

@@ -8,17 +8,17 @@ defmodule CNCApp.Settings do
   Each setting has a default and a type; unknown keys and wrong types are
   refused, so the stored map only ever holds what's listed here.
 
-    * `:trail` (boolean, default false) — draw the path the tool has
-      actually moved on the 2D map
+    * `:jog_trail` (boolean, default false) — while jogging, the 2D map
+      draws the path the tool moves (a running job draws its own trace)
   """
   use Boundary, top_level?: true, deps: [], exports: []
 
-  @defaults %{trail: false}
-  @types %{trail: :boolean}
+  @defaults %{jog_trail: false}
+  @types %{jog_trail: :boolean}
   @key :app_settings
   @pubsub CNC.PubSub
 
-  @type t :: %{trail: boolean}
+  @type t :: %{jog_trail: boolean}
 
   @doc "Every setting, defaults filled in."
   @spec all(GenServer.server()) :: t
