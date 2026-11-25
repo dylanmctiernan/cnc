@@ -236,7 +236,11 @@ defmodule CNCWeb.UI do
   slot :inner_block, required: true
   slot :actions, required: true
 
-  @doc "A modal: Escape or a click outside cancels."
+  @doc """
+  A modal: Escape or a click outside cancels. Actions are right-aligned
+  with the main one last (as on macOS and the web): cancel first, then any
+  others, then the action the dialog is for.
+  """
   def dialog(assigns) do
     ~H"""
     <div class="ui-modal" id={@id} phx-window-keydown={@on_cancel} phx-key="Escape">

@@ -1319,10 +1319,10 @@ defmodule CNCWeb.ConfigLive do
         </ul>
       </div>
       <:actions>
+        <UI.button id="close-review" phx-click="close_review">Not yet</UI.button>
         <UI.button variant="primary" id="apply-staged" phx-click="apply" disabled={@machine.moving?}>
           {if @restart?, do: "Apply and restart", else: "Apply"}
         </UI.button>
-        <UI.button id="close-review" phx-click="close_review">Not yet</UI.button>
       </:actions>
     </UI.dialog>
     """
@@ -1342,10 +1342,10 @@ defmodule CNCWeb.ConfigLive do
         <.diff_list diffs={@dialog.diffs} id="approve-diffs" />
       </div>
       <:actions>
+        <UI.button id="cancel-approve" phx-click="cancel_dialog">Cancel</UI.button>
         <UI.button variant="primary" id="approve" phx-click="approve" disabled={@machine.moving?}>
           {@dialog.approve}
         </UI.button>
-        <UI.button id="cancel-approve" phx-click="cancel_dialog">Cancel</UI.button>
       </:actions>
     </UI.dialog>
     """

@@ -1033,7 +1033,7 @@ defmodule CNCWeb.MachineLive do
               {work_preview(@work_edit, @machine)}
             </p>
             <p :if={@work_edit.error} class="cnc-set-error">{@work_edit.error}</p>
-            <div class="cnc-row">
+            <div class="cnc-row cnc-dialog-actions">
               <button type="button" class="cnc-btn" phx-click="cancel_work">Cancel</button>
               <button
                 type="submit"
@@ -1085,7 +1085,7 @@ defmodule CNCWeb.MachineLive do
               <p :if={@file_error} class="cnc-set-error">{@file_error}</p>
             </form>
             <.program_summary :if={@program} program={@program} fit={fit(@program, @machine)} />
-            <div class="cnc-row">
+            <div class="cnc-row cnc-dialog-actions">
               <button :if={@program} type="button" class="cnc-btn" phx-click="clear_program">
                 Clear file
               </button>
@@ -1232,16 +1232,10 @@ defmodule CNCWeb.MachineLive do
           A new program's first run is usually a dry run (Z lifted above the stock,
           spindle off), then the first cut at 25% rapids, in single block.
         </p>
+        <%!-- In the order a new program is proved: check it, see where it
+             lands, then cut. The main action last, as on macOS and the web. --%>
         <:actions>
-          <UI.button
-            variant="primary"
-            id="confirm-start"
-            phx-click="confirm_start"
-            disabled={fit(@program, @machine, @dry_lift || 0) != []}
-          >
-            <.icon name="hero-play" class="ui-btn-icon" />
-            {if @dry_lift, do: "Start dry run", else: "Start cutting"}
-          </UI.button>
+          <UI.button variant="quiet" id="cancel-start" phx-click="cancel_start">Not yet</UI.button>
           <UI.button
             id="check-start"
             phx-click="confirm_check"
@@ -1257,7 +1251,15 @@ defmodule CNCWeb.MachineLive do
           >
             <.icon name="hero-square-2-stack" class="ui-btn-icon" /> Outline
           </UI.button>
-          <UI.button variant="quiet" id="cancel-start" phx-click="cancel_start">Not yet</UI.button>
+          <UI.button
+            variant="primary"
+            id="confirm-start"
+            phx-click="confirm_start"
+            disabled={fit(@program, @machine, @dry_lift || 0) != []}
+          >
+            <.icon name="hero-play" class="ui-btn-icon" />
+            {if @dry_lift, do: "Start dry run", else: "Start cutting"}
+          </UI.button>
         </:actions>
       </UI.dialog>
 
@@ -1272,10 +1274,10 @@ defmodule CNCWeb.MachineLive do
           home to carry on. The work zero is kept. The job can't continue from here.
         </p>
         <:actions>
+          <UI.button id="cancel-abort" phx-click="cancel_abort">Keep running</UI.button>
           <UI.button variant="danger" id="confirm-abort" phx-click="confirm_abort">
             Abort
           </UI.button>
-          <UI.button id="cancel-abort" phx-click="cancel_abort">Keep running</UI.button>
         </:actions>
       </UI.dialog>
     </Layouts.app>

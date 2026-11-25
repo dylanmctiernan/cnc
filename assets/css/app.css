@@ -2674,6 +2674,11 @@ body {
   font-size: var(--text-lg);
   font-weight: 600;
 }
+/* Dialog buttons: right-aligned, the main action last (macOS and the web) */
+.ui-modal-box .ui-actions,
+.cnc-dialog-actions {
+  justify-content: flex-end;
+}
 .ui-modal-box .ui-actions {
   margin-top: var(--space-6);
 }
