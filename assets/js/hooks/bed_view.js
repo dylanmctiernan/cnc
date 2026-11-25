@@ -65,6 +65,7 @@ export default {
       y: css("--y"),
       z: css("--z"),
       path: css("--path"),
+      done: css("--path-done"),
     }
 
     // Loaded G-code toolpath (work coordinates), drawn into an offscreen
@@ -135,7 +136,8 @@ export default {
     this.wco = wco
     if (wcoChanged && this.view && this.view.zoomed) this.fit()
     if (speed) this.speed = speed
-    this.pushTrail(x, y)
+    if (this.el.dataset.trail === "true") this.pushTrail(x, y)
+    else this.trailLen = 0
     if (this.program) this.progress.update(this.program.data, job, {x, y, z}, wco)
   },
 
@@ -267,7 +269,7 @@ export default {
   },
 
   // Cut so far: each finished segment painted over in the bed's colour and
-  // redrawn faint, so what's left stands out. Only new segments are drawn;
+  // redrawn in a muted green ("done"), so what's left stands out. Only new segments are drawn;
   // the cache is rebuilt when the view or the job starts over.
   drawDone(key, dpr, [ox, oy]) {
     const done = this.progress.done
@@ -286,7 +288,8 @@ export default {
       const d = this.program.data
       const erase = new Path2D(), faint = new Path2D()
       for (let i = Math.max(1, this.doneDrawn + 1); i <= done; i++) {
-        if (d[i * 4] < 0) continue
+        // Only cuts turn green; rapids stay as they're drawn (dashed, faint)
+        if (d[i * 4] !== 1) continue
         const [ax, ay] = this.px(d[(i - 1) * 4 + 1] + ox, d[(i - 1) * 4 + 2] + oy)
         const [bx, by] = this.px(d[i * 4 + 1] + ox, d[i * 4 + 2] + oy)
         for (const p of [erase, faint]) {
@@ -298,9 +301,9 @@ export default {
       ctx.strokeStyle = c.bed
       ctx.lineWidth = 3
       ctx.stroke(erase)
-      ctx.strokeStyle = c.dim
-      ctx.globalAlpha = 0.45
-      ctx.lineWidth = 1
+      ctx.strokeStyle = c.done
+      ctx.globalAlpha = 0.85
+      ctx.lineWidth = 1.25
       ctx.stroke(faint)
       ctx.globalAlpha = 1
       this.doneDrawn = done

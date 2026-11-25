@@ -65,6 +65,16 @@ defmodule CNCWeb.Layouts do
           </.link>
         </nav>
         <div class="ui-rail-foot">
+          <.link
+            navigate="/settings"
+            id="nav-settings"
+            class={["ui-nav-item", @current == :settings && "is-current"]}
+            aria-current={if(@current == :settings, do: "page", else: "false")}
+            title="Settings"
+          >
+            <.icon name="hero-cog-6-tooth" class="ui-nav-icon" />
+            <span class="ui-nav-label">Settings</span>
+          </.link>
           <.link navigate="/pendant" id="nav-pendant" class="ui-nav-item" title="Pendant">
             <.icon name="hero-device-phone-mobile" class="ui-nav-icon" />
             <span class="ui-nav-label">Pendant</span>

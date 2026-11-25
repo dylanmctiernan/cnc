@@ -203,6 +203,9 @@
   --y: #51cf66;
   --z: #4dabf7;
   --path: var(--ref-violet);
+  /* What a running job has cut: a muted green (a plain hex, read by the
+     canvas and three.js) */
+  --path-done: #5f9e74;
   --bed: var(--ref-gray-750);
   --grid: #343a3f;
   --grid-major: #424a51;
@@ -3844,3 +3847,24 @@ body {
   color: var(--warn);
   font-weight: 600;
 }
+
+/* Settings: one row per setting, its name and what it does, the control on the right */
+.ui-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  max-width: 44rem;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.ui-setting-name {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+.ui-setting .ui-muted {
+  margin: 0;
+}
+

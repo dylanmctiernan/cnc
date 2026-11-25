@@ -26,6 +26,7 @@ defmodule CNCWeb.Router do
       live "/configuration/wiring", ConfigLive, :wiring
       live "/configuration/file", ConfigLive, :file
       live "/configuration/history", ConfigLive, :history
+      live "/settings", SettingsLive
     end
 
     # The pendant: a phone or tablet as a jog controller, no rail

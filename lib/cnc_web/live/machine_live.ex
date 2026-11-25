@@ -23,6 +23,7 @@ defmodule CNCWeb.MachineLive do
     if connected?(socket) do
       Program.subscribe(cnc.program_topic)
       CNC.Controllers.subscribe(cnc.controllers_topic)
+      CNCApp.Settings.subscribe(cnc.db)
     end
 
     machine = Machine.status(cnc.machine)
@@ -37,6 +38,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(file?: false, program: program, file_error: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
      |> assign(dry_lift: nil, single_block?: false)
+     |> assign(settings: CNCApp.Settings.all(cnc.db))
      |> assign(zoom: if(program, do: :file, else: :bed), view_mode: :top)
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
@@ -96,6 +98,9 @@ defmodule CNCWeb.MachineLive do
     do:
       {:noreply,
        assign(socket, controller: CNC.Controllers.active(socket.assigns.cnc.controllers))}
+
+  def handle_info({:app_settings, settings}, socket),
+    do: {:noreply, assign(socket, settings: settings)}
 
   def handle_info({:machine_console, entry}, socket),
     do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
@@ -730,6 +735,7 @@ defmodule CNCWeb.MachineLive do
             data-z={pos(@machine, 2)}
             data-state={@machine.state}
             data-zoom={@zoom}
+            data-trail={to_string(@settings.trail)}
           >
             <canvas
               role="img"
@@ -957,7 +963,7 @@ defmodule CNCWeb.MachineLive do
             <dd :if={@machine.alarm}>{lock_label(@machine.alarm)}</dd>
           </dl>
           <button
-            :if={@view_mode == :top}
+            :if={@view_mode == :top and @settings.trail}
             type="button"
             class="cnc-btn cnc-btn--quiet"
             phx-click={JS.dispatch("bed:clear-trail", to: "#bed")}

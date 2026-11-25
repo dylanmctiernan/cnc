@@ -54,8 +54,8 @@ export default {
       z: new THREE.Color(token("--z", "#4dabf7")),
       path: new THREE.Color(token("--path", "#c792ea")),
       rapid: new THREE.Color(token("--text-faint", "#5a636b")),
-      // Cut so far: recedes toward the background, as in 2D
-      done: new THREE.Color(token("--border", "#3d444b")).lerp(new THREE.Color(token("--surface-0", "#1c1f22")), 0.35),
+      // Cut so far: a muted green, as in 2D
+      done: new THREE.Color(token("--path-done", "#5f9e74")),
       tool: new THREE.Color(token("--text", "#e4e7e9")),
     }
 
@@ -323,8 +323,11 @@ export default {
     const faint = this.colors.done
     let k = this.painted
     while (k < this.segEnd.length && this.segEnd[k] <= done) {
-      colors.setXYZ(k * 2, faint.r, faint.g, faint.b)
-      colors.setXYZ(k * 2 + 1, faint.r, faint.g, faint.b)
+      // Only cuts turn green; rapids keep their colour
+      if (this.segCut[k]) {
+        colors.setXYZ(k * 2, faint.r, faint.g, faint.b)
+        colors.setXYZ(k * 2 + 1, faint.r, faint.g, faint.b)
+      }
       k++
     }
     if (k !== this.painted) {
@@ -353,7 +356,7 @@ export default {
     // One set of segments, cuts and rapids, coloured per vertex so a job's
     // progress can fade what's done in place. segEnd[k] is the path vertex
     // that segment k ends at.
-    const pos = [], col = [], segEnd = []
+    const pos = [], col = [], segEnd = [], segCut = []
     const cut = this.colors.path, rapid = this.colors.rapid
     for (let i = 4; i < v.length; i += 4) {
       const kind = v[i]
@@ -362,12 +365,14 @@ export default {
       const c = kind === 1 ? cut : rapid
       col.push(c.r, c.g, c.b, c.r, c.g, c.b)
       segEnd.push(i / 4)
+      segCut.push(kind === 1)
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
     geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3))
     this.pathSegs = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({vertexColors: true}))
     this.segEnd = segEnd
+    this.segCut = segCut
     this.painted = 0
     this.pathLines = [this.pathSegs]
     this.work.add(...this.pathLines)
