@@ -19,7 +19,8 @@ defmodule CNCWeb do
   use Boundary, deps: [CNC, CNCApp.Settings], exports: [Endpoint, Telemetry]
 
   def static_paths,
-    do: ~w(assets fonts images favicon.ico favicon.svg robots.txt manifest.webmanifest)
+    do:
+      ~w(assets fonts images favicon.ico favicon.svg robots.txt manifest.webmanifest pendant.webmanifest)
 
   def router do
     quote do

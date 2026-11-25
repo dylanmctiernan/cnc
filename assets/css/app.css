@@ -2873,31 +2873,119 @@ body {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-/* Tablets and phones on their side: controls left, the stick right */
+/* The pendant's modes (Jog, Inc, Zero, Job), as on the workstation */
+.ui-pendant {
+  gap: var(--space-3);
+  /* A pendant, not a page: no double-tap zoom, no pull-to-refresh */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+.ui-pendant-modes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+.ui-pendant-modes .ui-seg {
+  min-height: 2.75rem;
+}
+/* One line, always there: an error never moves the controls */
+.ui-pendant-msg {
+  min-height: 1.25rem;
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--text-sm);
+  line-height: 1.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What the mode holds fills what's left */
+.ui-pendant-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+.ui-pendant-body > .ui-pendant-stage {
+  flex: 1;
+}
+.ui-pendant-inc,
+.ui-pendant-zero,
+.ui-pendant-job {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.ui-pendant-row {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  gap: var(--space-2);
+}
+.ui-pendant-row .ui-seg.ui-axis-x:not(.is-on) { color: var(--x); }
+.ui-pendant-row .ui-seg.ui-axis-y:not(.is-on) { color: var(--y); }
+.ui-pendant-row .ui-seg.ui-axis-z:not(.is-on) { color: var(--z); }
+.ui-pendant-go {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+/* The big press-to-move buttons: a thumb's worth, and then some */
+.ui-pendant-big {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-1);
+  min-height: 7rem;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: var(--radius);
+  background: var(--surface-2, var(--surface-1));
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xl, 1.25rem);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 120ms ease, transform 80ms ease;
+}
+.ui-pendant-big:active:not(:disabled) {
+  transform: scale(0.98);
+  background: var(--surface-1);
+}
+.ui-pendant-big:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ui-pendant-zero > .ui-btn,
+.ui-pendant-job > .ui-btn {
+  width: 100%;
+  justify-content: center;
+}
+.ui-pendant-job .ui-seg {
+  text-transform: none;
+}
+
+/* Tablets and phones on their side: the top in one row; in Jog, the
+   speeds left and the stick right */
 @media (orientation: landscape) and (min-width: 40rem) {
-  .ui-pendant {
-    display: grid;
-    grid-template-columns: minmax(16rem, 1fr) minmax(0, 1.4fr);
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
-    column-gap: var(--space-8);
-  }
-  .ui-pendant-top,
-  .ui-pendant-foot {
-    grid-column: 1 / -1;
-  }
-  /* One row on a tablet: state, position, cycle start, Stop */
   .ui-pendant-top {
     grid-template-columns: auto minmax(0, 1fr) auto minmax(10rem, auto);
     grid-template-areas: "state pos cycle hold";
   }
-  .ui-pendant-speed {
-    grid-column: 1;
+  .ui-pendant-body.is-jog {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1fr) minmax(0, 1.6fr);
+    column-gap: var(--space-8);
+  }
+  .ui-pendant-body.is-jog > .ui-pendant-speed {
     grid-template-columns: 1fr;
     align-self: start;
   }
-  .ui-pendant-stage {
-    grid-column: 2;
-    grid-row: 2 / 4;
+  .ui-pendant-body.is-inc,
+  .ui-pendant-body.is-zero,
+  .ui-pendant-body.is-job {
+    width: min(100%, 40rem);
+    margin-inline: auto;
   }
 }
 
@@ -4039,4 +4127,15 @@ body {
   flex: 1 1 0;
   height: auto;
   min-height: 0;
+}
+
+/* Short labels centred in the pendant's segment buttons */
+.ui-pendant .ui-seg {
+  align-content: center;
+}
+/* A row's name, above it */
+.ui-pendant-label {
+  margin: var(--space-1) 0 calc(-1 * var(--space-2));
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }

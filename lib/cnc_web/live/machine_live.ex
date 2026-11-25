@@ -8,6 +8,8 @@ defmodule CNCWeb.MachineLive do
   use CNCWeb, :live_view
 
   alias CNC.{Machine, Program}
+  import CNCWeb.Run, only: [fit: 2, fit: 3, fit_issue: 1, fraction: 2, time_left: 4, duration: 1]
+
   alias CNC.Machine.State
 
   @tiers CNCWeb.Jog.tiers()
@@ -1542,7 +1544,7 @@ defmodule CNCWeb.MachineLive do
 
   # The running job: how far, how long, the feed override, Abort.
   defp job_panel(assigns) do
-    fraction = job_fraction(assigns.job, assigns.machine)
+    fraction = fraction(assigns.job, assigns.machine)
     elapsed = DateTime.diff(DateTime.utc_now(), assigns.job.started_at)
     {feed_ov, _, _} = assigns.machine.overrides || {100, 100, 100}
 
@@ -1687,41 +1689,6 @@ defmodule CNCWeb.MachineLive do
     </div>
     """
   end
-
-  # How much has actually run: the controller accepts lines into its
-  # planner well ahead of the tool, so the lines acked minus the moves still
-  # waiting there (its status: Bf, planner blocks free) estimate what's
-  # been done. On a short file the planner can hold most of it.
-  @planner_blocks 15
-  defp job_fraction(%{total: total}, _machine) when total == 0, do: 0.0
-
-  defp job_fraction(job, %State{buffer: buffer}) do
-    waiting =
-      case buffer do
-        {free, _} when is_integer(free) -> max(@planner_blocks - free, 0)
-        _ -> 0
-      end
-
-    min(max(job.acked - waiting, 0) / job.total, 1.0)
-  end
-
-  # Early on, from the file's estimate (at the feed override); once a few
-  # percent are done, from the pace so far.
-  defp time_left(fraction, _elapsed, %Program{gcode: %{seconds: secs}}, ov) when fraction < 0.05,
-    do: round(secs * (1 - fraction) * 100 / max(ov, 10))
-
-  defp time_left(fraction, elapsed, _program, _ov) when fraction > 0 and fraction < 1,
-    do: round(elapsed / fraction - elapsed)
-
-  defp time_left(_, _, _, _), do: nil
-
-  defp duration(seconds) when is_integer(seconds) and seconds >= 3600,
-    do: "#{div(seconds, 3600)}:#{pad(div(rem(seconds, 3600), 60))}:#{pad(rem(seconds, 60))}"
-
-  defp duration(seconds) when is_integer(seconds),
-    do: "#{div(max(seconds, 0), 60)}:#{pad(rem(max(seconds, 0), 60))}"
-
-  defp pad(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
 
   defp job_outcome(%{result: :checked} = j), do: check_summary(j)
 
@@ -2065,33 +2032,6 @@ defmodule CNCWeb.MachineLive do
   defp mm(v),
     do: v |> Float.round(1) |> :erlang.float_to_binary(decimals: 1) |> String.trim_trailing(".0")
 
-  # Machine origin is front-left, Z at the top: say which edge, and what to do.
-  defp fit_issue({:z, :high, out}),
-    do:
-      "It lifts Z #{mm(out)} mm above the top of travel. Zero Z on the stock's surface " <>
-        "(at least #{mm(out)} mm below the top)."
-
-  defp fit_issue({:z, :low, out}),
-    do: "It cuts #{mm(out)} mm deeper than Z can reach. Raise the stock, or zero Z higher."
-
-  defp fit_issue({axis, side, out}) do
-    edge =
-      case {axis, side} do
-        {:x, :low} -> "left"
-        {:x, :high} -> "right"
-        {:y, :low} -> "front"
-        {:y, :high} -> "back"
-      end
-
-    "It goes #{mm(out)} mm past the #{edge} edge (#{axis |> to_string() |> String.upcase()}). " <>
-      "Move the work zero #{mm(out)} mm #{opposite(edge)}."
-  end
-
-  defp opposite("left"), do: "right"
-  defp opposite("right"), do: "left"
-  defp opposite("front"), do: "back"
-  defp opposite("back"), do: "front"
-
   defp warning_label(%{kind: kind, line: line, count: count}) do
     where =
       cond do
@@ -2201,20 +2141,6 @@ defmodule CNCWeb.MachineLive do
 
   # How the program's moves sit in the machine's travel from the current
   # work zero: [{axis, :low | :high, mm_outside}], or :no_work_zero.
-  # lift: a dry run's Z lift, which can take the program past the top
-  defp fit(program, machine, lift \\ 0)
-  defp fit(%Program{gcode: %{bounds: nil}}, _machine, _lift), do: []
-  defp fit(_program, %State{wco: nil}, _lift), do: :no_work_zero
-
-  defp fit(%Program{gcode: %{bounds: bounds}}, %State{wco: wco, travel: travel}, lift) do
-    for {axis, i} <- [x: 0, y: 1, z: 2],
-        {pmin, pmax} = elem(bounds, i),
-        {tmin, tmax} = elem(travel, i),
-        offset = elem(wco, i) + if(axis == :z, do: lift, else: 0),
-        {side, out} <- [low: tmin - (pmin + offset), high: pmax + offset - tmax],
-        out > 0.0005,
-        do: {axis, side, out}
-  end
 
   # Speed meters: current X/Y and Z speed against the machine's max rate,
   # with each tier's full-deflection speed marked. All mm/min.

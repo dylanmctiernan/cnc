@@ -2,6 +2,7 @@
   "name": "CNC",
   "short_name": "CNC",
   "description": "Control panel for the CNC router",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
