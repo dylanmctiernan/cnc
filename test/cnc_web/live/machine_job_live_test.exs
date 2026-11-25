@@ -123,6 +123,28 @@ defmodule CNCWeb.MachineJobLiveTest do
     assert eventually(fn -> has_element?(view, "#note-job", "Dry run of square.nc") end)
   end
 
+  test "Single block: chosen before Start, Next line steps, the message line says what's next",
+       %{conn: conn, m: m, program: program} do
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+
+    view |> element("#bar-resume") |> render_click()
+    assert has_element?(view, "#start-single-off[aria-pressed=true]")
+    view |> element("#start-single-on") |> render_click()
+    view |> element("#confirm-start") |> render_click()
+
+    assert eventually(fn -> has_element?(view, "#note-single", "line 2 is next (G0Z0)") end)
+    assert has_element?(view, "#machine-state", "Single block")
+    assert has_element?(view, "#bar-resume", "Next line")
+    view |> element("#bar-resume") |> render_click()
+    assert eventually(fn -> has_element?(view, "#note-single", "line 3 is next") end)
+
+    view |> element("#job-single-off") |> render_click()
+    assert eventually(fn -> Machine.status(m).state == :idle end, 10_000)
+    assert eventually(fn -> has_element?(view, "#note-job", "Finished square.nc") end)
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")

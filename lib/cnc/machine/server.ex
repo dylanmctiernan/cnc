@@ -103,6 +103,8 @@ defmodule CNC.Machine.Server do
     # The G-code file being streamed (state :running), and how the last one ended
     job: nil,
     last_job: nil,
+    # Single block for the next job (set from Ready, kept per job)
+    single_block_next?: false,
     console: Console.new(),
     settings: %{},
     travel_source: :config,
@@ -453,6 +455,29 @@ defmodule CNC.Machine.Server do
     end
   end
 
+  # Single block: Cycle Start sends the next line once the controller has
+  # finished the last one (at rest, nothing unacked). A press while a line
+  # is still running does nothing, as on a machine's panel. On Hold, it's
+  # the usual resume.
+  defp event({:call, from}, :resume, :running, %{job: %{single_block?: true}} = d)
+       when d.status.state != :hold and d.status.state != :door do
+    d =
+      if Job.waiting?(d.job) and d.status.state == :idle and not d.motion_unsettled?,
+        do: feed_job(%{d | job: Job.grant(d.job)}),
+        else: d
+
+    {:running, d, [{:reply, from, :ok}]}
+  end
+
+  # Single block on or off: for the next job (from Ready) or this one.
+  defp event({:call, from}, {:single_block, on?}, :running, d) when is_boolean(on?) do
+    d = %{d | job: Job.single_block(d.job, on?), single_block_next?: on?}
+    {:running, feed_job(d), [{:reply, from, :ok}]}
+  end
+
+  defp event({:call, from}, {:single_block, on?}, :idle, d) when is_boolean(on?),
+    do: {:idle, %{d | single_block_next?: on?}, [{:reply, from, :ok}]}
+
   defp event({:call, from}, cmd, s, %{connected?: true} = d)
        when cmd in [:feed_hold, :resume, :reset] do
     byte =
@@ -515,7 +540,7 @@ defmodule CNC.Machine.Server do
         {:idle, d, [{:reply, from, {:error, :busy}}]}
 
       true ->
-        case Job.new(name, text, mode: mode) do
+        case Job.new(name, text, mode: mode, single_block?: d.single_block_next?) do
           {:ok, job} ->
             d =
               log(
@@ -1060,6 +1085,18 @@ defmodule CNC.Machine.Server do
 
   ## Jobs
 
+  # The job for the snapshot: its summary, and whether single block is
+  # waiting for Start (the last line done, the controller at rest)
+  defp job_snapshot(%{job: nil}), do: nil
+
+  defp job_snapshot(%{job: job} = d) do
+    waiting? =
+      Job.waiting?(job) and d.status != nil and d.status.state == :idle and
+        not d.motion_unsettled?
+
+    Map.put(Job.summary(job), :waiting?, waiting?)
+  end
+
   # Send job lines while they fit in the controller's buffer.
   defp feed_job(%{job: job} = d) do
     case Job.next(job) do
@@ -1163,7 +1200,7 @@ defmodule CNC.Machine.Server do
       max_rate: max_rate(d),
       buffer: d.status && d.status.buffer,
       overrides: d.status && d.status.overrides,
-      job: Job.summary(d.job),
+      job: job_snapshot(d),
       last_job: d.last_job,
       awaiting_ack: :queue.len(d.pending),
       moving?: d.motion_unsettled? or (d.status != nil and d.status.state in [:run, :jog, :home]),

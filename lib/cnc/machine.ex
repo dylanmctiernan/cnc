@@ -82,6 +82,14 @@ defmodule CNC.Machine do
   def dry_run(server \\ __MODULE__, name, text, lift) when is_number(lift) and lift > 0,
     do: run(server, name, text, {:dry, lift})
 
+  @doc """
+  Single block: one line per Cycle Start (`resume/1`). From Ready it's for
+  the next job; while running it switches this one (off: the rest streams
+  straight away).
+  """
+  def single_block(server \\ __MODULE__, on?) when is_boolean(on?),
+    do: call(server, {:single_block, on?})
+
   @doc "Abort the running job: a soft reset (the machine comes back locked)."
   def abort(server \\ __MODULE__), do: call(server, :abort)
 

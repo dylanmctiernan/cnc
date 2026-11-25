@@ -45,4 +45,20 @@ defmodule CNC.FluidNCSim.JobTest do
     assert [{20, 3, "G38.2Z-5F100"}] = last.errors
     assert {x, y} == {0.0, 0.0}
   end
+
+  test "single block steps line by line on the firmware, then runs on", %{m: m} do
+    unlock(m)
+    :ok = Machine.single_block(m, true)
+    :ok = Machine.run(m, "steps.nc", "G21 G90\nG1 X10 F2000\nG1 Y10\nG1 X0\nG1 Y0\n")
+
+    assert eventually(fn -> match?(%{waiting?: true, acked: 1}, Machine.status(m).job) end, 5000)
+    :ok = Machine.resume(m)
+    assert eventually(fn -> match?(%{waiting?: true, acked: 2}, Machine.status(m).job) end, 5000)
+    {x, _, _} = Machine.status(m).mpos
+    assert_in_delta x, 10.0, 0.01
+
+    :ok = Machine.single_block(m, false)
+    assert eventually(fn -> Machine.status(m).state == :idle end, 15_000)
+    assert %{result: :done, acked: 5} = Machine.status(m).last_job
+  end
 end

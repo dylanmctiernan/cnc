@@ -30,6 +30,11 @@ defmodule CNC.Machine.Job do
       absolute positioning (G90) gets the lift (relative moves are already
       relative to it; machine-coordinate G53 lines are left alone), and
       spindle on (M3/M4) is dropped.
+
+  Single block (`single_block?`, switchable mid-job): one line per Cycle
+  Start. The job holds a `credit` of lines it may send; with single block
+  on, each Start grants one (the server only grants it once the controller
+  has finished the last line and is at rest).
   """
 
   @rx_buffer 127
@@ -50,7 +55,9 @@ defmodule CNC.Machine.Job do
           halted?: boolean,
           aborting?: boolean,
           mode: :run | :check | {:dry, number},
-          errors: [{code :: term, line_no :: pos_integer, text :: String.t()}]
+          errors: [{code :: term, line_no :: pos_integer, text :: String.t()}],
+          single_block?: boolean,
+          credit: non_neg_integer | :infinity
         }
 
   defstruct [
@@ -69,7 +76,9 @@ defmodule CNC.Machine.Job do
     # check mode: $C off has been sent
     exiting?: false,
     mode: :run,
-    errors: []
+    errors: [],
+    single_block?: false,
+    credit: :infinity
   ]
 
   @doc """
@@ -84,6 +93,7 @@ defmodule CNC.Machine.Job do
   def new(name, text, opts \\ []) do
     now = Keyword.get(opts, :now, DateTime.utc_now())
     mode = Keyword.get(opts, :mode, :run)
+    single_block? = Keyword.get(opts, :single_block?, false)
 
     lines =
       text
@@ -111,7 +121,9 @@ defmodule CNC.Machine.Job do
            queue: :queue.from_list(lines),
            total: length(lines),
            started_at: now,
-           mode: mode
+           mode: mode,
+           single_block?: single_block?,
+           credit: if(single_block?, do: 1, else: :infinity)
          }}
     end
   end
@@ -168,6 +180,7 @@ defmodule CNC.Machine.Job do
   @doc "The next line to send, if it fits in the controller's buffer now."
   @spec next(t) :: {:send, line, t} | :wait
   def next(%__MODULE__{halted?: true}), do: :wait
+  def next(%__MODULE__{credit: 0}), do: :wait
 
   def next(%__MODULE__{} = job) do
     case :queue.peek(job.queue) do
@@ -181,7 +194,8 @@ defmodule CNC.Machine.Job do
              | queue: :queue.drop(job.queue),
                in_flight: :queue.in({n, size, text}, job.in_flight),
                bytes: job.bytes + size,
-               sent: job.sent + 1
+               sent: job.sent + 1,
+               credit: if(job.credit == :infinity, do: :infinity, else: job.credit - 1)
            }}
         else
           :wait
@@ -212,6 +226,28 @@ defmodule CNC.Machine.Job do
     end
   end
 
+  @doc "Single block: may the next line go? (one more)"
+  def grant(%__MODULE__{single_block?: true} = job), do: %{job | credit: 1}
+  def grant(job), do: job
+
+  @doc "Single block on or off mid-job (off: the rest streams straight away)."
+  def single_block(job, true), do: %{job | single_block?: true, credit: 0}
+  def single_block(job, false), do: %{job | single_block?: false, credit: :infinity}
+
+  @doc "Single block, the last line done, waiting for Start (needs the controller at rest)."
+  def waiting?(%__MODULE__{} = job),
+    do:
+      job.single_block? and job.credit == 0 and :queue.is_empty(job.in_flight) and
+        not :queue.is_empty(job.queue) and not job.halted?
+
+  @doc "The next line to send, if any: {line_no, text}."
+  def peek(%__MODULE__{queue: q}) do
+    case :queue.peek(q) do
+      {:value, line} -> line
+      :empty -> nil
+    end
+  end
+
   @doc "Everything sent has been acked, and there's nothing more to send."
   def drained?(%__MODULE__{} = job),
     do: :queue.is_empty(job.in_flight) and (job.halted? or :queue.is_empty(job.queue))
@@ -230,7 +266,9 @@ defmodule CNC.Machine.Job do
       error: job.error,
       halted?: job.halted?,
       mode: job.mode,
-      errors: job.errors
+      errors: job.errors,
+      single_block?: job.single_block?,
+      next: peek(job)
     }
   end
 end

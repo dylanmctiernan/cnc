@@ -36,7 +36,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
-     |> assign(dry_lift: nil)
+     |> assign(dry_lift: nil, single_block?: false)
      |> assign(zoom: if(program, do: :file, else: :bed), view_mode: :top)
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
@@ -128,13 +128,30 @@ defmodule CNCWeb.MachineLive do
   # Cycle start: Resume a hold, or (Ready, a file loaded) the pre-start check.
   def handle_event("cycle_start", _, socket) do
     case cycle(socket.assigns.machine, socket.assigns.program) do
-      :resume -> tap_noreply(socket, &Machine.resume/1)
-      :start -> {:noreply, assign(socket, start_check?: true, dry_lift: nil)}
-      nil -> {:noreply, socket}
+      :resume ->
+        tap_noreply(socket, &Machine.resume/1)
+
+      :next ->
+        tap_noreply(socket, &Machine.resume/1)
+
+      :start ->
+        # Every run starts as a plain one: dry run and single block are chosen each time
+        Machine.single_block(srv(socket), false)
+        {:noreply, assign(socket, start_check?: true, dry_lift: nil, single_block?: false)}
+
+      nil ->
+        {:noreply, socket}
     end
   end
 
   def handle_event("cancel_start", _, socket), do: {:noreply, assign(socket, start_check?: false)}
+
+  # Single block: for the next run (dialog) or this one (job panel)
+  def handle_event("single_block", %{"on" => on}, socket) when on in ~w(true false) do
+    on? = on == "true"
+    Machine.single_block(srv(socket), on?)
+    {:noreply, assign(socket, single_block?: on?)}
+  end
 
   def handle_event("dry_lift", %{"mm" => mm}, socket) do
     lift = if mm in ~w(5 10 25), do: String.to_integer(mm), else: nil
@@ -544,7 +561,11 @@ defmodule CNCWeb.MachineLive do
                 }
               >
                 <.icon name="hero-play" class="ui-btn-icon" />
-                {if held?(@machine), do: "Resume", else: "Start"}
+                {cond do
+                  held?(@machine) -> "Resume"
+                  cycle(@machine, @program) == :next -> "Next line"
+                  true -> "Start"
+                end}
               </UI.button>
               <UI.hold_button id="bar-hold" />
             </div>
@@ -594,6 +615,16 @@ defmodule CNCWeb.MachineLive do
             <p>
               On hold: motion paused, the position kept. The spindle keeps turning.
               Resume to carry on, or Abort.
+            </p>
+          </div>
+          <div
+            :if={@machine.state == :running and match?(%{waiting?: true}, @machine.job)}
+            class="cnc-note"
+            id="note-single"
+          >
+            <p>
+              Single block: line {elem(@machine.job.next, 0)} is next ({elem(@machine.job.next, 1)}).
+              Press Next line for it, or turn single block off to run on.
             </p>
           </div>
           <.note
@@ -1178,9 +1209,13 @@ defmodule CNCWeb.MachineLive do
             </button>
           </div>
         </div>
+        <div class="cnc-job-ov" id="start-single">
+          <span class="cnc-h">Single block</span>
+          <.single_block_seg on?={@single_block?} id="start-single" />
+        </div>
         <p class="cnc-sub">
           A new program's first run is usually a dry run (Z lifted above the stock,
-          spindle off), then the first cut at 25% rapids.
+          spindle off), then the first cut at 25% rapids, in single block.
         </p>
         <:actions>
           <UI.button
@@ -1367,6 +1402,10 @@ defmodule CNCWeb.MachineLive do
         <span class="cnc-h">Rapids</span>
         <.rapid_seg machine={@machine} id="job-rapid" />
       </div>
+      <div :if={@job.mode != :check} class="cnc-job-ov">
+        <span class="cnc-h">Single block</span>
+        <.single_block_seg on?={@job.single_block?} id="job-single" />
+      </div>
       <button
         type="button"
         id="abort-job"
@@ -1376,6 +1415,27 @@ defmodule CNCWeb.MachineLive do
         Abort the job
       </button>
     </section>
+    """
+  end
+
+  attr :on?, :boolean, required: true
+  attr :id, :string, required: true
+
+  defp single_block_seg(assigns) do
+    ~H"""
+    <div class="cnc-seg cnc-seg--small" role="group" aria-label="Single block">
+      <button
+        :for={{on?, label} <- [{false, "Off"}, {true, "On"}]}
+        type="button"
+        class="cnc-btn"
+        id={"#{@id}-#{if on?, do: "on", else: "off"}"}
+        phx-click="single_block"
+        phx-value-on={to_string(on?)}
+        aria-pressed={to_string(@on? == on?)}
+      >
+        {label}
+      </button>
+    </div>
     """
   end
 
@@ -1972,6 +2032,7 @@ defmodule CNCWeb.MachineLive do
   defp cycle(machine, program) do
     cond do
       held?(machine) -> :resume
+      machine.state == :running and match?(%{waiting?: true}, machine.job) -> :next
       machine.state == :idle and program != nil -> :start
       true -> nil
     end
@@ -2004,6 +2065,10 @@ defmodule CNCWeb.MachineLive do
   defp state_icon(_), do: "hero-arrow-path"
 
   defp state_label(%State{state: :running, job: %{mode: :check}}), do: "Checking"
+
+  defp state_label(%State{state: :running, controller: c, job: %{single_block?: true}})
+       when c not in [:hold, :door],
+       do: "Single block"
 
   defp state_label(%State{state: :running, controller: c, job: %{mode: {:dry, _}}})
        when c not in [:hold, :door],

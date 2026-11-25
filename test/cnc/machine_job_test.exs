@@ -151,6 +151,33 @@ defmodule CNC.Machine.JobTest do
       assert {:error, :outside_travel} = Machine.outline(m, {{0.0, 5000.0}, {0.0, 10.0}})
     end
 
+    test "single block: one line per Start, only once the last has finished; off runs on", %{m: m} do
+      :ok = Machine.single_block(m, true)
+      :ok = Machine.run(m, "square.nc", @square)
+
+      # One line goes; then it waits for Start
+      assert eventually(fn -> match?(%{waiting?: true, acked: 1}, Machine.status(m).job) end)
+      Process.sleep(150)
+      assert %{acked: 1, sent: 1, next: {3, "G0Z0"}} = Machine.status(m).job
+
+      :ok = Machine.resume(m)
+      assert eventually(fn -> match?(%{waiting?: true, acked: 2}, Machine.status(m).job) end)
+
+      # A long line: Start while it's still moving does nothing
+      for _ <- 1..3 do
+        :ok = Machine.resume(m)
+        assert eventually(fn -> Machine.status(m).job.waiting? end, 5000)
+      end
+
+      %{acked: acked} = Machine.status(m).job
+      assert acked == 5
+
+      # Off: the rest runs straight through
+      :ok = Machine.single_block(m, false)
+      assert eventually(fn -> Machine.status(m).state == :idle end, 10_000)
+      assert %{result: :done, acked: 10} = Machine.status(m).last_job
+    end
+
     test "Abort stops it and the machine comes back locked", %{m: m} do
       :ok = Machine.run(m, "square.nc", @square)
       assert eventually(fn -> Machine.status(m).controller == :run end)

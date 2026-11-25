@@ -61,6 +61,7 @@ defmodule CNC.Machine.Protocol do
     work_offset: [:idle],
     go_to_work_zero: [:idle],
     outline: [:idle],
+    single_block: [:idle, :running],
     upload: [:alarm, :idle],
     request: [:alarm, :idle],
     run: [:idle],
