@@ -49,7 +49,7 @@ defmodule CNCWeb.MachineLiveTest do
     {_, _, z0} = Machine.status(m).mpos
 
     # At the top of Z travel already: down works, up is clamped.
-    view |> element("button[phx-value-mode=step]") |> render_click()
+    view |> element("#panel-inc") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
     view |> element("button[phx-click=step_axis][phx-value-axis=z]") |> render_click()
     view |> element(".cnc-pendant-btn", "Z−") |> render_click()
@@ -156,7 +156,7 @@ defmodule CNCWeb.MachineLiveTest do
              abs(wx) < 1.0e-6 and abs(wy) < 1.0e-6
            end)
 
-    view |> element("button[phx-value-mode=step]") |> render_click()
+    view |> element("#panel-inc") |> render_click()
     view |> element("button[phx-value-mm='10']") |> render_click()
     view |> element(".cnc-pendant-btn", "X+") |> render_click()
     # Work = machine - offset, in floats: compare with a tolerance.
@@ -241,7 +241,7 @@ defmodule CNCWeb.MachineLiveTest do
     assert eventually(fn -> render(view) =~ "Ready" end)
     {x0, y0, _} = Machine.status(m).mpos
 
-    view |> element("button[phx-value-mode=step]") |> render_click()
+    view |> element("#panel-inc") |> render_click()
     view |> element("button[phx-value-mm='1']") |> render_click()
     view |> element("button[phx-click=step_axis][phx-value-axis=y]") |> render_click()
     view |> element(".cnc-pendant-btn", "Y+") |> render_click()
@@ -277,27 +277,42 @@ defmodule CNCWeb.MachineLiveTest do
 
   defp round_wco({x, y, z}), do: {Float.round(x * 1.0, 3), Float.round(y * 1.0, 3), z}
 
-  test "details and console", %{conn: conn, m: m} do
+  test "Diagnostics: the controller traffic, view only", %{conn: conn} do
     {:ok, view, _} = live(conn, ~p"/")
-    refute has_element?(view, "#console")
+    refute has_element?(view, "#diagnostics")
 
-    view |> element(".cnc-actions button", "Console") |> render_click()
-    assert has_element?(view, "#console")
+    view |> element("#diagnostics-toggle") |> render_click()
+    assert has_element?(view, "#diagnostics")
+    refute has_element?(view, "#diagnostics input[type=text]")
     # A fresh machine: locked because it just connected.
     assert render(view) =~ "New connection"
 
     view |> element(".cnc-lock button", "Unlock") |> render_click()
-    assert eventually(fn -> has_element?(view, "#console-log li", "$X") end)
-    refute has_element?(view, "#console-log li.is-poll")
+    assert eventually(fn -> has_element?(view, "#diagnostics-log li", "$X") end)
+    refute has_element?(view, "#diagnostics-log li.is-poll")
 
-    view |> element("#console input[type=checkbox]") |> render_click()
-    assert eventually(fn -> has_element?(view, "#console-log li.is-poll") end)
+    view |> element("#diagnostics input[type=checkbox]") |> render_click()
+    assert eventually(fn -> has_element?(view, "#diagnostics-log li.is-poll") end)
 
-    view |> element("#console-input") |> render_submit(%{"line" => "$$"})
-    assert eventually(fn -> has_element?(view, "#console-log li", "$130=") end)
+    view |> element("#diagnostics-toggle") |> render_click()
+    refute has_element?(view, "#diagnostics")
+  end
+
+  test "MDI: type commands for the controller, see its replies, a commands reference", %{
+    conn: conn,
+    m: m
+  } do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element(".cnc-lock button", "Unlock") |> render_click()
+    view |> element("#panel-mdi") |> render_click()
+    assert has_element?(view, "#mdi-input")
+
+    view |> element("#mdi-input") |> render_submit(%{"line" => "$$"})
+    assert eventually(fn -> has_element?(view, "#mdi-log li", "$130=") end)
+    refute has_element?(view, "#mdi-log li.is-poll")
 
     :ok = Machine.jog(m, {1, 0}, :normal)
-    view |> element("#console-input") |> render_submit(%{"line" => "$$"})
+    view |> element("#mdi-input") |> render_submit(%{"line" => "$$"})
     assert render(view) =~ "Can&#39;t send while jogging."
     Machine.jog_stop(m)
 
@@ -306,13 +321,8 @@ defmodule CNCWeb.MachineLiveTest do
     assert render(view) =~ "The fake sim understands"
 
     view |> element("#console-help button", "Ask the controller") |> render_click()
-    assert eventually(fn -> has_element?(view, "#console-log li", "[HLP:") end)
-
     view |> element("button", "Hide commands") |> render_click()
-    refute has_element?(view, "#console-help")
-
-    view |> element(".cnc-actions button", "Console") |> render_click()
-    refute has_element?(view, "#console")
+    assert eventually(fn -> has_element?(view, "#mdi-log li", "[HLP:") end)
   end
 
   test "uploading a G-code file shows its summary, shared with other screens", %{
@@ -323,6 +333,7 @@ defmodule CNCWeb.MachineLiveTest do
     {:ok, view, _} = live(conn, ~p"/")
     {:ok, other, _} = live(conn, ~p"/")
 
+    view |> element("#panel-auto") |> render_click()
     view |> element("#open-file") |> render_click()
     assert has_element?(view, "#file-dialog")
 

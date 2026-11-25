@@ -19,7 +19,7 @@ const SIZES = [[1440, 900], [1024, 768]]
 const TOLERANCE = 0.5 // px
 
 const MACHINE = [
-  "#machine-state", "#open-file", "#bar-resume", "#bar-hold", "#rail-hold",
+  "#machine-state", "#diagnostics-toggle", "#bar-reset", "#bar-resume", "#bar-hold", "#rail-hold",
   ".cnc-view-bar", "#view-top", "#view-3d", ".cnc-view", "#messages",
   ".cnc-dro", ".cnc-dro-tools", ".cnc-ctl", ".cnc-modes", ".cnc-mode-body", ".cnc-side",
 ]
@@ -81,6 +81,7 @@ for (const [w, h] of SIZES) {
 
   const M = MACHINE
   await step(page, where, "load a file", M, async () => {
+    await click(page, "#panel-auto")
     await click(page, "#open-file")
     await page.locator("input[type=file]").first().setInputFiles(SAMPLE)
     await page.waitForTimeout(1500)
@@ -91,22 +92,19 @@ for (const [w, h] of SIZES) {
   await step(page, where, "zoom to the file", M, () => click(page, "#zoom-file"))
   await step(page, where, "3D", M, () => click(page, "#view-3d"))
   await step(page, where, "2D", M, () => click(page, "#view-top"))
-  // Jog | Program: one fixed height, so switching moves nothing else
-  await step(page, where, "Jog panel", M, () => click(page, "#panel-jog"))
-  await step(page, where, "Program panel", M, () => click(page, "#panel-program"))
-  await step(page, where, "back to Jog", M, () => click(page, "#panel-jog"))
-  await step(page, where, "Step mode", M, () => click(page, ".cnc-tab--step"))
-  await step(page, where, "Stick mode", M, () => click(page, ".cnc-tab--joystick"))
+  // Jog · Inc · Auto · MDI: one fixed height, so switching moves nothing else
+  for (const mode of ["jog", "inc", "auto", "mdi", "jog"])
+    await step(page, where, `${mode} mode`, M, () => click(page, `#panel-${mode}`))
   await step(page, where, "machine coordinates", M, () => click(page, ".cnc-dro-head button[phx-value-frame=machine]"))
   await step(page, where, "work coordinates", M, () => click(page, ".cnc-dro-head button[phx-value-frame=work]"))
   await step(page, where, "Hold", M, () => click(page, "#bar-hold"))
   await step(page, where, "Resume", M, () => click(page, "#bar-resume"))
   await step(page, where, "Zero X/Y", M, () => click(page, ".cnc-dro-tools button:has-text('Zero X/Y')"))
   await step(page, where, "Undo the zero", M, () => click(page, "#undo-zero"))
-  // The console docks under the map: the right column doesn't move
+  // Diagnostics docks under the map: the right column doesn't move
   const R = ["#bar-hold", "#rail-hold", ".cnc-dro", ".cnc-ctl", "#messages"]
-  await step(page, where, "open the console", R, () => click(page, "button[aria-controls=console]"))
-  await step(page, where, "close the console", R, () => click(page, "button[aria-controls=console]"))
+  await step(page, where, "open Diagnostics", R, () => click(page, "#diagnostics-toggle"))
+  await step(page, where, "close Diagnostics", R, () => click(page, "#diagnostics-toggle"))
   // The Start check is a dialog: opening and closing it moves nothing
   await step(page, where, "Start check, then Not yet", M, async () => {
     await click(page, "#bar-resume")

@@ -13,6 +13,14 @@ defmodule CNCWeb.MachineLive do
   @tiers CNCWeb.Jog.tiers()
   @steps [0.1, 1, 10, 50]
   @console_rows 200
+  @mdi_rows 60
+
+  @modes [
+    {:jog, "Jog", "Jog: hold the stick or arrow keys to move"},
+    {:inc, "Inc", "Incremental: one press, one step"},
+    {:auto, "Auto", "Auto: open and run a program"},
+    {:mdi, "MDI", "Manual data input: type commands for the controller"}
+  ]
   @fade_ms 8_000
 
   @impl true
@@ -37,7 +45,10 @@ defmodule CNCWeb.MachineLive do
      # The panel's mode, as on a machine's operator panel: Jog (by hand) or
      # Program (the loaded file and the job)
      # (Program if a file is already loaded)
-     |> assign(panel: if(program, do: :program, else: :jog))
+     |> assign(panel: if(program, do: :auto, else: :jog), console_sub?: false)
+     |> assign(modes: @modes)
+     |> stream_configure(:mdi, dom_id: &"mdi-#{&1.id}")
+     |> stream(:mdi, [])
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
@@ -80,7 +91,7 @@ defmodule CNCWeb.MachineLive do
     # A job started: the panel shows it (Jog can't be used meanwhile)
     socket =
       if machine.job && !socket.assigns.machine.job,
-        do: assign(socket, panel: :program),
+        do: assign(socket, panel: :auto),
         else: socket
 
     {:noreply, socket |> assign(machine: machine) |> push_pos(machine)}
@@ -97,7 +108,7 @@ defmodule CNCWeb.MachineLive do
   def handle_info({:program, program}, socket) do
     zoom = if program, do: :file, else: :bed
 
-    socket = if program, do: assign(socket, panel: :program), else: socket
+    socket = if program, do: assign(socket, panel: :auto), else: socket
 
     {:noreply,
      socket
@@ -114,8 +125,21 @@ defmodule CNCWeb.MachineLive do
   def handle_info({:app_settings, settings}, socket),
     do: {:noreply, assign(socket, settings: settings)}
 
-  def handle_info({:machine_console, entry}, socket),
-    do: {:noreply, stream_insert(socket, :console, entry, limit: -@console_rows)}
+  # Controller traffic: the full log for Diagnostics, the conversation (no
+  # status polls) for MDI
+  def handle_info({:machine_console, entry}, socket) do
+    socket =
+      if socket.assigns.details?,
+        do: stream_insert(socket, :console, entry, limit: -@console_rows),
+        else: socket
+
+    socket =
+      if socket.assigns.panel == :mdi and entry.kind != :poll,
+        do: stream_insert(socket, :mdi, entry, limit: -@mdi_rows),
+        else: socket
+
+    {:noreply, socket}
+  end
 
   @impl true
   def handle_event("jog", %{"x" => x, "y" => y, "tier" => tier} = params, socket) do
@@ -396,8 +420,11 @@ defmodule CNCWeb.MachineLive do
   def handle_event("dismiss", %{"note" => "travel"}, socket),
     do: {:noreply, dismiss(socket, :travel)}
 
-  def handle_event("panel", %{"mode" => mode}, socket) when mode in ~w(jog program),
-    do: {:noreply, assign(socket, panel: String.to_existing_atom(mode))}
+  def handle_event("panel", %{"mode" => mode}, socket) when mode in ~w(jog inc auto mdi) do
+    panel = String.to_existing_atom(mode)
+    control = if panel == :inc, do: :step, else: :joystick
+    {:noreply, socket |> assign(panel: panel, control_mode: control) |> sync_console()}
+  end
 
   def handle_event("control_mode", %{"mode" => mode}, socket) when mode in ~w(joystick step),
     do: {:noreply, assign(socket, control_mode: String.to_existing_atom(mode))}
@@ -444,23 +471,23 @@ defmodule CNCWeb.MachineLive do
     {:noreply, set_action_error(socket, error)}
   end
 
-  # Console traffic is only subscribed to while the panel is open. Subscribe
-  # before loading history; overlapping entries share a DOM id, so no dupes.
+  # Diagnostics (view only): the full traffic log, docked under the map
   def handle_event("toggle_details", _, %{assigns: %{details?: false}} = socket) do
-    Machine.subscribe_console(socket.assigns.cnc.topic)
-
     {:noreply,
      socket
      |> assign(details?: true)
+     |> sync_console()
      |> stream(:console, Machine.console(srv(socket)), reset: true)}
   end
 
   def handle_event("toggle_details", _, socket) do
-    Machine.unsubscribe_console(socket.assigns.cnc.topic)
     Machine.unsubscribe_polls(socket.assigns.cnc.topic)
 
     {:noreply,
-     socket |> assign(details?: false, polls?: false) |> stream(:console, [], reset: true)}
+     socket
+     |> assign(details?: false, polls?: false)
+     |> sync_console()
+     |> stream(:console, [], reset: true)}
   end
 
   def handle_event("toggle_polls", _, %{assigns: %{polls?: polls?}} = socket) do
@@ -550,27 +577,34 @@ defmodule CNCWeb.MachineLive do
           <%!-- Grouped as on a machine's operator panel: the job, then Reset
                (abandons it; quiet, apart), then Resume and Hold side by side,
                Hold last and always in the same place. --%>
+          <%!-- The cycle group, as on a machine's panel: Reset (Abort while a
+               job runs), Cycle Start / Resume, Hold, always in this place.
+               Diagnostics, a view, sits apart. --%>
           <div class="cnc-actions">
-            <div class="cnc-run-group" role="group" aria-label="Job">
-              <UI.button id="open-file" phx-click="open_file" disabled={@machine.state == :running}>
-                <.icon name="hero-document-arrow-up" class="ui-btn-icon" /> Open file
-              </UI.button>
+            <UI.button
+              id="diagnostics-toggle"
+              variant="quiet"
+              phx-click="toggle_details"
+              aria-pressed={to_string(@details?)}
+              aria-controls="diagnostics"
+              title="The traffic to and from the controller (view only)"
+            >
+              <.icon name="hero-command-line" class="ui-btn-icon" /> Diagnostics
+            </UI.button>
+            <div class="cnc-run-group" role="group" aria-label="Cycle">
               <UI.button
-                phx-click="toggle_details"
-                aria-pressed={to_string(@details?)}
-                aria-controls="console"
-              >
-                <.icon name="hero-command-line" class="ui-btn-icon" /> Console
-              </UI.button>
-            </div>
-            <div class="cnc-run-group" role="group" aria-label="Run">
-              <UI.button
+                id="bar-reset"
                 variant="quiet"
-                phx-click="reset"
+                class="cnc-reset"
+                phx-click={if @machine.job, do: "abort_job", else: "reset"}
                 disabled={!@machine.connected?}
-                title="Abandon the job: stops and clears the controller; it comes back locked"
+                title={
+                  if @machine.job,
+                    do: "End the job: stops at once and comes back locked (asks first)",
+                    else: "Soft reset: stops and clears the controller; it comes back locked"
+                }
               >
-                Reset
+                {if @machine.job, do: "Abort", else: "Reset"}
               </UI.button>
               <%!-- Cycle start, as on a machine's panel: Start the loaded file
                    when Ready, Resume a hold. Same place and size either way. --%>
@@ -843,36 +877,30 @@ defmodule CNCWeb.MachineLive do
             </div>
           </section>
 
-          <section class="cnc-ctl" aria-label="Jog and program">
+          <%!-- The operator panel's modes, as on a Fanuc/Haas mode selector:
+               JOG (continuous), INC (incremental, a step a press), AUTO (run
+               the program), MDI (type commands). --%>
+          <section class="cnc-ctl" aria-label="Operating mode">
             <div class="cnc-seg cnc-modes" role="group" aria-label="Mode">
               <button
-                :for={{mode, label} <- [jog: "Jog", program: "Program"]}
+                :for={{mode, label, title} <- @modes}
                 type="button"
                 class="cnc-btn"
                 id={"panel-#{mode}"}
                 aria-pressed={to_string(@panel == mode)}
                 phx-click="panel"
                 phx-value-mode={mode}
+                title={title}
               >
                 {label}
               </button>
             </div>
             <%!-- One fixed height for both modes: switching never moves what's below --%>
             <div class="cnc-mode-body">
-              <%= if @panel == :jog do %>
-                <div class="cnc-seg cnc-tabs" role="group" aria-label="Control mode">
-                  <button
-                    :for={{mode, label} <- [joystick: "Stick", step: "Step"]}
-                    type="button"
-                    class={["cnc-btn", "cnc-tab--#{mode}"]}
-                    aria-pressed={to_string(@control_mode == mode)}
-                    phx-click="control_mode"
-                    phx-value-mode={mode}
-                  >
-                    {label}
-                  </button>
-                </div>
-
+              <%= if @panel in [:jog, :inc] do %>
+                <p :if={@machine.state == :running} class="cnc-mode-off" id="jog-off">
+                  Jogging is off while a job runs.
+                </p>
                 <%!-- Same height in every mode, so switching never moves the map --%>
                 <div class="cnc-ctl-body">
                   <div
@@ -971,12 +999,22 @@ defmodule CNCWeb.MachineLive do
                   </div>
                 </div>
               <% else %>
-                <.program_panel
-                  program={@program}
-                  machine={@machine}
-                  uploads={@uploads}
-                  file_error={@file_error}
-                />
+                <%= if @panel == :auto do %>
+                  <.program_panel
+                    program={@program}
+                    machine={@machine}
+                    uploads={@uploads}
+                    file_error={@file_error}
+                  />
+                <% else %>
+                  <.mdi_panel
+                    streams={@streams}
+                    machine={@machine}
+                    commands?={@commands?}
+                    command_help={@command_help}
+                    raw_error={@raw_error}
+                  />
+                <% end %>
               <% end %>
             </div>
           </section>
@@ -1129,65 +1167,28 @@ defmodule CNCWeb.MachineLive do
           </div>
         </div>
 
-        <section :if={@details?} id="console" class="cnc-console" aria-label="Controller console">
+        <%!-- Diagnostics: the traffic to and from the controller, view only
+             (type commands in MDI). Docked under the map. --%>
+        <section
+          :if={@details?}
+          id="diagnostics"
+          class="cnc-console"
+          aria-label="Diagnostics: controller traffic"
+        >
           <div class="cnc-console-bar">
-            <h2 class="cnc-h">Console</h2>
+            <h2 class="cnc-h">Diagnostics</h2>
             <label class="cnc-check">
               <input type="checkbox" checked={@polls?} phx-click="toggle_polls" />
-              <span><span class="cnc-wide-only">Show </span>status polls</span>
+              <span>Show status polls</span>
             </label>
             <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_console">
               Clear
             </button>
-            <button
-              type="button"
-              class="cnc-btn cnc-btn--quiet"
-              phx-click="toggle_commands"
-              aria-expanded={to_string(@commands?)}
-              aria-controls="console-help"
-            >
-              {if @commands?, do: "Hide commands", else: "Commands"}
-            </button>
-            <button type="button" class="cnc-btn cnc-console-close" phx-click="toggle_details">
+            <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="toggle_details">
               Close
             </button>
           </div>
-          <div :if={@commands?} id="console-help" class="cnc-help">
-            <p class="cnc-help-lead">
-              Click a command to put it in the input below; nothing is sent until you press Enter.
-              <button type="button" class="cnc-link" phx-click="ask_controller">
-                Ask the controller for its own list
-              </button>
-            </p>
-            <p :if={@machine.adapter == "FakeSim"} class="cnc-help-note">
-              The fake sim understands $, $$, $X, $H, $J=, $130–$132, ?, ! and ~.
-              A real controller answers the rest.
-            </p>
-            <section :for={section <- @command_help} class="cnc-help-section">
-              <h3 class="cnc-help-title">{section.title}</h3>
-              <p :if={section.note} class="cnc-help-note">{section.note}</p>
-              <dl class="cnc-help-list">
-                <%= for item <- section.items do %>
-                  <dt>
-                    <button
-                      type="button"
-                      class="cnc-help-cmd"
-                      phx-click={
-                        JS.dispatch("console:insert", to: "#console-input", detail: %{text: item.cmd})
-                      }
-                    >
-                      {item.cmd}
-                    </button>
-                  </dt>
-                  <dd>
-                    {item.desc}
-                    <span :if={item.firmware} class="cnc-help-tag">{item.firmware}</span>
-                  </dd>
-                <% end %>
-              </dl>
-            </section>
-          </div>
-          <ol id="console-log" class="cnc-log" phx-update="stream" phx-hook="ConsoleScroll">
+          <ol id="diagnostics-log" class="cnc-log" phx-update="stream" phx-hook="ConsoleScroll">
             <li
               :for={{dom_id, entry} <- @streams.console}
               id={dom_id}
@@ -1200,29 +1201,6 @@ defmodule CNCWeb.MachineLive do
               <span class="cnc-log-text">{entry.text}</span>
             </li>
           </ol>
-          <form
-            id="console-input"
-            class="cnc-term"
-            phx-submit="send_raw"
-            phx-hook="ConsoleInput"
-            autocomplete="off"
-          >
-            <label for="console-line" class="cnc-term-prompt">→</label>
-            <input
-              id="console-line"
-              name="line"
-              type="text"
-              spellcheck="false"
-              autocapitalize="off"
-              placeholder="Send a command to the controller, e.g. $$ or $G"
-              aria-describedby="console-hint"
-            />
-            <button type="submit" class="cnc-btn">Send</button>
-          </form>
-          <p id="console-hint" class={["cnc-term-hint", @raw_error && "is-error"]}>
-            {@raw_error ||
-              "Typed moves skip the jog safety stop and the travel limit. ↑ and ↓ recall earlier commands."}
-          </p>
         </section>
       </div>
 
@@ -1317,6 +1295,111 @@ defmodule CNCWeb.MachineLive do
     """
   end
 
+  attr :streams, :any, required: true
+  attr :machine, State, required: true
+  attr :commands?, :boolean, required: true
+  attr :command_help, :list, required: true
+  attr :raw_error, :any, required: true
+
+  # MDI (manual data input): type a command for the controller; its replies
+  # just above. Off while a job runs (the state machine refuses it anyway).
+  defp mdi_panel(assigns) do
+    ~H"""
+    <div class="cnc-mdi" id="mdi">
+      <p :if={@machine.state == :running} class="cnc-mode-off" id="mdi-off">
+        MDI is off while a job runs.
+      </p>
+      <%!-- The log stays on the page while the reference shows (hidden), so
+           replies arriving meanwhile aren't lost --%>
+      <div :if={@commands?} id="console-help" class="cnc-help cnc-mdi-help">
+        <p class="cnc-help-lead">
+          Click a command to put it in the input; nothing is sent until you press Enter.
+          <button type="button" class="cnc-link" phx-click="ask_controller">
+            Ask the controller for its own list
+          </button>
+        </p>
+        <p :if={@machine.adapter == "FakeSim"} class="cnc-help-note">
+          The fake sim understands $, $$, $X, $H, $J=, $130–$132, ?, ! and ~.
+          A real controller answers the rest.
+        </p>
+        <section :for={section <- @command_help} class="cnc-help-section">
+          <h3 class="cnc-help-title">{section.title}</h3>
+          <p :if={section.note} class="cnc-help-note">{section.note}</p>
+          <dl class="cnc-help-list">
+            <%= for item <- section.items do %>
+              <dt>
+                <button
+                  type="button"
+                  class="cnc-help-cmd"
+                  phx-click={
+                    JS.dispatch("console:insert", to: "#mdi-input", detail: %{text: item.cmd})
+                  }
+                >
+                  {item.cmd}
+                </button>
+              </dt>
+              <dd>
+                {item.desc}
+                <span :if={item.firmware} class="cnc-help-tag">{item.firmware}</span>
+              </dd>
+            <% end %>
+          </dl>
+        </section>
+      </div>
+      <ol
+        id="mdi-log"
+        class="cnc-log cnc-mdi-log"
+        phx-update="stream"
+        phx-hook="ConsoleScroll"
+        hidden={@commands?}
+      >
+        <li
+          :for={{dom_id, entry} <- @streams.mdi}
+          id={dom_id}
+          class={["cnc-log-row", "is-#{entry.dir}", tone(entry)]}
+        >
+          <span class="cnc-log-dir">{if entry.dir == :out, do: "→", else: "←"}</span>
+          <span class="cnc-log-text">{entry.text}</span>
+        </li>
+      </ol>
+      <form
+        id="mdi-input"
+        class="cnc-term"
+        phx-submit="send_raw"
+        phx-hook="ConsoleInput"
+        autocomplete="off"
+      >
+        <label for="mdi-line" class="cnc-term-prompt" title="Manual data input">MDI</label>
+        <input
+          id="mdi-line"
+          name="line"
+          type="text"
+          spellcheck="false"
+          autocapitalize="off"
+          placeholder="A command, e.g. $$ or G0 X10"
+          aria-describedby="mdi-hint"
+          disabled={@machine.state == :running}
+        />
+        <button type="submit" class="cnc-btn" disabled={@machine.state == :running}>Send</button>
+      </form>
+      <div class="cnc-mdi-foot">
+        <p id="mdi-hint" class={["cnc-term-hint", @raw_error && "is-error"]}>
+          {@raw_error || "Typed moves skip the jog safety stop and the travel limit. ↑ ↓ recall."}
+        </p>
+        <button
+          type="button"
+          class="cnc-btn cnc-btn--quiet"
+          phx-click="toggle_commands"
+          aria-expanded={to_string(@commands?)}
+          aria-controls="console-help"
+        >
+          {if @commands?, do: "Hide commands", else: "Commands"}
+        </button>
+      </div>
+    </div>
+    """
+  end
+
   attr :program, :any, required: true
   attr :machine, State, required: true
   attr :uploads, :any, required: true
@@ -1342,7 +1425,7 @@ defmodule CNCWeb.MachineLive do
               >
                 <.icon name="hero-play" class="ui-btn-icon" /> Start…
               </UI.button>
-              <UI.button variant="quiet" phx-click="open_file">Open another</UI.button>
+              <UI.button variant="quiet" id="open-file" phx-click="open_file">Open another</UI.button>
               <UI.button variant="quiet" id="program-clear" phx-click="clear_program">
                 Clear
               </UI.button>
@@ -1352,7 +1435,7 @@ defmodule CNCWeb.MachineLive do
           <div class="cnc-program-empty" id="program-empty">
             <.icon name="hero-document-arrow-up" class="cnc-program-empty-icon" />
             <p>No file loaded.</p>
-            <UI.button id="program-open" phx-click="open_file">Open file</UI.button>
+            <UI.button id="open-file" phx-click="open_file">Open file</UI.button>
             <p class="cnc-sub">or drop a G-code file on the map</p>
           </div>
       <% end %>
@@ -1727,6 +1810,36 @@ defmodule CNCWeb.MachineLive do
       </button>
     </div>
     """
+  end
+
+  # Controller traffic is subscribed to only while Diagnostics or MDI is
+  # showing; MDI starts with the recent conversation.
+  defp sync_console(socket) do
+    want? = socket.assigns.details? or socket.assigns.panel == :mdi
+    topic = socket.assigns.cnc.topic
+
+    socket =
+      cond do
+        want? and not socket.assigns.console_sub? ->
+          Machine.subscribe_console(topic)
+          assign(socket, console_sub?: true)
+
+        not want? and socket.assigns.console_sub? ->
+          Machine.unsubscribe_console(topic)
+          assign(socket, console_sub?: false)
+
+        true ->
+          socket
+      end
+
+    if socket.assigns.panel == :mdi do
+      recent =
+        Machine.console(srv(socket)) |> Enum.reject(&(&1.kind == :poll)) |> Enum.take(-@mdi_rows)
+
+      stream(socket, :mdi, recent, reset: true)
+    else
+      stream(socket, :mdi, [], reset: true)
+    end
   end
 
   defp set_action_error(socket, error) do

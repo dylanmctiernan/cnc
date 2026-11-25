@@ -37,7 +37,8 @@ defmodule CNCWeb.MachineJobLiveTest do
     view |> element("#confirm-start") |> render_click()
     assert eventually(fn -> Machine.status(m).state == :running end)
     assert eventually(fn -> has_element?(view, "#job-panel", "square.nc") end)
-    assert has_element?(view, "#open-file[disabled]")
+    # The Auto panel shows the job; no other file can be opened meanwhile
+    refute has_element?(view, "#open-file")
 
     # Hold: the reminder, and the same button resumes
     view |> element("#bar-hold") |> render_click()
