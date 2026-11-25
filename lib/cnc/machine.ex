@@ -14,7 +14,7 @@ defmodule CNC.Machine do
   application's instance. Commands invalid for the current state return
   `{:error, {:invalid_state, state}}`.
   """
-  use Boundary, deps: [CNC.Grbl, CNC.Link], exports: [State]
+  use Boundary, deps: [CNC.Grbl, CNC.Link], exports: [State, Protocol]
 
   alias CNC.Machine.{Jog, Server, State}
 
