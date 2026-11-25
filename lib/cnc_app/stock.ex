@@ -78,14 +78,19 @@ defmodule CNCApp.Stock do
   Where a program's cutting moves (`cut_bounds`, work coordinates) leave
   the stock: `[{:edge, :left | :right | :front | :back, mm} | {:through, mm}]`
   (`:through`: deeper than the stock is thick, into what's under it).
-  Empty when they stay on it. Warnings, not refusals: an outside profile
-  runs a bit's radius past the edge, a cut-out goes a little through.
+  Empty when they stay on it. `reach`: how far the cutter reaches from the
+  path (the bit's radius, `CNCApp.Bit.radius/1`; 0 with no bit), so an edge
+  issue is how far the bit itself goes past the edge: how close it comes
+  to the clamps. Warnings, not refusals: an outside profile runs past the
+  edge, a cut-out goes a little through, both on purpose.
   """
-  def issues(nil, _stock), do: []
-  def issues(_cut_bounds, nil), do: []
+  def issues(cut_bounds, stock, reach \\ 0.0)
+  def issues(nil, _stock, _reach), do: []
+  def issues(_cut_bounds, nil, _reach), do: []
 
-  def issues({{px0, px1}, {py0, py1}, {pz0, _}}, stock) do
+  def issues({{px0, px1}, {py0, py1}, {pz0, _}}, stock, reach) do
     {{x0, x1}, {y0, y1}, {z0, _}} = box(stock)
+    {px0, px1, py0, py1} = {px0 - reach, px1 + reach, py0 - reach, py1 + reach}
 
     [
       {:edge, :left, x0 - px0},

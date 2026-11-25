@@ -244,11 +244,19 @@ defmodule CNCWeb.Run do
   defp line_fraction(%{total: total}, _machine) when total == 0, do: 0.0
   defp line_fraction(job, machine), do: min(max(job.acked - waiting(machine), 0) / job.total, 1.0)
 
-  @doc "A stock issue (`CNCApp.Stock.issues/2`) in words."
-  def stock_issue({:edge, edge, out}, _stock),
+  @doc """
+  A stock issue (`CNCApp.Stock.issues/3`) in words. With a bit, an edge
+  issue is where the cutter reaches (the clamps' concern); without, the path.
+  """
+  def stock_issue(issue, stock, bit \\ nil)
+
+  def stock_issue({:edge, edge, out}, _stock, nil),
     do: "Cuts #{mm(out)} mm past the stock's #{edge} edge."
 
-  def stock_issue({:through, out}, stock),
+  def stock_issue({:edge, edge, out}, _stock, _bit),
+    do: "The bit reaches #{mm(out)} mm past the stock's #{edge} edge: keep clamps clear."
+
+  def stock_issue({:through, out}, stock, _bit),
     do:
       "Cuts #{mm(out)} mm deeper than the stock is thick (#{mm(stock.thickness)} mm): " <>
         "into what's under it."
@@ -257,6 +265,24 @@ defmodule CNCWeb.Run do
   def stock_label(%{width: w, depth: d, thickness: t, zero: zero}),
     do:
       "#{mm(w)} × #{mm(d)} × #{mm(t)} mm, zero #{if zero == :center, do: "centred", else: "front-left"}"
+
+  @doc "The bit in a few words: `6.35 mm flat end mill`, `90° V-bit, 12 mm`."
+  def bit_label(%{diameter: d, kind: :flat}), do: "#{size(d)} mm flat end mill"
+  def bit_label(%{diameter: d, kind: :ball}), do: "#{size(d)} mm ball nose"
+  def bit_label(%{diameter: d, kind: :v, angle: a}), do: "#{a}° V-bit, #{size(d)} mm"
+
+  @doc "A size to two decimals, trailing zeros dropped: 6.35, 3.18, 12."
+  def size(v),
+    do:
+      v
+      |> Float.round(2)
+      |> :erlang.float_to_binary(decimals: 2)
+      |> String.replace(~r/\.?0+$/, "")
+
+  @doc "A kind of bit, as its button says."
+  def kind_label(:flat), do: "Flat end mill"
+  def kind_label(:ball), do: "Ball nose"
+  def kind_label(:v), do: "V-bit"
 
   @doc "Where the work zero is on the stock, in words."
   def zero_label(:front_left), do: "on top, front-left corner"

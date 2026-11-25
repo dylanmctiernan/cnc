@@ -20,7 +20,7 @@ defmodule CNCWeb.PendantLive do
   use CNCWeb, :live_view
 
   import CNCWeb.Run,
-    only: [fit: 2, fit_issue: 1, progress: 3, duration: 1, stock_issue: 2, stock_label: 1]
+    only: [fit: 2, fit_issue: 1, progress: 3, duration: 1, stock_issue: 3, stock_label: 1]
 
   alias CNC.{Machine, Program}
 
@@ -34,6 +34,7 @@ defmodule CNCWeb.PendantLive do
     if connected?(socket) do
       Program.subscribe(cnc.program_topic)
       CNCApp.Stock.subscribe(cnc.db)
+      CNCApp.Bit.subscribe(cnc.db)
     end
 
     program = Program.current(cnc.program)
@@ -42,6 +43,7 @@ defmodule CNCWeb.PendantLive do
      socket
      |> assign(page_title: "Pendant", cnc: cnc, tier: :normal, tiers: CNCWeb.Jog.tiers())
      |> assign(program: program, modes: @modes, steps: @steps, stock: CNCApp.Stock.get(cnc.db))
+     |> assign(bit: CNCApp.Bit.get(cnc.db))
      # A job running when the pendant opens: show it
      |> assign(mode: if(socket.assigns.shell_machine.job, do: :job, else: :jog))
      |> assign(seen_job: (job = socket.assigns.shell_machine.job) && job.started_at)
@@ -68,6 +70,7 @@ defmodule CNCWeb.PendantLive do
 
   def handle_info({:program, program}, socket), do: {:noreply, assign(socket, program: program)}
   def handle_info({:stock, stock}, socket), do: {:noreply, assign(socket, stock: stock)}
+  def handle_info({:bit, bit}, socket), do: {:noreply, assign(socket, bit: bit)}
 
   @impl true
   def handle_event("mode", %{"mode" => mode}, socket) when mode in ~w(jog inc zero job),
@@ -298,7 +301,8 @@ defmodule CNCWeb.PendantLive do
           </li>
           <.stock_check
             stock={@stock}
-            issues={CNCApp.Stock.issues(@program.gcode.cut_bounds, @stock)}
+            bit={@bit}
+            issues={CNCApp.Stock.issues(@program.gcode.cut_bounds, @stock, CNCApp.Bit.radius(@bit))}
           />
           <li class="cnc-check-item">
             <.icon name="hero-hand-raised" class="cnc-check-icon" />
@@ -637,6 +641,7 @@ defmodule CNCWeb.PendantLive do
 
   attr :stock, :any, required: true
   attr :issues, :list, required: true
+  attr :bit, :any, default: nil
 
   defp stock_check(assigns) do
     ~H"""
@@ -650,7 +655,7 @@ defmodule CNCWeb.PendantLive do
     </li>
     <li :if={@stock && @issues != []} class="cnc-check-item is-warn" id="pendant-stock-check">
       <.icon name="hero-exclamation-triangle" class="cnc-check-icon" />
-      <span>{Enum.map_join(@issues, " ", &stock_issue(&1, @stock))}</span>
+      <span>{Enum.map_join(@issues, " ", &stock_issue(&1, @stock, @bit))}</span>
     </li>
     """
   end

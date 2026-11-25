@@ -109,6 +109,12 @@ export default {
       this.paintDone()
       this.reframe()
     })
+    // The bit in the spindle: draw the tool as it is (null: a 1/4" end mill)
+    this.handleEvent("bit", ({bit}) => {
+      this.bit = bit
+      this.buildTool()
+      this.render()
+    })
     // The stock: a box in work coordinates (its top at Z 0), or null
     this.handleEvent("stock", ({box}) => {
       this.buildStock(box)
@@ -361,24 +367,48 @@ export default {
     this.machine.add(box)
   },
 
-  // The tool, to scale: a 6.35 mm (1/4") bit, 25 mm sticking out, its tip
-  // at the reported position; above it the collet nut, translucent so it
-  // doesn't hide the cut.
+  // The tool, to scale: the bit in the spindle (a 1/4" end mill if none is
+  // set), 25 mm sticking out, its tip at the reported position; above it
+  // the collet nut, translucent so it doesn't hide the cut. A ball nose has
+  // a rounded tip, a V-bit is a cone at its angle up to its diameter.
   buildTool() {
+    const at = this.tool ? this.tool.position.clone() : null
+    if (this.tool) this.scene.remove(this.tool)
     this.tool = new THREE.Group()
-    const bit = new THREE.Mesh(
-      new THREE.CylinderGeometry(BIT_D / 2, BIT_D / 2, BIT_OUT, 24),
-      new THREE.MeshLambertMaterial({color: this.colors.tool}),
-    )
-    bit.rotation.x = Math.PI / 2
-    bit.position.z = BIT_OUT / 2
+    const mat = new THREE.MeshLambertMaterial({color: this.colors.tool})
+    const b = this.bit || {diameter: BIT_D, kind: "flat"}
+    const r = b.diameter / 2
+    if (b.kind === "v") {
+      // The cone from the tip up to the full diameter, then the shank
+      const h = r / Math.tan(((b.angle || 90) / 2) * (Math.PI / 180))
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(r, h, 24), mat)
+      cone.rotation.x = -Math.PI / 2
+      cone.position.z = h / 2
+      const shank = new THREE.Mesh(new THREE.CylinderGeometry(r, r, Math.max(BIT_OUT - h, 1), 24), mat)
+      shank.rotation.x = Math.PI / 2
+      shank.position.z = h + Math.max(BIT_OUT - h, 1) / 2
+      this.tool.add(cone, shank)
+    } else {
+      const tipR = b.kind === "ball" ? r : 0
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, BIT_OUT - tipR, 24), mat)
+      body.rotation.x = Math.PI / 2
+      body.position.z = tipR + (BIT_OUT - tipR) / 2
+      this.tool.add(body)
+      if (tipR) {
+        const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mat)
+        ball.rotation.x = Math.PI / 2
+        ball.position.z = r
+        this.tool.add(ball)
+      }
+    }
     const nut = new THREE.Mesh(
       new THREE.CylinderGeometry(NUT_D / 2, NUT_D / 2, NUT_H, 6),
       new THREE.MeshLambertMaterial({color: this.colors.tool, transparent: true, opacity: 0.35}),
     )
     nut.rotation.x = Math.PI / 2
     nut.position.z = BIT_OUT + NUT_H / 2
-    this.tool.add(bit, nut)
+    this.tool.add(nut)
+    if (at) this.tool.position.copy(at)
     this.scene.add(this.tool)
   },
 

@@ -16,7 +16,10 @@ defmodule CNCWeb.MachineLive do
       fit_issue: 1,
       progress: 3,
       duration: 1,
-      stock_issue: 2,
+      stock_issue: 3,
+      bit_label: 1,
+      kind_label: 1,
+      size: 1,
       stock_label: 1,
       zero_label: 1
     ]
@@ -46,6 +49,7 @@ defmodule CNCWeb.MachineLive do
       CNC.Controllers.subscribe(cnc.controllers_topic)
       CNCApp.Settings.subscribe(cnc.db)
       CNCApp.Stock.subscribe(cnc.db)
+      CNCApp.Bit.subscribe(cnc.db)
     end
 
     machine = Machine.status(cnc.machine)
@@ -66,6 +70,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
      |> assign(stock: CNCApp.Stock.get(cnc.db), stock_edit: nil)
+     |> assign(bit: CNCApp.Bit.get(cnc.db), bit_edit: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
      |> assign(dry_lift: nil, single_block?: false)
      |> assign(settings: CNCApp.Settings.all(cnc.db))
@@ -143,6 +148,8 @@ defmodule CNCWeb.MachineLive do
 
   def handle_info({:stock, stock}, socket),
     do: {:noreply, socket |> assign(stock: stock) |> push_stock()}
+
+  def handle_info({:bit, bit}, socket), do: {:noreply, socket |> assign(bit: bit) |> push_bit()}
 
   # Controller traffic: the full log for Diagnostics, the conversation (no
   # status polls) for MDI
@@ -374,7 +381,56 @@ defmodule CNCWeb.MachineLive do
 
   # A view that just appeared asks for what there is now.
   def handle_event("viewport_ready", _, socket),
-    do: {:noreply, socket |> push_program() |> push_stock() |> push_pos(socket.assigns.machine)}
+    do:
+      {:noreply,
+       socket |> push_program() |> push_stock() |> push_bit() |> push_pos(socket.assigns.machine)}
+
+  # The bit: its diameter and kind (and a V-bit's angle)
+  def handle_event("open_bit", _, socket) do
+    edit =
+      case socket.assigns.bit do
+        nil -> %{diameter: "", kind: :flat, angle: 90, error: nil}
+        b -> %{diameter: size(b.diameter), kind: b.kind, angle: b.angle || 90, error: nil}
+      end
+
+    {:noreply, assign(socket, bit_edit: edit)}
+  end
+
+  def handle_event("cancel_bit", _, socket), do: {:noreply, assign(socket, bit_edit: nil)}
+
+  def handle_event("bit_preview", params, socket),
+    do:
+      {:noreply,
+       update(socket, :bit_edit, &%{&1 | diameter: params["diameter"] || &1.diameter, error: nil})}
+
+  def handle_event("bit_kind", %{"kind" => kind}, socket) when kind in ~w(flat ball v),
+    do: {:noreply, update(socket, :bit_edit, &%{&1 | kind: String.to_existing_atom(kind)})}
+
+  def handle_event("bit_angle", %{"angle" => angle}, socket) do
+    case Enum.find(CNCApp.Bit.angles(), &(to_string(&1) == angle)) do
+      nil -> {:noreply, socket}
+      a -> {:noreply, update(socket, :bit_edit, &%{&1 | angle: a})}
+    end
+  end
+
+  def handle_event("save_bit", params, socket) do
+    e = socket.assigns.bit_edit
+
+    with {:ok, d} <- parse_mm(params["diameter"] || e.diameter),
+         {:ok, _} <-
+           CNCApp.Bit.put(socket.assigns.cnc.db, %{diameter: d, kind: e.kind, angle: e.angle}) do
+      {:noreply, assign(socket, bit_edit: nil)}
+    else
+      _ ->
+        {:noreply,
+         update(socket, :bit_edit, &%{&1 | error: "The diameter in mm, like 6.35 or 3.175."})}
+    end
+  end
+
+  def handle_event("clear_bit", _, socket) do
+    :ok = CNCApp.Bit.clear(socket.assigns.cnc.db)
+    {:noreply, assign(socket, bit_edit: nil)}
+  end
 
   # The stock: set its size and where the work zero is on it
   def handle_event("open_stock", _, socket) do
@@ -1076,6 +1132,7 @@ defmodule CNCWeb.MachineLive do
                     uploads={@uploads}
                     file_error={@file_error}
                     stock={@stock}
+                    bit={@bit}
                   />
                 <% else %>
                   <.mdi_panel
@@ -1128,6 +1185,88 @@ defmodule CNCWeb.MachineLive do
               Clear trail
             </button>
           </aside>
+        </div>
+
+        <div
+          :if={@bit_edit}
+          id="bit-dialog"
+          class="cnc-file-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bit-title"
+          phx-window-keydown="cancel_bit"
+          phx-key="Escape"
+        >
+          <form
+            id="bit-form"
+            class="cnc-review-box cnc-work-box"
+            phx-change="bit_preview"
+            phx-submit="save_bit"
+            phx-click-away="cancel_bit"
+          >
+            <h2 id="bit-title" class="cnc-page-title">The bit</h2>
+            <p class="cnc-sub">
+              The one in the spindle. Checks against the stock then use where the cutter reaches.
+            </p>
+            <div class="cnc-seg" role="group" aria-label="Kind of bit">
+              <button
+                :for={kind <- CNCApp.Bit.kinds()}
+                type="button"
+                id={"bit-kind-#{kind}"}
+                class="cnc-btn"
+                aria-pressed={to_string(@bit_edit.kind == kind)}
+                phx-click="bit_kind"
+                phx-value-kind={kind}
+              >
+                {kind_label(kind)}
+              </button>
+            </div>
+            <div class="cnc-work-field">
+              <label for="bit-diameter">Diameter</label>
+              <input
+                id="bit-diameter"
+                name="diameter"
+                value={@bit_edit.diameter}
+                inputmode="decimal"
+                autocomplete="off"
+                placeholder="6.35"
+                phx-mounted={JS.focus()}
+              />
+              <span class="cnc-unit">mm</span>
+            </div>
+            <%!-- Always there (disabled unless a V-bit): no shift --%>
+            <p class="cnc-sub">Included angle (V-bit)</p>
+            <div class="cnc-seg" role="group" aria-label="V-bit angle">
+              <button
+                :for={a <- CNCApp.Bit.angles()}
+                type="button"
+                id={"bit-angle-#{a}"}
+                class="cnc-btn"
+                aria-pressed={to_string(@bit_edit.kind == :v and @bit_edit.angle == a)}
+                disabled={@bit_edit.kind != :v}
+                phx-click="bit_angle"
+                phx-value-angle={a}
+              >
+                {a}°
+              </button>
+            </div>
+            <p :if={@bit_edit.error} class="cnc-set-error">{@bit_edit.error}</p>
+            <div class="cnc-row cnc-dialog-actions">
+              <button
+                :if={@bit}
+                type="button"
+                id="bit-clear"
+                class="cnc-btn cnc-btn--quiet"
+                phx-click="clear_bit"
+              >
+                No bit
+              </button>
+              <button type="button" class="cnc-btn" id="bit-cancel" phx-click="cancel_bit">
+                Cancel
+              </button>
+              <button type="submit" class="cnc-btn cnc-btn--primary" id="bit-save">Save</button>
+            </div>
+          </form>
         </div>
 
         <div
@@ -1369,6 +1508,7 @@ defmodule CNCWeb.MachineLive do
           machine={@machine}
           fit={fit(@program, @machine, @dry_lift || 0)}
           stock={@stock}
+          bit={@bit}
         />
         <div class="cnc-job-ov" id="start-rapids">
           <span class="cnc-h">Rapids</span>
@@ -1560,6 +1700,7 @@ defmodule CNCWeb.MachineLive do
   attr :uploads, :any, required: true
   attr :file_error, :any, required: true
   attr :stock, :any, required: true
+  attr :bit, :any, required: true
 
   # Program mode: the job while one runs; else the loaded file and Start;
   # else an invitation to load one.
@@ -1571,7 +1712,12 @@ defmodule CNCWeb.MachineLive do
           <.job_panel job={@machine.job} program={@program} machine={@machine} />
         <% @program -> %>
           <section class="cnc-file-side" aria-label="Loaded file">
-            <.program_summary program={@program} fit={fit(@program, @machine)} stock={@stock}>
+            <.program_summary
+              program={@program}
+              fit={fit(@program, @machine)}
+              stock={@stock}
+              bit={@bit}
+            >
               <%!-- Start right under the facts: the notes below can't push it
                    out of the panel --%>
               <div class="cnc-row">
@@ -1592,6 +1738,7 @@ defmodule CNCWeb.MachineLive do
               </div>
               <:below>
                 <.stock_row stock={@stock} disabled={@machine.job != nil} />
+                <.bit_row bit={@bit} disabled={@machine.job != nil} />
               </:below>
             </.program_summary>
           </section>
@@ -1603,6 +1750,7 @@ defmodule CNCWeb.MachineLive do
             <p class="cnc-sub">or drop a G-code file on the map</p>
           </div>
           <.stock_row stock={@stock} disabled={false} />
+          <.bit_row bit={@bit} disabled={false} />
       <% end %>
       <.upload_status uploads={@uploads} file_error={@file_error} />
     </div>
@@ -1633,13 +1781,19 @@ defmodule CNCWeb.MachineLive do
   attr :machine, State, required: true
   attr :fit, :any, required: true
   attr :stock, :any, required: true
+  attr :bit, :any, required: true
 
   # Before anything moves: where it starts, whether it fits, the stock,
   # which bit, and what only the operator can check.
   defp start_checks(assigns) do
     assigns =
       assign(assigns,
-        stock_issues: CNCApp.Stock.issues(assigns.program.gcode.cut_bounds, assigns.stock)
+        stock_issues:
+          CNCApp.Stock.issues(
+            assigns.program.gcode.cut_bounds,
+            assigns.stock,
+            CNCApp.Bit.radius(assigns.bit)
+          )
       )
 
     ~H"""
@@ -1662,15 +1816,18 @@ defmodule CNCWeb.MachineLive do
           <% end %>
         </span>
       </li>
-      <.stock_check stock={@stock} issues={@stock_issues} />
+      <.stock_check stock={@stock} issues={@stock_issues} bit={@bit} />
       <li class="cnc-check-item">
         <.icon name="hero-wrench" class="cnc-check-icon" />
         <span>
-          {case Enum.reject(@program.gcode.tools, &is_nil/1) do
-            [] ->
+          {case {@bit, Enum.reject(@program.gcode.tools, &is_nil/1)} do
+            {%{} = bit, []} ->
+              "Bit: #{bit_label(bit)}. Check it's the one the file was made for."
+
+            {nil, []} ->
               "The file doesn't name a bit: check the one that's in."
 
-            tools ->
+            {_, tools} ->
               "Bit: " <> Enum.map_join(tools, ", ", &"T#{&1}") <> ". Tool changes aren't handled yet."
           end}
         </span>
@@ -2061,8 +2218,26 @@ defmodule CNCWeb.MachineLive do
     """
   end
 
+  attr :bit, :any, required: true
+  attr :disabled, :boolean, required: true
+
+  # The bit in the spindle, or an invitation to say
+  defp bit_row(assigns) do
+    ~H"""
+    <div class="cnc-stock" id="bit-row">
+      <span class="cnc-sub">Bit</span>
+      <span :if={@bit} class="cnc-stock-label" id="bit-label">{bit_label(@bit)}</span>
+      <span :if={!@bit} class="cnc-stock-label cnc-sub">not set: checks use the path alone</span>
+      <UI.button variant="quiet" id="bit-edit" phx-click="open_bit" disabled={@disabled}>
+        {if @bit, do: "Change…", else: "Set…"}
+      </UI.button>
+    </div>
+    """
+  end
+
   attr :stock, :any, required: true
   attr :issues, :list, required: true
+  attr :bit, :any, default: nil
 
   defp stock_check(assigns) do
     ~H"""
@@ -2081,7 +2256,7 @@ defmodule CNCWeb.MachineLive do
     <li :if={@stock && @issues != []} class="cnc-check-item is-warn" id="stock-check">
       <.icon name="hero-exclamation-triangle" class="cnc-check-icon" />
       <span>
-        {Enum.map_join(@issues, " ", &stock_issue(&1, @stock))} Check that's intended (an outside
+        {Enum.map_join(@issues, " ", &stock_issue(&1, @stock, @bit))} Check that's intended (an outside
         profile, a cut-out).
       </span>
     </li>
@@ -2091,13 +2266,19 @@ defmodule CNCWeb.MachineLive do
   attr :program, Program, required: true
   attr :fit, :any, required: true
   attr :stock, :any, default: nil
+  attr :bit, :any, default: nil
   slot :inner_block, doc: "the file's actions, right under its facts"
   slot :below, doc: "under the actions, before the notes"
 
   defp program_summary(assigns) do
     assigns =
       assign(assigns,
-        stock_issues: CNCApp.Stock.issues(assigns.program.gcode.cut_bounds, assigns.stock)
+        stock_issues:
+          CNCApp.Stock.issues(
+            assigns.program.gcode.cut_bounds,
+            assigns.stock,
+            CNCApp.Bit.radius(assigns.bit)
+          )
       )
 
     ~H"""
@@ -2132,7 +2313,7 @@ defmodule CNCWeb.MachineLive do
       <div :if={@stock_issues != []} class="cnc-note cnc-note--warn" id="stock-issues">
         <p>On this stock:</p>
         <ul class="cnc-fit-issues">
-          <li :for={issue <- @stock_issues}>{stock_issue(issue, @stock)}</li>
+          <li :for={issue <- @stock_issues}>{stock_issue(issue, @stock, @bit)}</li>
         </ul>
       </div>
       <ul :if={@program.gcode.warnings != []} class="cnc-file-warnings">
@@ -2315,6 +2496,9 @@ defmodule CNCWeb.MachineLive do
   # than @path_merge_mm to the last one kept (same kind) are merged: the bed
   # is drawn at around a millimetre a pixel.
   @path_merge_mm 0.25
+
+  # The bit to the 3D view, to draw it (nil: the default)
+  defp push_bit(socket), do: push_event(socket, "bit", %{bit: socket.assigns.bit})
 
   # The stock to the views, as a box in work coordinates (nil: none)
   defp push_stock(socket) do

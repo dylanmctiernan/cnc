@@ -226,6 +226,54 @@ defmodule CNCWeb.MachineJobLiveTest do
     assert eventually(fn -> has_element?(view, "#stock-row", "not set") end)
   end
 
+  test "the bit: set it; the stock's edges are checked where the cutter reaches", %{
+    conn: conn,
+    program: program
+  } do
+    # The square is 0..40, 1 deep; the stock exactly 40 x 40
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element("#panel-auto") |> render_click()
+    view |> element("#stock-edit") |> render_click()
+    view |> form("#stock-form", %{width: "40", depth: "40", thickness: "18"}) |> render_submit()
+    assert eventually(fn -> has_element?(view, "#stock-label") end)
+    refute has_element?(view, "#stock-issues")
+    assert has_element?(view, "#bit-row", "not set")
+
+    view |> element("#bit-edit") |> render_click()
+    assert has_element?(view, "#bit-kind-flat[aria-pressed=true]")
+    # The angle only counts for a V-bit
+    assert has_element?(view, "#bit-angle-90[disabled]")
+    view |> element("#bit-kind-v") |> render_click()
+    refute has_element?(view, "#bit-angle-90[disabled]")
+    view |> element("#bit-angle-60") |> render_click()
+    assert has_element?(view, "#bit-angle-60[aria-pressed=true]")
+    view |> element("#bit-kind-flat") |> render_click()
+
+    view |> form("#bit-form", %{diameter: "x"}) |> render_submit()
+    assert has_element?(view, "#bit-dialog .cnc-set-error")
+    view |> form("#bit-form", %{diameter: "6,35"}) |> render_submit()
+    refute has_element?(view, "#bit-dialog")
+    assert eventually(fn -> has_element?(view, "#bit-label", "6.35 mm flat end mill") end)
+
+    # The path runs along the stock's edges: the cutter reaches its radius past
+    assert has_element?(
+             view,
+             "#stock-issues",
+             "The bit reaches 3.2 mm past the stock's right edge"
+           )
+
+    view |> element("#program-start") |> render_click()
+    assert has_element?(view, "#start-checks #stock-check.is-warn", "keep clamps clear")
+    assert has_element?(view, "#start-checks", "Bit: 6.35 mm flat end mill")
+    view |> element("#cancel-start") |> render_click()
+
+    view |> element("#bit-edit") |> render_click()
+    view |> element("#bit-clear") |> render_click()
+    assert eventually(fn -> has_element?(view, "#bit-row", "not set") end)
+    refute has_element?(view, "#stock-issues")
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")
