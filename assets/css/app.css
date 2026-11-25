@@ -4019,3 +4019,24 @@ body {
   padding: 0;
   font-size: var(--text-xs);
 }
+
+/* Diagnostics expanded: it takes the map's place (not over it), the log
+   filling the height; the right column and the header stay */
+.cnc.diag-full {
+  grid-template-areas:
+    "status status"
+    "msgs msgs"
+    "console right"
+    "console right";
+}
+.cnc.diag-full > .cnc-view {
+  display: none;
+}
+.cnc.diag-full > .cnc-console {
+  min-height: 0;
+}
+.cnc.diag-full #diagnostics-log {
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+}

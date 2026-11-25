@@ -63,6 +63,7 @@ defmodule CNCWeb.MachineLive do
        progress: &handle_progress/3
      )
      |> assign(details?: false, polls?: false, raw_error: nil, commands?: false)
+     |> assign(diag_full?: false)
      |> assign(command_help: CNCWeb.ConsoleHelp.sections())
      |> assign(tiers: @tiers, steps: @steps)
      |> stream_configure(:console, dom_id: &"log-#{&1.id}")
@@ -388,7 +389,14 @@ defmodule CNCWeb.MachineLive do
 
   def handle_event("open_file", _, socket), do: {:noreply, assign(socket, file?: true)}
   def handle_event("close_file", _, socket), do: {:noreply, assign(socket, file?: false)}
-  def handle_event("validate_upload", _, socket), do: {:noreply, assign(socket, file_error: nil)}
+  # A file picked or dropped (on the map or in the dialog): show Auto, where
+  # its upload and then its summary appear
+  def handle_event("validate_upload", _, socket),
+    do: {:noreply, assign(socket, file_error: nil, panel: :auto) |> sync_console()}
+
+  def handle_event("diag_full", _, socket),
+    do: {:noreply, update(socket, :diag_full?, &(!&1))}
+
   def handle_event("upload", _, socket), do: {:noreply, socket}
 
   def handle_event("clear_program", _, socket) do
@@ -531,7 +539,10 @@ defmodule CNCWeb.MachineLive do
            touch and small screens get the controller (readout, map, controller,
            Hold dock); a wide screen with a mouse gets the workstation (map,
            readout and jog panel, details, docked console, Hold in the bar). --%>
-      <div class={["cnc", @details? && "has-console"]} data-mode={@control_mode}>
+      <div
+        class={["cnc", @details? && "has-console", @details? && @diag_full? && "diag-full"]}
+        data-mode={@control_mode}
+      >
         <%!-- The file input, always on the page: the file dialog's drop zone,
              the map and the Program panel all feed it --%>
         <form id="upload-form" class="cnc-sr-only" phx-change="validate_upload" phx-submit="upload">
@@ -1183,6 +1194,20 @@ defmodule CNCWeb.MachineLive do
             </label>
             <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="clear_console">
               Clear
+            </button>
+            <button
+              type="button"
+              id="diag-full"
+              class="cnc-btn cnc-btn--quiet"
+              phx-click="diag_full"
+              aria-pressed={to_string(@diag_full?)}
+              title={if @diag_full?, do: "Back under the map", else: "Fill the map's area"}
+            >
+              <.icon
+                name={if @diag_full?, do: "hero-arrows-pointing-in", else: "hero-arrows-pointing-out"}
+                class="ui-btn-icon"
+              />
+              {if @diag_full?, do: "Restore", else: "Expand"}
             </button>
             <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="toggle_details">
               Close

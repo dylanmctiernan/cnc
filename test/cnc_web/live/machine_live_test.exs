@@ -294,6 +294,12 @@ defmodule CNCWeb.MachineLiveTest do
     view |> element("#diagnostics input[type=checkbox]") |> render_click()
     assert eventually(fn -> has_element?(view, "#diagnostics-log li.is-poll") end)
 
+    # Expand: it takes the map's place; Restore puts it back under the map
+    view |> element("#diag-full") |> render_click()
+    assert has_element?(view, ".cnc.diag-full")
+    view |> element("#diag-full") |> render_click()
+    refute has_element?(view, ".cnc.diag-full")
+
     view |> element("#diagnostics-toggle") |> render_click()
     refute has_element?(view, "#diagnostics")
   end
@@ -333,6 +339,7 @@ defmodule CNCWeb.MachineLiveTest do
     {:ok, view, _} = live(conn, ~p"/")
     {:ok, other, _} = live(conn, ~p"/")
 
+    # Picking a file (or dropping one) shows Auto, wherever you were
     view |> element("#panel-auto") |> render_click()
     view |> element("#open-file") |> render_click()
     assert has_element?(view, "#file-dialog")

@@ -150,6 +150,20 @@ defmodule CNCWeb.MachineJobLiveTest do
     assert eventually(fn -> has_element?(view, "#note-job", "Finished square.nc") end)
   end
 
+  test "a file picked or dropped while on another mode switches to Auto", %{conn: conn} do
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element("#panel-mdi") |> render_click()
+
+    file =
+      file_input(view, "#upload-form", :gcode, [
+        %{name: "quick.nc", content: File.read!("test/fixtures/quick.nc"), type: "text/plain"}
+      ])
+
+    render_upload(file, "quick.nc")
+    assert has_element?(view, "#panel-auto[aria-pressed=true]")
+    assert eventually(fn -> has_element?(view, "#program-panel", "quick.nc") end)
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")
