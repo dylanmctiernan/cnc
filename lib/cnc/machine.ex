@@ -62,8 +62,17 @@ defmodule CNC.Machine do
   and Resume pause it; `abort/1` stops it. Progress is in the status's
   `job`, the outcome in `last_job`.
   """
-  @spec run(server, String.t(), binary) :: reply | {:error, term}
-  def run(server \\ __MODULE__, name, text), do: call(server, {:run, name, text})
+  @spec run(server, String.t(), binary, :run | :check) :: reply | {:error, term}
+  def run(server \\ __MODULE__, name, text, mode \\ :run),
+    do: call(server, {:run, name, text, mode})
+
+  @doc """
+  Check a file without moving: the controller's check mode reads and
+  validates every line. The outcome (`last_job.result == :checked`, with
+  `errors`) lists every line it refuses; the controller restarts after a
+  check, so the machine comes back locked.
+  """
+  def check(server \\ __MODULE__, name, text), do: run(server, name, text, :check)
 
   @doc "Abort the running job: a soft reset (the machine comes back locked)."
   def abort(server \\ __MODULE__), do: call(server, :abort)

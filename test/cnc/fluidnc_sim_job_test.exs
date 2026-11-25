@@ -34,4 +34,15 @@ defmodule CNC.FluidNCSim.JobTest do
     assert_in_delta y, 45.0, 0.01
     assert_in_delta z, 0.0, 0.01
   end
+
+  test "a check run: every line read, nothing moves, refused lines listed, ends locked", %{m: m} do
+    unlock(m)
+    program = "G21 G90\nG1 X50 Y20 F1000\nG38.2 Z-5 F100\nG2 X60 Y30 I5 J5\nG0 Z0\n"
+    :ok = Machine.check(m, "check.nc", program)
+    assert eventually(fn -> Machine.status(m).state == :alarm end, 10_000)
+    %State{last_job: last, mpos: {x, y, _}} = Machine.status(m)
+    assert %{result: :checked, total: 5, acked: 5} = last
+    assert [{20, 3, "G38.2Z-5F100"}] = last.errors
+    assert {x, y} == {0.0, 0.0}
+  end
 end

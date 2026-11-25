@@ -10,6 +10,7 @@ defmodule CNC.Machine.Server do
       :alarm | :idle ─($H)─▶ :homing ─(ok)─▶ :idle
       :idle | :jogging ─(status: hold/door/...)─▶ :busy ─(status: Idle)─▶ :idle
       :idle ─(run)─▶ :running ─(all sent and acked, status Idle)─▶ :idle
+      :running (check) ─(all read; $C off: the controller restarts)─▶ :connecting ─▶ :alarm
       :running ─(Abort: soft reset)─▶ :connecting ─▶ :alarm
       any ─(ALARM:N or status Alarm)─▶ :alarm
       any ─(banner = controller reset)─▶ :connecting
@@ -487,15 +488,25 @@ defmodule CNC.Machine.Server do
 
   # Run a file: only from Ready with nothing in flight, so the job owns the
   # line stream from its first byte.
-  defp event({:call, from}, {:run, name, text}, :idle, d) do
+  # A check run first puts the controller in check mode ($C): it reads every
+  # line without moving.
+  defp event({:call, from}, {:run, name, text, mode}, :idle, d) when mode in [:run, :check] do
     cond do
       d.motion_unsettled? or not :queue.is_empty(d.pending) ->
         {:idle, d, [{:reply, from, {:error, :busy}}]}
 
       true ->
-        case Job.new(name, text) do
+        case Job.new(name, text, mode: mode) do
           {:ok, job} ->
-            d = log(%{d | job: job, last_job: nil, last_error: nil}, :out, :line, "(run #{name})")
+            d =
+              log(
+                %{d | job: job, last_job: nil, last_error: nil},
+                :out,
+                :line,
+                "(#{mode} #{name})"
+              )
+
+            d = if mode == :check, do: send_line(d, "$C", :check_on), else: d
             {:running, feed_job(d), [{:reply, from, :ok}]}
 
           {:error, _} = err ->
@@ -576,7 +587,14 @@ defmodule CNC.Machine.Server do
 
   defp response({:banner, banner}, _s, d) do
     Logger.info("controller reset: #{banner}")
-    reason = if d.job && d.job.aborting?, do: :aborted, else: :reset
+
+    reason =
+      case d.job do
+        %{mode: :check} = job -> if Job.drained?(job), do: :checked, else: :reset
+        %{aborting?: true} -> :aborted
+        _ -> :reset
+      end
+
     d = end_job(d, reason)
     {:connecting, %{flush_pending(d) | alarm: :reset, status: nil, banner: banner}, []}
   end
@@ -647,6 +665,16 @@ defmodule CNC.Machine.Server do
   # A job line acked: free its bytes and send what now fits. An error stops
   # the stream and holds, so the operator decides (Resume finishes what the
   # controller has, Abort drops it).
+  defp on_ack({:job, _n}, result, :running, %{job: %{mode: :check}} = d) do
+    d = feed_job(%{d | job: Job.ack(d.job, result)})
+
+    # Everything read: leave check mode. The controller restarts on that (no
+    # ok), and its banner ends the job as :checked.
+    if Job.drained?(d.job) and not d.job.exiting?,
+      do: {:running, send_line(%{d | job: %{d.job | exiting?: true}}, "$C", :check_off), []},
+      else: {:running, d, []}
+  end
+
   defp on_ack({:job, _n}, result, :running, d) do
     job = Job.ack(d.job, result)
     d = %{d | job: job}
@@ -656,6 +684,9 @@ defmodule CNC.Machine.Server do
       {:error, _} -> {:running, %{realtime(d, Realtime.feed_hold()) | last_error: result}, []}
     end
   end
+
+  defp on_ack(:check_on, {:error, _} = err, :running, d),
+    do: {:idle, %{end_job(d, :error) | last_error: err}, []}
 
   defp on_ack({:job, _n}, _result, s, d), do: {s, d, []}
 

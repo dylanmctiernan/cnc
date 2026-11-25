@@ -16,6 +16,14 @@ defmodule CNC.Machine.Job do
 
   An `error:N` on a job line stops the stream (`halted?`): nothing more is
   sent; what the controller already has finishes or is aborted.
+
+  Modes (`:mode`, fixed when the job starts):
+
+    * `:run` — the file is cut
+    * `:check` — the controller's check mode (`$C`): it reads and validates
+      every line without moving. Errors don't stop the stream: they're
+      collected (`errors`), since the point is to list every line the
+      controller refuses.
   """
 
   @rx_buffer 127
@@ -34,7 +42,9 @@ defmodule CNC.Machine.Job do
           started_at: DateTime.t(),
           error: nil | {code :: term, line_no :: pos_integer, text :: String.t()},
           halted?: boolean,
-          aborting?: boolean
+          aborting?: boolean,
+          mode: :run | :check,
+          errors: [{code :: term, line_no :: pos_integer, text :: String.t()}]
         }
 
   defstruct [
@@ -49,7 +59,11 @@ defmodule CNC.Machine.Job do
     last_line: 0,
     error: nil,
     halted?: false,
-    aborting?: false
+    aborting?: false,
+    # check mode: $C off has been sent
+    exiting?: false,
+    mode: :run,
+    errors: []
   ]
 
   @doc """
@@ -60,8 +74,11 @@ defmodule CNC.Machine.Job do
       iex> job.total
       2
   """
-  @spec new(String.t(), binary, DateTime.t()) :: {:ok, t} | {:error, term}
-  def new(name, text, now \\ DateTime.utc_now()) do
+  @spec new(String.t(), binary, keyword) :: {:ok, t} | {:error, term}
+  def new(name, text, opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    mode = Keyword.get(opts, :mode, :run)
+
     lines =
       text
       |> String.split(["\r\n", "\n", "\r"])
@@ -86,7 +103,8 @@ defmodule CNC.Machine.Job do
            name: name,
            queue: :queue.from_list(lines),
            total: length(lines),
-           started_at: now
+           started_at: now,
+           mode: mode
          }}
     end
   end
@@ -142,9 +160,10 @@ defmodule CNC.Machine.Job do
         last_line: n
     }
 
-    case result do
-      :ok -> job
-      {:error, code} -> %{job | error: job.error || {code, n, text}, halted?: true}
+    case {result, job.mode} do
+      {:ok, _} -> job
+      {{:error, code}, :check} -> %{job | errors: job.errors ++ [{code, n, text}]}
+      {{:error, code}, :run} -> %{job | error: job.error || {code, n, text}, halted?: true}
     end
   end
 
@@ -164,7 +183,9 @@ defmodule CNC.Machine.Job do
       line: job.last_line,
       started_at: job.started_at,
       error: job.error,
-      halted?: job.halted?
+      halted?: job.halted?,
+      mode: job.mode,
+      errors: job.errors
     }
   end
 end

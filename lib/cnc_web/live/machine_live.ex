@@ -147,6 +147,19 @@ defmodule CNCWeb.MachineLive do
     end
   end
 
+  # Check: the controller reads every line without moving (check mode)
+  def handle_event("confirm_check", _, socket) do
+    %Program{name: name, text: text} = socket.assigns.program
+
+    case Machine.check(srv(socket), name, text) do
+      :ok ->
+        {:noreply, assign(socket, start_check?: false)}
+
+      {:error, reason} ->
+        {:noreply, socket |> assign(start_check?: false) |> set_action_error(run_error(reason))}
+    end
+  end
+
   def handle_event("abort_job", _, socket), do: {:noreply, assign(socket, abort_check?: true)}
   def handle_event("cancel_abort", _, socket), do: {:noreply, assign(socket, abort_check?: false)}
 
@@ -519,8 +532,8 @@ defmodule CNCWeb.MachineLive do
           </p>
           <div :if={@machine.state == :alarm} class="cnc-lock" role="alert">
             <span class="cnc-lock-tag">Locked</span>
-            <p title={alarm_text(@machine.alarm)}>
-              {alarm_text(@machine.alarm)}
+            <p title={lock_text(@machine)}>
+              {lock_text(@machine)}
               <span :if={@machine.homing_enabled? == false}>
                 This controller has homing turned off ($22), so unlock to continue.
               </span>
@@ -554,7 +567,10 @@ defmodule CNCWeb.MachineLive do
             </p>
           </div>
           <.note
-            :if={@machine.last_job && not MapSet.member?(@dismissed, :job)}
+            :if={
+              @machine.last_job && not MapSet.member?(@dismissed, :job) &&
+                not (@machine.state == :alarm and @machine.last_job.result == :checked)
+            }
             id="note-job"
             key="job"
             warn={@machine.last_job.result != :done}
@@ -1117,7 +1133,14 @@ defmodule CNCWeb.MachineLive do
           >
             <.icon name="hero-play" class="ui-btn-icon" /> Start
           </UI.button>
-          <UI.button id="cancel-start" phx-click="cancel_start">Not yet</UI.button>
+          <UI.button
+            id="check-start"
+            phx-click="confirm_check"
+            title="The controller reads every line without moving and lists any it refuses"
+          >
+            <.icon name="hero-magnifying-glass" class="ui-btn-icon" /> Check first
+          </UI.button>
+          <UI.button variant="quiet" id="cancel-start" phx-click="cancel_start">Not yet</UI.button>
         </:actions>
       </UI.dialog>
 
@@ -1210,7 +1233,12 @@ defmodule CNCWeb.MachineLive do
     ~H"""
     <section class="cnc-job" id="job-panel" aria-label="Job">
       <div class="cnc-job-head">
-        <p class="cnc-file-name">{@job.name}</p>
+        <p class="cnc-file-name">
+          {@job.name}
+          <span :if={@job.mode == :check} class="cnc-sub-inline" id="job-mode">
+            Check run: the controller reads every line, nothing moves
+          </span>
+        </p>
         <span class="cnc-job-pct num">{@pct}%</span>
       </div>
       <div
@@ -1231,7 +1259,7 @@ defmodule CNCWeb.MachineLive do
         <dt>left</dt>
         <dd class="num">{if @left, do: "about #{duration(@left)}", else: "–"}</dd>
       </dl>
-      <div class="cnc-job-ov">
+      <div :if={@job.mode == :run} class="cnc-job-ov">
         <span class="cnc-h">Feed</span>
         <div class="cnc-seg cnc-seg--small" role="group" aria-label="Feed override">
           <button
@@ -1295,6 +1323,8 @@ defmodule CNCWeb.MachineLive do
 
   defp pad(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
 
+  defp job_outcome(%{result: :checked} = j), do: check_summary(j)
+
   defp job_outcome(%{result: :done} = j),
     do: "Finished #{j.name} in #{duration(DateTime.diff(j.ended_at, j.started_at))}."
 
@@ -1310,6 +1340,42 @@ defmodule CNCWeb.MachineLive do
     do: "#{j.name} stopped at line #{j.line}: the connection to the controller was lost."
 
   defp job_outcome(j), do: "#{j.name} stopped at line #{j.line}."
+
+  # A check's result, for the message line
+  defp check_summary(%{errors: [], total: n} = j),
+    do: "Checked #{j.name}: the controller accepts all #{n} lines."
+
+  defp check_summary(%{errors: errors} = j) do
+    listed =
+      errors
+      |> Enum.take(3)
+      |> Enum.map_join("; ", fn {code, line, text} ->
+        "line #{line} (#{text}): #{refusal(code)}"
+      end)
+
+    more = if length(errors) > 3, do: " and #{length(errors) - 3} more", else: ""
+
+    "Checked #{j.name}: #{length(errors)} #{if length(errors) == 1, do: "line", else: "lines"} refused: #{listed}#{more}."
+  end
+
+  # Grbl's error codes, as reasons
+  defp refusal(1), do: "a value without its letter"
+  defp refusal(2), do: "a badly formed number"
+  defp refusal(9), do: "the machine is locked"
+  defp refusal(15), do: "outside the travel"
+  defp refusal(20), do: "a code this controller doesn't support"
+  defp refusal(22), do: "no feed rate set"
+  defp refusal(24), do: "two codes that can't go together"
+  defp refusal(25), do: "a word given twice"
+  defp refusal(33), do: "an arc that doesn't add up"
+  defp refusal(code), do: "error #{code}"
+
+  # The Locked banner: after a check it says how the check went (the
+  # controller restarts after one, which is why it's locked).
+  defp lock_text(%State{alarm: :reset, last_job: %{result: :checked} = j}),
+    do: check_summary(j) <> " The controller restarts after a check: unlock to carry on."
+
+  defp lock_text(%State{alarm: alarm}), do: alarm_text(alarm)
 
   defp run_error(:busy), do: "Wait for the machine to settle, then Start."
   defp run_error({:invalid_state, _}), do: "Only when the machine is Ready."
@@ -1819,6 +1885,7 @@ defmodule CNCWeb.MachineLive do
   defp state_icon(%State{state: :running, controller: c}) when c in [:hold, :door],
     do: "hero-pause-circle"
 
+  defp state_icon(%State{state: :running, job: %{mode: :check}}), do: "hero-magnifying-glass"
   defp state_icon(%State{state: :running}), do: "hero-play-circle"
   defp state_icon(%State{state: :idle}), do: "hero-check-circle"
   defp state_icon(%State{state: :alarm}), do: "hero-lock-closed"
@@ -1831,6 +1898,7 @@ defmodule CNCWeb.MachineLive do
 
   defp state_icon(_), do: "hero-arrow-path"
 
+  defp state_label(%State{state: :running, job: %{mode: :check}}), do: "Checking"
   defp state_label(%State{state: :running, controller: :hold}), do: "On hold"
   defp state_label(%State{state: :running, controller: :door}), do: "Door open"
   defp state_label(%State{state: :busy, controller: :door}), do: "Door open"

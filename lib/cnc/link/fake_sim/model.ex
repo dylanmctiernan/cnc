@@ -25,6 +25,9 @@ defmodule CNC.Link.FakeSim.Model do
       `ALARM:3`. A move outside the travel is a soft limit, `ALARM:2`; a
       feed move with no `F` yet is `error:22`. Feed override (`0x90`–`0x94`)
       scales feed moves and is reported as `Ov:`.
+    * check mode (`$C`), as FluidNC's: `Check` state, every line validated
+      and its position followed but nothing moves; outside the travel is
+      `ALARM:2`; `$C` again restarts the controller (banner, locked, no ok)
     * soft reset while moving → `ALARM:3` (jog) / `ALARM:6` (homing)
     * `$$` lists max travel `$130`–`$132`; `$13x=<mm>` sets it (Idle/Alarm only)
     * `G10 L2 P1 X.. Y.. Z..` puts the G54 work zero at machine coordinates;
@@ -76,7 +79,7 @@ defmodule CNC.Link.FakeSim.Model do
 
   @type xyz :: {float, float, float}
   @type t :: %__MODULE__{
-          state: :alarm | :idle | :jog | :home | :hold | :run,
+          state: :alarm | :idle | :jog | :home | :hold | :run | :check,
           pos: xyz,
           queue: :queue.queue({xyz, float}),
           feed: float,
@@ -102,6 +105,8 @@ defmodule CNC.Link.FakeSim.Model do
             gcode: %{absolute?: true, units: 1.0, motion: nil, feed: nil},
             waiting: :queue.new(),
             feed_ov: 100,
+            # check mode: where the program would be (nothing moves)
+            check_pos: nil,
             files: %{"config.yaml" => @config},
             config_file: "config.yaml",
             running: @config
@@ -259,6 +264,16 @@ defmodule CNC.Link.FakeSim.Model do
     {m, ["[MSG:INFO: Restarting]", "ok", @banner, @locked]}
   end
 
+  # Check mode: read and validate lines, move nothing. Leaving it restarts
+  # the controller, as FluidNC (and Grbl) do.
+  def line(%{state: :idle} = m, "$C"),
+    do: {%{m | state: :check, check_pos: m.pos}, ["[MSG:INFO: Enabled]", "ok"]}
+
+  def line(%{state: :check} = m, "$C") do
+    m = %{stop(m, :alarm) | check_pos: nil}
+    {m, ["[MSG:INFO: Disabled]", @banner, @locked]}
+  end
+
   # G54 work offset: the current position becomes the given work position.
   def line(%{state: s} = m, "G10 L20 P1" <> words) when s in [:idle, :alarm] do
     case parse_axes(words) do
@@ -364,7 +379,8 @@ defmodule CNC.Link.FakeSim.Model do
 
   defp motion(m, g, axes, words) do
     {wx, wy, wz} = m.wco
-    {cx, cy, cz} = sub(tail(m), m.wco)
+    from = if m.state == :check, do: m.check_pos, else: tail(m)
+    {cx, cy, cz} = sub(from, m.wco)
 
     coord = fn letter, current ->
       case Map.fetch(axes, letter) do
@@ -382,6 +398,9 @@ defmodule CNC.Link.FakeSim.Model do
 
       within_travel(target, m.travel) != :ok ->
         {stop(m, :alarm), ["ALARM:2"]}
+
+      m.state == :check ->
+        {%{m | check_pos: target}, ["ok"]}
 
       true ->
         feed = if g.motion == 0, do: m.max_feed, else: min(g.feed, m.max_feed)

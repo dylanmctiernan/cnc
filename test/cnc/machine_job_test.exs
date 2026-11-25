@@ -95,6 +95,19 @@ defmodule CNC.Machine.JobTest do
       assert %{result: :done} = Machine.status(m).last_job
     end
 
+    test "a check run reads every line without moving, lists what's refused, and ends locked",
+         %{m: m} do
+      program = "G21\nG1 X10 F600\nG38.2 Z-5 F100\nG1 X20\nG28\n"
+      :ok = Machine.check(m, "check.nc", program)
+      assert %State{state: :running, job: %{mode: :check}} = Machine.status(m)
+
+      assert eventually(fn -> Machine.status(m).state == :alarm end, 5000)
+      %State{last_job: last, mpos: mpos} = Machine.status(m)
+      assert %{result: :checked, mode: :check, acked: 5, total: 5} = last
+      assert [{20, 3, "G38.2Z-5F100"}, {20, 5, "G28"}] = last.errors
+      assert mpos == {0.0, 0.0, 0.0}
+    end
+
     test "Abort stops it and the machine comes back locked", %{m: m} do
       :ok = Machine.run(m, "square.nc", @square)
       assert eventually(fn -> Machine.status(m).controller == :run end)

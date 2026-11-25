@@ -50,6 +50,31 @@ defmodule CNCWeb.MachineJobLiveTest do
     refute has_element?(view, "#job-panel")
   end
 
+  test "Check first: nothing moves, and the Locked banner says how the check went", %{
+    conn: conn,
+    m: m,
+    program: program
+  } do
+    {:ok, _} = CNC.Program.load("odd.nc", "G21\nG1 X10 F600\nG28\nG1 X20\n", server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+    before = Machine.status(m).mpos
+
+    view |> element("#bar-resume") |> render_click()
+    view |> element("#check-start") |> render_click()
+
+    assert eventually(fn -> Machine.status(m).state == :alarm end, 5000)
+
+    assert eventually(fn ->
+             has_element?(view, ".cnc-lock", "Checked odd.nc: 1 line refused") and
+               has_element?(view, ".cnc-lock", "doesn't support") and
+               has_element?(view, ".cnc-lock", "unlock to carry on")
+           end)
+
+    refute has_element?(view, "#note-job")
+    assert Machine.status(m).mpos == before
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")
