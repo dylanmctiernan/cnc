@@ -185,6 +185,20 @@ defmodule CNC.Machine do
   def go_to_work_zero(server \\ __MODULE__), do: call(server, :go_to_work_zero)
 
   @doc """
+  Outline a file: trace its X/Y extent at a safe height, to see where it
+  lands on the stock. `bounds` is `{{x0, x1}, {y0, y1}}` in work
+  coordinates (the file's cutting area). Lifts Z first (never lowers it),
+  goes to the first corner and round the rectangle back to it, at the
+  normal jog speed. Jogs, so Hold/Esc stop it. Only when `:idle` and
+  stopped; `{:error, :outside_travel}` if a corner is off the machine.
+  """
+  @spec outline(server, {{number, number}, {number, number}}) ::
+          reply | {:error, :no_work_offset | :outside_travel | :moving}
+  def outline(server \\ __MODULE__, {{x0, x1}, {y0, y1}} = bounds)
+      when is_number(x0) and is_number(x1) and is_number(y0) and is_number(y1),
+      do: call(server, {:outline, bounds})
+
+  @doc """
   Connect to another controller: `{adapter, opts}` (a `CNC.Link` adapter),
   or `nil` for none. Stops the current link first (with a jog cancel if
   it's connected); the new controller starts locked, as on any connect.

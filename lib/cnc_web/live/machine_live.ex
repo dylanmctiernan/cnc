@@ -147,6 +147,24 @@ defmodule CNCWeb.MachineLive do
     end
   end
 
+  # Outline: trace the file's cutting area at a safe height (on the stock)
+  def handle_event("outline", _, socket) do
+    %Program{gcode: g} = socket.assigns.program
+    {{x0, x1}, {y0, y1}, _} = g.cut_bounds || g.bounds
+
+    error =
+      case Machine.outline(srv(socket), {{x0, x1}, {y0, y1}}) do
+        :ok -> nil
+        {:error, :outside_travel} -> "The outline would leave the travel from this work zero."
+        {:error, :no_work_offset} -> "The controller hasn't reported a work zero yet."
+        {:error, :moving} -> "Wait for the machine to stop, then Outline."
+        {:error, {:invalid_state, _}} -> "Only when the machine is Ready."
+        {:error, other} -> "Couldn't outline: #{inspect(other)}"
+      end
+
+    {:noreply, socket |> assign(start_check?: false) |> set_action_error(error)}
+  end
+
   # Check: the controller reads every line without moving (check mode)
   def handle_event("confirm_check", _, socket) do
     %Program{name: name, text: text} = socket.assigns.program
@@ -1139,6 +1157,14 @@ defmodule CNCWeb.MachineLive do
             title="The controller reads every line without moving and lists any it refuses"
           >
             <.icon name="hero-magnifying-glass" class="ui-btn-icon" /> Check first
+          </UI.button>
+          <UI.button
+            id="outline-start"
+            phx-click="outline"
+            disabled={@program.gcode.bounds == nil}
+            title="Trace the file's area at a safe height, to see where it lands on the stock"
+          >
+            <.icon name="hero-square-2-stack" class="ui-btn-icon" /> Outline
           </UI.button>
           <UI.button variant="quiet" id="cancel-start" phx-click="cancel_start">Not yet</UI.button>
         </:actions>

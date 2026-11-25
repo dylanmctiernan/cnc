@@ -75,6 +75,25 @@ defmodule CNCWeb.MachineJobLiveTest do
     assert Machine.status(m).mpos == before
   end
 
+  test "Outline from the pre-start dialog traces the file, then it's Ready again", %{
+    conn: conn,
+    m: m,
+    program: program
+  } do
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+
+    view |> element("#bar-resume") |> render_click()
+    view |> element("#outline-start") |> render_click()
+    refute has_element?(view, "#start-dialog")
+    assert eventually(fn -> Machine.status(m).controller == :jog end)
+    assert eventually(fn -> not Machine.status(m).moving? end, 10_000)
+    {x, y, _} = Machine.status(m).mpos
+    assert_in_delta x, 0.0, 0.01
+    assert_in_delta y, 0.0, 0.01
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")

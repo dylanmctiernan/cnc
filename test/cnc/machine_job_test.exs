@@ -108,6 +108,29 @@ defmodule CNC.Machine.JobTest do
       assert mpos == {0.0, 0.0, 0.0}
     end
 
+    test "Outline traces the file's corners at a safe height and ends at the first", %{m: m} do
+      :ok = Machine.set_work_offset(m, x: 100.0, y: 50.0, z: -30.0)
+      assert eventually(fn -> Machine.status(m).wco == {100.0, 50.0, -30.0} end)
+
+      :ok = Machine.outline(m, {{10.0, 40.0}, {5.0, 25.0}})
+      assert eventually(fn -> Machine.status(m).controller == :jog end)
+      # Never below the safe height while tracing
+      for _ <- 1..10 do
+        Process.sleep(30)
+        {_, _, z} = Machine.status(m).mpos
+        assert z >= -1.0 - 1.0e-6 or z == 0.0
+      end
+
+      assert eventually(fn -> not Machine.status(m).moving? end, 10_000)
+      {x, y, z} = Machine.status(m).mpos
+      assert_in_delta x, 110.0, 0.01
+      assert_in_delta y, 55.0, 0.01
+      # It started at the top (Z 0): Outline only ever lifts Z, never lowers it
+      assert_in_delta z, 0.0, 0.01
+
+      assert {:error, :outside_travel} = Machine.outline(m, {{0.0, 5000.0}, {0.0, 10.0}})
+    end
+
     test "Abort stops it and the machine comes back locked", %{m: m} do
       :ok = Machine.run(m, "square.nc", @square)
       assert eventually(fn -> Machine.status(m).controller == :run end)

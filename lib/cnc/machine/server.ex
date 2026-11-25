@@ -437,6 +437,22 @@ defmodule CNC.Machine.Server do
     end
   end
 
+  # Outline: the same bounded jogs, round the file's corners at a safe height.
+  defp event({:call, from}, {:outline, bounds}, :idle, d) do
+    case outline_moves(d, bounds) do
+      {:ok, moves} ->
+        d =
+          Enum.reduce(moves, d, fn {delta, feed}, d ->
+            send_line(d, Command.jog(delta, feed), :step)
+          end)
+
+        {:idle, d, [{:reply, from, :ok}]}
+
+      {:error, _} = err ->
+        {:idle, d, [{:reply, from, err}]}
+    end
+  end
+
   defp event({:call, from}, cmd, s, %{connected?: true} = d)
        when cmd in [:feed_hold, :resume, :reset] do
     byte =
@@ -863,6 +879,41 @@ defmodule CNC.Machine.Server do
       zero = elem(mpos, i) - v
       zero >= lo - 0.001 and zero <= hi + 0.001
     end)
+  end
+
+  defp outline_moves(%{status: %{wco: nil}}, _bounds), do: {:error, :no_work_offset}
+
+  defp outline_moves(d, _bounds)
+       when d.motion_unsettled? or d.status.state in [:run, :jog, :home],
+       do: {:error, :moving}
+
+  defp outline_moves(%{status: %{mpos: {x, y, z}, wco: {wx, wy, _}}, travel: travel}, bounds) do
+    {{x0, x1}, {y0, y1}} = bounds
+    {{tx0, tx1}, {ty0, ty1}, {_, z_top}} = travel
+    safe_z = z_top - 1.0
+
+    corners =
+      for {cx, cy} <- [{x0, y0}, {x1, y0}, {x1, y1}, {x0, y1}, {x0, y0}], do: {cx + wx, cy + wy}
+
+    if Enum.all?(corners, fn {cx, cy} -> cx >= tx0 and cx <= tx1 and cy >= ty0 and cy <= ty1 end) do
+      lift =
+        if z < safe_z,
+          do: [{{0.0, 0.0, Float.round(safe_z - z, 3)}, Jog.z_speed(:fast) * 60}],
+          else: []
+
+      feed = Jog.speed(:normal) * 60
+
+      {_, moves} =
+        Enum.reduce(corners, {{x, y}, []}, fn {cx, cy}, {{px, py}, acc} ->
+          delta = {Float.round(cx - px, 3), Float.round(cy - py, 3), 0.0}
+          acc = if Jog.zero?(delta), do: acc, else: [{delta, feed} | acc]
+          {{cx, cy}, acc}
+        end)
+
+      {:ok, lift ++ Enum.reverse(moves)}
+    else
+      {:error, :outside_travel}
+    end
   end
 
   defp work_zero_moves(%{status: %{wco: nil}}), do: {:error, :no_work_offset}
