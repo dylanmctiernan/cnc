@@ -75,21 +75,21 @@ defmodule CNCWeb.MachineLiveTest do
     assert Machine.status(m).state == :idle
   end
 
-  test "type a work position without moving", %{conn: conn, m: m} do
+  test "type where the work zero is on the bed, without moving; the readout only displays", %{
+    conn: conn,
+    m: m
+  } do
     {:ok, view, _} = live(conn, ~p"/")
     view |> element(".cnc-lock button", "Unlock") |> render_click()
     assert eventually(fn -> Machine.status(m).state == :idle and Machine.status(m).wpos end)
-    mpos = Machine.status(m).mpos
+    {mx, _, _} = mpos = Machine.status(m).mpos
 
-    view |> element(~s|.cnc-num--edit[phx-value-axis="x"]|) |> render_click()
-    assert has_element?(view, "#work-dialog", "Set X position")
+    # The readout is display only
+    refute has_element?(view, ".cnc-dro-row button")
+
+    view |> element(~s|.cnc-dro .cnc-zero-val[phx-value-axis="x"]|) |> render_click()
+    assert has_element?(view, "#work-dialog", "Set X work zero")
     # Starts empty (current value as the placeholder): Set waits for a number.
-    assert has_element?(view, "#work-dialog button[type=submit][disabled]")
-
-    # The preview says where the work zero lands, in machine terms.
-    # A value that would put the work zero off the machine is refused as you type.
-    html = view |> form("#work-form", %{value: "99999"}) |> render_change()
-    assert html =~ "off the machine"
     assert has_element?(view, "#work-dialog button[type=submit][disabled]")
 
     # ± flips the sign (iPhone decimal keypads have no minus key).
@@ -97,11 +97,12 @@ defmodule CNCWeb.MachineLiveTest do
     html = view |> element("#work-dialog button", "±") |> render_click()
     assert html =~ ~s(value="-12,5")
 
-    # -12.5 here: the work zero is 12.5 mm to the tool's right, on the bed.
-    html = view |> form("#work-form", %{value: "-12,5"}) |> render_change()
+    # The preview says where it lands relative to the tool
+    zero = mx + 12.5
+    html = view |> form("#work-form", %{value: to_string(zero)}) |> render_change()
     assert html =~ "X0 will be 12.5 mm to the right of the tool. Nothing moves."
 
-    view |> form("#work-form", %{value: "-12,5"}) |> render_submit()
+    view |> form("#work-form", %{value: to_string(zero)}) |> render_submit()
     refute has_element?(view, "#work-dialog")
 
     assert eventually(fn ->
@@ -111,7 +112,7 @@ defmodule CNCWeb.MachineLiveTest do
     assert Machine.status(m).mpos == mpos
 
     # Not a number: says so, stays open.
-    view |> element(~s|.cnc-num--edit[phx-value-axis="y"]|) |> render_click()
+    view |> element(~s|.cnc-dro .cnc-zero-val[phx-value-axis="y"]|) |> render_click()
     view |> form("#work-form", %{value: "abc"}) |> render_submit()
     assert has_element?(view, "#work-dialog .cnc-set-error", "Type a number")
   end
@@ -126,7 +127,7 @@ defmodule CNCWeb.MachineLiveTest do
 
     view |> element(".cnc-dro-head button[phx-value-frame=machine]") |> render_click()
     # The machine position isn't editable; the work zero row is.
-    refute has_element?(view, ".cnc-num--edit")
+    refute has_element?(view, ".cnc-dro-row button")
     view |> element(~s|.cnc-dro .cnc-zero-val[phx-value-axis="x"]|) |> render_click()
     assert has_element?(view, "#work-dialog", "Set X work zero")
     assert has_element?(view, "#work-dialog", "Work zero at machine X =")

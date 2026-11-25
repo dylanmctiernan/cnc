@@ -296,28 +296,9 @@ defmodule CNCWeb.MachineLive do
   def handle_event("toggle_more", _, socket), do: {:noreply, update(socket, :more?, &(!&1))}
 
   # G-code file: a dialog to upload (auto, on drop/choose) and summarise it.
-  # Set a work coordinate by typing it: nothing moves (G10 L20).
-  def handle_event("edit_work", %{"axis" => axis}, socket) when axis in ~w(x y z) do
-    axis = String.to_existing_atom(axis)
-    i = Enum.find_index([:x, :y, :z], &(&1 == axis))
-    m = socket.assigns.machine
-    # Work tab: where the tool is, relative to the work zero. Machine tab:
-    # where the work zero is, as an absolute spot on the bed.
-    edit_frame = frame(m, socket.assigns.frame)
-
-    current =
-      case edit_frame do
-        :machine -> m.wco |> elem(i) |> fmt()
-        :work -> m.wpos |> elem(i) |> fmt()
-      end
-
-    {:noreply,
-     assign(socket,
-       work_edit: %{axis: axis, frame: edit_frame, value: "", current: current, error: nil}
-     )}
-  end
-
-  # The work zero row: always an absolute spot on the bed, whichever tab.
+  # The work zero row: type where the work zero is on the bed (machine
+  # coordinates), whichever tab. Nothing moves. The one way to set it by
+  # value; the readout above only displays.
   def handle_event("edit_zero", %{"axis" => axis}, socket) when axis in ~w(x y z) do
     axis = String.to_existing_atom(axis)
     i = Enum.find_index([:x, :y, :z], &(&1 == axis))
@@ -348,13 +329,8 @@ defmodule CNCWeb.MachineLive do
   def handle_event("set_work", %{"value" => value}, socket) do
     %{axis: axis} = socket.assigns.work_edit
 
-    set =
-      if socket.assigns.work_edit.frame == :machine,
-        do: &Machine.set_work_offset/2,
-        else: &Machine.set_work_position/2
-
     with {:ok, v} <- parse_mm(value),
-         :ok <- set.(srv(socket), [{axis, v}]) do
+         :ok <- Machine.set_work_offset(srv(socket), [{axis, v}]) do
       {:noreply, assign(socket, work_edit: nil)}
     else
       :error ->
@@ -832,22 +808,9 @@ defmodule CNCWeb.MachineLive do
             </div>
             <div :for={{axis, i} <- [{"X", 0}, {"Y", 1}, {"Z", 2}]} class="cnc-dro-row">
               <span class={"cnc-axis cnc-axis--#{String.downcase(axis)}"}>{axis}</span>
-              <%!-- Work tab: tap the work position to type it. Machine tab: the
-                 machine's actual position, which only jogging changes. --%>
-              <button
-                :if={@machine.wpos && frame(@machine, @frame) == :work}
-                type="button"
-                class="cnc-num cnc-num--edit"
-                phx-click="edit_work"
-                phx-value-axis={String.downcase(axis)}
-                aria-label={"Set work #{axis} without moving"}
-                title="Set this axis's work position without moving"
-              >
-                {fmt(axis_value(shown(@machine, @frame), i))}
-              </button>
-              <span :if={!@machine.wpos || frame(@machine, @frame) == :machine} class="cnc-num">
-                {fmt(axis_value(shown(@machine, @frame), i))}
-              </span>
+              <%!-- Display only: what you watch while it moves. The work zero
+                 is set below (Work zero at, Zero X/Y, Zero Z). --%>
+              <span class="cnc-num">{fmt(axis_value(shown(@machine, @frame), i))}</span>
             </div>
             <p :if={@machine.wpos} class="cnc-sub cnc-dro-other">
               {if frame(@machine, @frame) == :work, do: "machine", else: "work"} {xyz_label(
@@ -1090,15 +1053,11 @@ defmodule CNCWeb.MachineLive do
             phx-click-away="cancel_work"
           >
             <h2 id="work-title" class="cnc-page-title">
-              {if @work_edit.frame == :machine,
-                do: "Set #{String.upcase(to_string(@work_edit.axis))} work zero",
-                else: "Set #{String.upcase(to_string(@work_edit.axis))} position"}
+              Set {String.upcase(to_string(@work_edit.axis))} work zero
             </h2>
             <div class="cnc-work-field">
               <label for="work-value">
-                {if @work_edit.frame == :machine,
-                  do: "Work zero at machine #{String.upcase(to_string(@work_edit.axis))} =",
-                  else: "Tool is at #{String.upcase(to_string(@work_edit.axis))} ="}
+                Work zero at machine {String.upcase(to_string(@work_edit.axis))} =
               </label>
               <input
                 id="work-value"
@@ -1992,11 +1951,8 @@ defmodule CNCWeb.MachineLive do
       {{:outside, _, {lo, hi}}, _} ->
         "That puts #{name}0 off the machine (#{name} runs #{mm(lo)} to #{mm(hi)})."
 
-      _ when edit.frame == :machine ->
-        "Type where the work zero is on the bed, in machine coordinates. Nothing moves."
-
       _ ->
-        "Type where the tool is, measured from the zero you want. Nothing moves."
+        "Type where the work zero is on the bed, in machine coordinates. Nothing moves."
     end
   end
 

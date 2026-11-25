@@ -1585,30 +1585,6 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-/* Readout values are buttons: tap to type a work position */
-.cnc-num--edit {
-  /* Keep .cnc-num's size: only reset what a button changes */
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font-family: inherit;
-  letter-spacing: inherit;
-  text-align: right;
-  cursor: pointer;
-  border-radius: 2px;
-  text-decoration: underline dotted transparent;
-  text-underline-offset: 0.3em;
-  transition: text-decoration-color 120ms;
-}
-.cnc-num--edit:hover,
-.cnc-num--edit:focus-visible {
-  text-decoration-color: var(--text-dim);
-}
-.cnc-num--edit:focus-visible {
-  outline: 2px solid var(--move);
-  outline-offset: 2px;
-}
 .cnc-work-box {
   width: min(100%, 24rem);
 }
