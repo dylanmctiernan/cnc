@@ -41,6 +41,26 @@ defmodule CNC.Machine.JobTest do
       assert {:send, _, _} = Job.next(job)
     end
 
+    test "a dry run lifts Z in absolute positioning and leaves the spindle off" do
+      text =
+        "G21 G90\nM3 S12000\nG0 Z5\nG1 Z-1.5 F300\nG91\nG1 Z-1\nG90\nG53 G0 Z-2\nG1 X1 Z.5\nM5\n"
+
+      {:ok, job} = Job.new("d.nc", text, mode: {:dry, 10})
+
+      assert :queue.to_list(job.queue) == [
+               {1, "G21G90"},
+               {2, "S12000"},
+               {3, "G0Z15.000"},
+               {4, "G1Z8.500F300"},
+               {5, "G91"},
+               {6, "G1Z-1"},
+               {7, "G90"},
+               {8, "G53G0Z-2"},
+               {9, "G1X1Z10.500"},
+               {10, "M5"}
+             ]
+    end
+
     test "an error halts the stream" do
       {:ok, job} = Job.new("e.nc", "G1 X1\nG1 X2\n")
       {:send, _, job} = Job.next(job)

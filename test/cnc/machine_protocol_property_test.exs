@@ -77,6 +77,7 @@ defmodule CNC.Machine.ProtocolPropertyTest do
       {1, constant(:reset)},
       {4, constant({:run, "square.nc", @program, :run})},
       {2, constant({:run, "square.nc", @program, :check})},
+      {1, constant({:run, "square.nc", @program, {:dry, 5}})},
       {2, constant(:abort)},
       {1, member_of([{:raw, "G0 X1"}, {:raw, "$$"}, {:raw, "?"}])},
       {1, constant({:work_position, [x: 0.0]})},

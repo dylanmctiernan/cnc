@@ -506,7 +506,10 @@ defmodule CNC.Machine.Server do
   # line stream from its first byte.
   # A check run first puts the controller in check mode ($C): it reads every
   # line without moving.
-  defp event({:call, from}, {:run, name, text, mode}, :idle, d) when mode in [:run, :check] do
+  defp event({:call, from}, {:run, name, text, mode}, :idle, d)
+       when mode in [:run, :check] or
+              (is_tuple(mode) and elem(mode, 0) == :dry and is_number(elem(mode, 1)) and
+                 elem(mode, 1) > 0) do
     cond do
       d.motion_unsettled? or not :queue.is_empty(d.pending) ->
         {:idle, d, [{:reply, from, {:error, :busy}}]}
@@ -519,7 +522,7 @@ defmodule CNC.Machine.Server do
                 %{d | job: job, last_job: nil, last_error: nil},
                 :out,
                 :line,
-                "(#{mode} #{name})"
+                "(#{inspect(mode)} #{name})"
               )
 
             d = if mode == :check, do: send_line(d, "$C", :check_on), else: d

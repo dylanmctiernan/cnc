@@ -3838,3 +3838,9 @@ body {
 .cnc-check-item.is-bad .cnc-check-icon {
   color: var(--danger-text);
 }
+
+/* Which kind of run it is must be unmistakable: a dry run says so in amber */
+.cnc-dry {
+  color: var(--warn);
+  font-weight: 600;
+}

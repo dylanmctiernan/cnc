@@ -36,6 +36,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
+     |> assign(dry_lift: nil)
      |> assign(zoom: if(program, do: :file, else: :bed), view_mode: :top)
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
@@ -128,17 +129,23 @@ defmodule CNCWeb.MachineLive do
   def handle_event("cycle_start", _, socket) do
     case cycle(socket.assigns.machine, socket.assigns.program) do
       :resume -> tap_noreply(socket, &Machine.resume/1)
-      :start -> {:noreply, assign(socket, start_check?: true)}
+      :start -> {:noreply, assign(socket, start_check?: true, dry_lift: nil)}
       nil -> {:noreply, socket}
     end
   end
 
   def handle_event("cancel_start", _, socket), do: {:noreply, assign(socket, start_check?: false)}
 
+  def handle_event("dry_lift", %{"mm" => mm}, socket) do
+    lift = if mm in ~w(5 10 25), do: String.to_integer(mm), else: nil
+    {:noreply, assign(socket, dry_lift: lift)}
+  end
+
   def handle_event("confirm_start", _, socket) do
     %Program{name: name, text: text} = socket.assigns.program
+    mode = if lift = socket.assigns.dry_lift, do: {:dry, lift}, else: :run
 
-    case Machine.run(srv(socket), name, text) do
+    case Machine.run(srv(socket), name, text, mode) do
       :ok ->
         {:noreply, assign(socket, start_check?: false)}
 
@@ -1146,20 +1153,44 @@ defmodule CNCWeb.MachineLive do
         title={"Start #{@program.name}?"}
         on_cancel="cancel_start"
       >
-        <.start_checks program={@program} machine={@machine} fit={fit(@program, @machine)} />
+        <.start_checks
+          program={@program}
+          machine={@machine}
+          fit={fit(@program, @machine, @dry_lift || 0)}
+        />
         <div class="cnc-job-ov" id="start-rapids">
           <span class="cnc-h">Rapids</span>
           <.rapid_seg machine={@machine} id="start-rapid" />
         </div>
-        <p class="cnc-sub">A new program's first run is usually at 25% rapids.</p>
+        <div class="cnc-job-ov" id="start-dry">
+          <span class="cnc-h">Dry run</span>
+          <div class="cnc-seg cnc-seg--small" role="group" aria-label="Dry run: Z lifted by">
+            <button
+              :for={{mm, label} <- [{nil, "Off"}, {5, "Z +5"}, {10, "Z +10"}, {25, "Z +25"}]}
+              type="button"
+              class="cnc-btn num"
+              id={"dry-#{mm || "off"}"}
+              phx-click="dry_lift"
+              phx-value-mm={mm || "off"}
+              aria-pressed={to_string(@dry_lift == mm)}
+            >
+              {label}
+            </button>
+          </div>
+        </div>
+        <p class="cnc-sub">
+          A new program's first run is usually a dry run (Z lifted above the stock,
+          spindle off), then the first cut at 25% rapids.
+        </p>
         <:actions>
           <UI.button
             variant="primary"
             id="confirm-start"
             phx-click="confirm_start"
-            disabled={fit(@program, @machine) != []}
+            disabled={fit(@program, @machine, @dry_lift || 0) != []}
           >
-            <.icon name="hero-play" class="ui-btn-icon" /> Start
+            <.icon name="hero-play" class="ui-btn-icon" />
+            {if @dry_lift, do: "Start dry run", else: "Start cutting"}
           </UI.button>
           <UI.button
             id="check-start"
@@ -1274,6 +1305,9 @@ defmodule CNCWeb.MachineLive do
           <span :if={@job.mode == :check} class="cnc-sub-inline" id="job-mode">
             Check run: the controller reads every line, nothing moves
           </span>
+          <span :if={match?({:dry, _}, @job.mode)} class="cnc-sub-inline cnc-dry" id="job-mode">
+            Dry run: Z lifted {elem(@job.mode, 1)} mm, spindle left off
+          </span>
         </p>
         <span class="cnc-job-pct num">{@pct}%</span>
       </div>
@@ -1295,7 +1329,7 @@ defmodule CNCWeb.MachineLive do
         <dt>left</dt>
         <dd class="num">{if @left, do: "about #{duration(@left)}", else: "–"}</dd>
       </dl>
-      <div :if={@job.mode == :run} class="cnc-job-ov">
+      <div :if={@job.mode != :check} class="cnc-job-ov">
         <span class="cnc-h">Feed</span>
         <div class="cnc-seg cnc-seg--small" role="group" aria-label="Feed override">
           <button
@@ -1329,7 +1363,7 @@ defmodule CNCWeb.MachineLive do
           </button>
         </div>
       </div>
-      <div :if={@job.mode == :run} class="cnc-job-ov">
+      <div :if={@job.mode != :check} class="cnc-job-ov">
         <span class="cnc-h">Rapids</span>
         <.rapid_seg machine={@machine} id="job-rapid" />
       </div>
@@ -1389,6 +1423,10 @@ defmodule CNCWeb.MachineLive do
   defp pad(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
 
   defp job_outcome(%{result: :checked} = j), do: check_summary(j)
+
+  defp job_outcome(%{result: :done, mode: {:dry, mm}} = j),
+    do:
+      "Dry run of #{j.name} (Z +#{mm} mm) finished in #{duration(DateTime.diff(j.ended_at, j.started_at))}."
 
   defp job_outcome(%{result: :done} = j),
     do: "Finished #{j.name} in #{duration(DateTime.diff(j.ended_at, j.started_at))}."
@@ -1831,14 +1869,16 @@ defmodule CNCWeb.MachineLive do
 
   # How the program's moves sit in the machine's travel from the current
   # work zero: [{axis, :low | :high, mm_outside}], or :no_work_zero.
-  defp fit(%Program{gcode: %{bounds: nil}}, _machine), do: []
-  defp fit(_program, %State{wco: nil}), do: :no_work_zero
+  # lift: a dry run's Z lift, which can take the program past the top
+  defp fit(program, machine, lift \\ 0)
+  defp fit(%Program{gcode: %{bounds: nil}}, _machine, _lift), do: []
+  defp fit(_program, %State{wco: nil}, _lift), do: :no_work_zero
 
-  defp fit(%Program{gcode: %{bounds: bounds}}, %State{wco: wco, travel: travel}) do
+  defp fit(%Program{gcode: %{bounds: bounds}}, %State{wco: wco, travel: travel}, lift) do
     for {axis, i} <- [x: 0, y: 1, z: 2],
         {pmin, pmax} = elem(bounds, i),
         {tmin, tmax} = elem(travel, i),
-        offset = elem(wco, i),
+        offset = elem(wco, i) + if(axis == :z, do: lift, else: 0),
         {side, out} <- [low: tmin - (pmin + offset), high: pmax + offset - tmax],
         out > 0.0005,
         do: {axis, side, out}
@@ -1964,6 +2004,11 @@ defmodule CNCWeb.MachineLive do
   defp state_icon(_), do: "hero-arrow-path"
 
   defp state_label(%State{state: :running, job: %{mode: :check}}), do: "Checking"
+
+  defp state_label(%State{state: :running, controller: c, job: %{mode: {:dry, _}}})
+       when c not in [:hold, :door],
+       do: "Dry run"
+
   defp state_label(%State{state: :running, controller: :hold}), do: "On hold"
   defp state_label(%State{state: :running, controller: :door}), do: "Door open"
   defp state_label(%State{state: :busy, controller: :door}), do: "Door open"

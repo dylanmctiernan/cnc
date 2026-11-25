@@ -24,6 +24,12 @@ defmodule CNC.Machine.Job do
       every line without moving. Errors don't stop the stream: they're
       collected (`errors`), since the point is to list every line the
       controller refuses.
+    * `{:dry, mm}` — a dry run (air cut): the real motion with Z lifted by
+      `mm` and the spindle left off. Done to the lines as they're sent, so
+      nothing on the controller has to be restored afterwards: every Z in
+      absolute positioning (G90) gets the lift (relative moves are already
+      relative to it; machine-coordinate G53 lines are left alone), and
+      spindle on (M3/M4) is dropped.
   """
 
   @rx_buffer 127
@@ -43,7 +49,7 @@ defmodule CNC.Machine.Job do
           error: nil | {code :: term, line_no :: pos_integer, text :: String.t()},
           halted?: boolean,
           aborting?: boolean,
-          mode: :run | :check,
+          mode: :run | :check | {:dry, number},
           errors: [{code :: term, line_no :: pos_integer, text :: String.t()}]
         }
 
@@ -89,6 +95,7 @@ defmodule CNC.Machine.Job do
           line -> [{n, line}]
         end
       end)
+      |> dry(mode)
 
     cond do
       lines == [] ->
@@ -107,6 +114,44 @@ defmodule CNC.Machine.Job do
            mode: mode
          }}
     end
+  end
+
+  # A dry run: Z words in absolute positioning lifted, spindle on dropped.
+  # Lines left empty (a lone M3) are skipped.
+  defp dry(lines, {:dry, lift}) do
+    {lines, _absolute?} =
+      Enum.flat_map_reduce(lines, true, fn {n, line}, absolute? ->
+        absolute? =
+          cond do
+            Regex.match?(~r/G91(?![.\d])/i, line) -> false
+            Regex.match?(~r/G90(?![.\d])/i, line) -> true
+            true -> absolute?
+          end
+
+        line = Regex.replace(~r/M0*[34](?!\d)/i, line, "")
+
+        line =
+          if absolute? and not Regex.match?(~r/G53(?!\d)/i, line),
+            do: lift_z(line, lift),
+            else: line
+
+        {if(line == "", do: [], else: [{n, line}]), absolute?}
+      end)
+
+    lines
+  end
+
+  defp dry(lines, _mode), do: lines
+
+  defp lift_z(line, lift) do
+    Regex.replace(~r/Z([-+]?\d*\.?\d+)/i, line, fn _, v ->
+      {z, _} =
+        Float.parse(
+          if String.starts_with?(v, "."), do: "0" <> v, else: String.replace(v, "-.", "-0.")
+        )
+
+      "Z" <> :erlang.float_to_binary(z + lift, decimals: 3)
+    end)
   end
 
   @doc "A line as sent: no comments, no spaces, no `%`."

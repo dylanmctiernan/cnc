@@ -94,6 +94,35 @@ defmodule CNCWeb.MachineJobLiveTest do
     assert_in_delta y, 0.0, 0.01
   end
 
+  test "Dry run: always off when the dialog opens; the lift counts in the fit; labelled while it runs",
+       %{conn: conn, m: m, program: program} do
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+
+    # At the top of travel there's no room to lift: refused
+    view |> element("#bar-resume") |> render_click()
+    assert has_element?(view, "#dry-off[aria-pressed=true]")
+    assert has_element?(view, "#confirm-start", "Start cutting")
+    view |> element("#dry-10") |> render_click()
+    assert has_element?(view, "#confirm-start[disabled]", "Start dry run")
+    assert has_element?(view, "#start-checks li.is-bad")
+    view |> element("#cancel-start") |> render_click()
+
+    # Work zero 30 mm down: room to lift 10
+    :ok = Machine.set_work_offset(m, z: -30.0)
+    assert eventually(fn -> elem(Machine.status(m).wco, 2) == -30.0 end)
+    view |> element("#bar-resume") |> render_click()
+    assert has_element?(view, "#dry-off[aria-pressed=true]")
+    view |> element("#dry-10") |> render_click()
+    view |> element("#confirm-start") |> render_click()
+
+    assert eventually(fn -> has_element?(view, "#machine-state", "Dry run") end)
+    assert has_element?(view, "#job-mode", "Z lifted 10 mm")
+    assert eventually(fn -> Machine.status(m).state == :idle end, 10_000)
+    assert eventually(fn -> has_element?(view, "#note-job", "Dry run of square.nc") end)
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")
