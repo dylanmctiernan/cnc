@@ -8,7 +8,10 @@
 //   mix e2e.layout   (runs this against the dev server)
 //
 // Needs the dev server running with a controller connected (a sim is fine):
-//   BASE_URL (default http://localhost:4000).
+//   BASE_URL (default http://localhost:4000). It drives the page (opens a
+//   file, runs a check): point it at a sandbox server, not the one in use,
+//   e.g. PORT=4100 CNC_DATA_DIR=/tmp/cnc-sandbox mix phx.server. It refuses
+//   to start while a job runs.
 import {chromium} from "playwright"
 import {fileURLToPath} from "node:url"
 import path from "node:path"
@@ -67,11 +70,12 @@ for (const [w, h] of SIZES) {
   await page.waitForSelector(".phx-connected")
   await page.waitForTimeout(800)
 
-  // A known starting point: no job running, unlocked, not held, 2D, Stick
-  if (await page.locator("#abort-job").count()) {
-    await click(page, "#abort-job")
-    await click(page, "#confirm-abort")
-    await page.waitForTimeout(1500)
+  // Never on a machine that's cutting: this drives the page (opens files,
+  // runs a check), and every browser drives the same machine. Use a
+  // sandbox server (PORT=4100 CNC_DATA_DIR=... mix phx.server; BASE_URL).
+  if (await page.locator("#job-panel, #bar-reset:has-text('Abort')").count()) {
+    console.error(`A job is running on ${BASE}: not touching it. Run against a sandbox (BASE_URL).`)
+    process.exit(2)
   }
   if (await page.locator(".cnc-lock button", {hasText: "Unlock"}).count())
     await page.locator(".cnc-lock button", {hasText: "Unlock"}).click()

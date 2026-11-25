@@ -22,6 +22,13 @@ end
 
 config :cnc, CNCWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# CNC_DATA_DIR: a separate data folder (settings, stock, history, the FluidNC
+# sim's flash), e.g. a second dev server on another PORT as a sandbox that
+# doesn't touch the one in use.
+if dir = System.get_env("CNC_DATA_DIR") do
+  config :cnc, :data_dir, Path.expand(dir)
+end
+
 # CNC_LAN=1 serves the UI to other devices on the local network (dev only).
 # There's no login: anyone on the network can drive the machine. Only local
 # names and addresses are served (CNCWeb.AllowedHost) and only the app's own

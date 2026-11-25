@@ -8,7 +8,18 @@ defmodule CNCWeb.MachineLive do
   use CNCWeb, :live_view
 
   alias CNC.{Machine, Program}
-  import CNCWeb.Run, only: [fit: 2, fit: 3, fit_issue: 1, progress: 3, duration: 1]
+
+  import CNCWeb.Run,
+    only: [
+      fit: 2,
+      fit: 3,
+      fit_issue: 1,
+      progress: 3,
+      duration: 1,
+      stock_issue: 2,
+      stock_label: 1,
+      zero_label: 1
+    ]
 
   alias CNC.Machine.State
 
@@ -34,6 +45,7 @@ defmodule CNCWeb.MachineLive do
       Program.subscribe(cnc.program_topic)
       CNC.Controllers.subscribe(cnc.controllers_topic)
       CNCApp.Settings.subscribe(cnc.db)
+      CNCApp.Stock.subscribe(cnc.db)
     end
 
     machine = Machine.status(cnc.machine)
@@ -53,6 +65,7 @@ defmodule CNCWeb.MachineLive do
      |> stream(:mdi, [])
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
+     |> assign(stock: CNCApp.Stock.get(cnc.db), stock_edit: nil)
      |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
      |> assign(dry_lift: nil, single_block?: false)
      |> assign(settings: CNCApp.Settings.all(cnc.db))
@@ -127,6 +140,9 @@ defmodule CNCWeb.MachineLive do
 
   def handle_info({:app_settings, settings}, socket),
     do: {:noreply, assign(socket, settings: settings)}
+
+  def handle_info({:stock, stock}, socket),
+    do: {:noreply, socket |> assign(stock: stock) |> push_stock()}
 
   # Controller traffic: the full log for Diagnostics, the conversation (no
   # status polls) for MDI
@@ -358,7 +374,68 @@ defmodule CNCWeb.MachineLive do
 
   # A view that just appeared asks for what there is now.
   def handle_event("viewport_ready", _, socket),
-    do: {:noreply, socket |> push_program() |> push_pos(socket.assigns.machine)}
+    do: {:noreply, socket |> push_program() |> push_stock() |> push_pos(socket.assigns.machine)}
+
+  # The stock: set its size and where the work zero is on it
+  def handle_event("open_stock", _, socket) do
+    edit =
+      case socket.assigns.stock do
+        nil ->
+          %{width: "", depth: "", thickness: "", zero: :front_left, error: nil}
+
+        s ->
+          %{width: fmt_mm(s.width), depth: fmt_mm(s.depth), thickness: fmt_mm(s.thickness)}
+          |> Map.merge(%{zero: s.zero, error: nil})
+      end
+
+    {:noreply, assign(socket, stock_edit: edit)}
+  end
+
+  def handle_event("cancel_stock", _, socket), do: {:noreply, assign(socket, stock_edit: nil)}
+
+  def handle_event("stock_preview", params, socket) do
+    {:noreply,
+     update(socket, :stock_edit, fn e ->
+       %{
+         e
+         | width: params["width"] || e.width,
+           depth: params["depth"] || e.depth,
+           thickness: params["thickness"] || e.thickness,
+           error: nil
+       }
+     end)}
+  end
+
+  def handle_event("stock_zero", %{"zero" => zero}, socket) when zero in ~w(front_left center),
+    do: {:noreply, update(socket, :stock_edit, &%{&1 | zero: String.to_existing_atom(zero)})}
+
+  def handle_event("save_stock", params, socket) do
+    e = socket.assigns.stock_edit
+
+    with {:ok, w} <- parse_mm(params["width"] || e.width),
+         {:ok, d} <- parse_mm(params["depth"] || e.depth),
+         {:ok, t} <- parse_mm(params["thickness"] || e.thickness),
+         {:ok, _} <-
+           CNCApp.Stock.put(socket.assigns.cnc.db, %{
+             width: w,
+             depth: d,
+             thickness: t,
+             zero: e.zero
+           }) do
+      {:noreply, assign(socket, stock_edit: nil)}
+    else
+      _ ->
+        {:noreply,
+         update(socket, :stock_edit, fn e ->
+           %{e | error: "Width, depth and thickness: each a size in mm, like 300 or 18.5."}
+         end)}
+    end
+  end
+
+  def handle_event("clear_stock", _, socket) do
+    :ok = CNCApp.Stock.clear(socket.assigns.cnc.db)
+    {:noreply, assign(socket, stock_edit: nil)}
+  end
 
   def handle_event("zoom", %{"zoom" => zoom}, socket) when zoom in ~w(bed file) do
     zoom = String.to_existing_atom(zoom)
@@ -998,6 +1075,7 @@ defmodule CNCWeb.MachineLive do
                     machine={@machine}
                     uploads={@uploads}
                     file_error={@file_error}
+                    stock={@stock}
                   />
                 <% else %>
                   <.mdi_panel
@@ -1050,6 +1128,79 @@ defmodule CNCWeb.MachineLive do
               Clear trail
             </button>
           </aside>
+        </div>
+
+        <div
+          :if={@stock_edit}
+          id="stock-dialog"
+          class="cnc-file-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="stock-title"
+          phx-window-keydown="cancel_stock"
+          phx-key="Escape"
+        >
+          <form
+            id="stock-form"
+            class="cnc-review-box cnc-work-box"
+            phx-change="stock_preview"
+            phx-submit="save_stock"
+            phx-click-away="cancel_stock"
+          >
+            <h2 id="stock-title" class="cnc-page-title">The stock</h2>
+            <p class="cnc-sub">
+              The piece on the machine. Before Start, the file is checked against it.
+            </p>
+            <div
+              :for={
+                {field, label} <- [width: "Width (X)", depth: "Depth (Y)", thickness: "Thickness"]
+              }
+              class="cnc-work-field"
+            >
+              <label for={"stock-#{field}"}>{label}</label>
+              <input
+                id={"stock-#{field}"}
+                name={field}
+                value={Map.fetch!(@stock_edit, field)}
+                inputmode="decimal"
+                autocomplete="off"
+                phx-mounted={field == :width && JS.focus()}
+              />
+              <span class="cnc-unit">mm</span>
+            </div>
+            <p class="cnc-sub">Work zero on the stock</p>
+            <div class="cnc-seg" role="group" aria-label="Work zero on the stock">
+              <button
+                :for={zero <- CNCApp.Stock.zeros()}
+                type="button"
+                id={"stock-zero-#{zero}"}
+                class="cnc-btn"
+                aria-pressed={to_string(@stock_edit.zero == zero)}
+                phx-click="stock_zero"
+                phx-value-zero={zero}
+              >
+                {String.capitalize(zero_label(zero))}
+              </button>
+            </div>
+            <p :if={@stock_edit.error} class="cnc-set-error">{@stock_edit.error}</p>
+            <div class="cnc-row cnc-dialog-actions">
+              <button
+                :if={@stock}
+                type="button"
+                id="stock-clear"
+                class="cnc-btn cnc-btn--quiet"
+                phx-click="clear_stock"
+              >
+                No stock
+              </button>
+              <button type="button" class="cnc-btn" id="stock-cancel" phx-click="cancel_stock">
+                Cancel
+              </button>
+              <button type="submit" class="cnc-btn cnc-btn--primary" id="stock-save">
+                Save
+              </button>
+            </div>
+          </form>
         </div>
 
         <div
@@ -1217,6 +1368,7 @@ defmodule CNCWeb.MachineLive do
           program={@program}
           machine={@machine}
           fit={fit(@program, @machine, @dry_lift || 0)}
+          stock={@stock}
         />
         <div class="cnc-job-ov" id="start-rapids">
           <span class="cnc-h">Rapids</span>
@@ -1407,6 +1559,7 @@ defmodule CNCWeb.MachineLive do
   attr :machine, State, required: true
   attr :uploads, :any, required: true
   attr :file_error, :any, required: true
+  attr :stock, :any, required: true
 
   # Program mode: the job while one runs; else the loaded file and Start;
   # else an invitation to load one.
@@ -1418,21 +1571,29 @@ defmodule CNCWeb.MachineLive do
           <.job_panel job={@machine.job} program={@program} machine={@machine} />
         <% @program -> %>
           <section class="cnc-file-side" aria-label="Loaded file">
-            <.program_summary program={@program} fit={fit(@program, @machine)} />
-            <div class="cnc-row">
-              <UI.button
-                variant="primary"
-                id="program-start"
-                phx-click="cycle_start"
-                disabled={cycle(@machine, @program) != :start}
-              >
-                <.icon name="hero-play" class="ui-btn-icon" /> Start…
-              </UI.button>
-              <UI.button variant="quiet" id="open-file" phx-click="open_file">Open another</UI.button>
-              <UI.button variant="quiet" id="program-clear" phx-click="clear_program">
-                Clear
-              </UI.button>
-            </div>
+            <.program_summary program={@program} fit={fit(@program, @machine)} stock={@stock}>
+              <%!-- Start right under the facts: the notes below can't push it
+                   out of the panel --%>
+              <div class="cnc-row">
+                <UI.button
+                  variant="primary"
+                  id="program-start"
+                  phx-click="cycle_start"
+                  disabled={cycle(@machine, @program) != :start}
+                >
+                  <.icon name="hero-play" class="ui-btn-icon" /> Start…
+                </UI.button>
+                <UI.button variant="quiet" id="open-file" phx-click="open_file">
+                  Open another
+                </UI.button>
+                <UI.button variant="quiet" id="program-clear" phx-click="clear_program">
+                  Clear
+                </UI.button>
+              </div>
+              <:below>
+                <.stock_row stock={@stock} disabled={@machine.job != nil} />
+              </:below>
+            </.program_summary>
           </section>
         <% true -> %>
           <div class="cnc-program-empty" id="program-empty">
@@ -1441,6 +1602,7 @@ defmodule CNCWeb.MachineLive do
             <UI.button id="open-file" phx-click="open_file">Open file</UI.button>
             <p class="cnc-sub">or drop a G-code file on the map</p>
           </div>
+          <.stock_row stock={@stock} disabled={false} />
       <% end %>
       <.upload_status uploads={@uploads} file_error={@file_error} />
     </div>
@@ -1470,10 +1632,16 @@ defmodule CNCWeb.MachineLive do
   attr :program, Program, required: true
   attr :machine, State, required: true
   attr :fit, :any, required: true
+  attr :stock, :any, required: true
 
-  # Before anything moves: where it starts, whether it fits, which bit, and
-  # what only the operator can check.
+  # Before anything moves: where it starts, whether it fits, the stock,
+  # which bit, and what only the operator can check.
   defp start_checks(assigns) do
+    assigns =
+      assign(assigns,
+        stock_issues: CNCApp.Stock.issues(assigns.program.gcode.cut_bounds, assigns.stock)
+      )
+
     ~H"""
     <ul class="cnc-checks" id="start-checks">
       <li class={["cnc-check-item", @fit == [] && "is-ok", @fit != [] && "is-bad"]}>
@@ -1494,6 +1662,7 @@ defmodule CNCWeb.MachineLive do
           <% end %>
         </span>
       </li>
+      <.stock_check stock={@stock} issues={@stock_issues} />
       <li class="cnc-check-item">
         <.icon name="hero-wrench" class="cnc-check-icon" />
         <span>
@@ -1872,10 +2041,65 @@ defmodule CNCWeb.MachineLive do
     """
   end
 
+  attr :stock, :any, required: true
+  attr :disabled, :boolean, required: true
+
+  # The stock on the machine: its size and where the zero is on it, or an
+  # invitation to say (nothing is checked against it until then)
+  defp stock_row(assigns) do
+    ~H"""
+    <div class="cnc-stock" id="stock-row">
+      <span class="cnc-sub">Stock</span>
+      <span :if={@stock} class="cnc-stock-label" id="stock-label">{stock_label(@stock)}</span>
+      <span :if={!@stock} class="cnc-stock-label cnc-sub">
+        not set: cuts aren't checked against it
+      </span>
+      <UI.button variant="quiet" id="stock-edit" phx-click="open_stock" disabled={@disabled}>
+        {if @stock, do: "Change…", else: "Set…"}
+      </UI.button>
+    </div>
+    """
+  end
+
+  attr :stock, :any, required: true
+  attr :issues, :list, required: true
+
+  defp stock_check(assigns) do
+    ~H"""
+    <li
+      :if={@stock == nil}
+      class="cnc-check-item"
+      id="stock-check"
+    >
+      <.icon name="hero-square-3-stack-3d" class="cnc-check-icon" />
+      <span>No stock set: what it cuts isn't checked against the piece.</span>
+    </li>
+    <li :if={@stock && @issues == []} class="cnc-check-item is-ok" id="stock-check">
+      <.icon name="hero-check-circle" class="cnc-check-icon" />
+      <span>Stays on the stock ({stock_label(@stock)}).</span>
+    </li>
+    <li :if={@stock && @issues != []} class="cnc-check-item is-warn" id="stock-check">
+      <.icon name="hero-exclamation-triangle" class="cnc-check-icon" />
+      <span>
+        {Enum.map_join(@issues, " ", &stock_issue(&1, @stock))} Check that's intended (an outside
+        profile, a cut-out).
+      </span>
+    </li>
+    """
+  end
+
   attr :program, Program, required: true
   attr :fit, :any, required: true
+  attr :stock, :any, default: nil
+  slot :inner_block, doc: "the file's actions, right under its facts"
+  slot :below, doc: "under the actions, before the notes"
 
   defp program_summary(assigns) do
+    assigns =
+      assign(assigns,
+        stock_issues: CNCApp.Stock.issues(assigns.program.gcode.cut_bounds, assigns.stock)
+      )
+
     ~H"""
     <div class="cnc-file-summary">
       <p class="cnc-file-name">{@program.name}</p>
@@ -1893,6 +2117,8 @@ defmodule CNCWeb.MachineLive do
           {Enum.map_join(@program.gcode.tools, ", ", &"T#{&1}")}: bit changes aren't handled yet
         </dd>
       </dl>
+      {render_slot(@inner_block)}
+      {render_slot(@below)}
       <p :if={@fit == :no_work_zero} class="cnc-note">
         The controller hasn't reported a work zero yet, so the fit can't be checked.
       </p>
@@ -1901,6 +2127,12 @@ defmodule CNCWeb.MachineLive do
         <p>From the current work zero it won't fit:</p>
         <ul class="cnc-fit-issues">
           <li :for={issue <- @fit}>{fit_issue(issue)}</li>
+        </ul>
+      </div>
+      <div :if={@stock_issues != []} class="cnc-note cnc-note--warn" id="stock-issues">
+        <p>On this stock:</p>
+        <ul class="cnc-fit-issues">
+          <li :for={issue <- @stock_issues}>{stock_issue(issue, @stock)}</li>
         </ul>
       </div>
       <ul :if={@program.gcode.warnings != []} class="cnc-file-warnings">
@@ -2083,6 +2315,28 @@ defmodule CNCWeb.MachineLive do
   # than @path_merge_mm to the last one kept (same kind) are merged: the bed
   # is drawn at around a millimetre a pixel.
   @path_merge_mm 0.25
+
+  # The stock to the views, as a box in work coordinates (nil: none)
+  defp push_stock(socket) do
+    box =
+      case socket.assigns.stock do
+        nil ->
+          nil
+
+        stock ->
+          {{x0, x1}, {y0, y1}, {z0, z1}} = CNCApp.Stock.box(stock)
+          %{x0: x0, x1: x1, y0: y0, y1: y1, z0: z0, z1: z1}
+      end
+
+    push_event(socket, "stock", %{box: box})
+  end
+
+  defp fmt_mm(v),
+    do:
+      v
+      |> Float.round(2)
+      |> :erlang.float_to_binary(decimals: 2)
+      |> String.replace(~r/\.?0+$/, "")
 
   defp push_program(socket) do
     case socket.assigns.program do

@@ -185,6 +185,47 @@ defmodule CNCWeb.MachineJobLiveTest do
     :ok = Machine.abort(m)
   end
 
+  test "the stock: set it; the file is checked against it before Start", %{
+    conn: conn,
+    program: program
+  } do
+    # The square is 40 x 40, 1 deep
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    view |> element("#panel-auto") |> render_click()
+    assert has_element?(view, "#stock-row", "not set")
+
+    view |> element("#stock-edit") |> render_click()
+    assert has_element?(view, "#stock-dialog #stock-zero-front_left[aria-pressed=true]")
+    view |> form("#stock-form", %{width: "abc", depth: "30", thickness: "0,5"}) |> render_submit()
+    assert has_element?(view, "#stock-dialog .cnc-set-error")
+
+    view |> form("#stock-form", %{width: "30", depth: "30", thickness: "0,5"}) |> render_submit()
+    refute has_element?(view, "#stock-dialog")
+    assert eventually(fn -> has_element?(view, "#stock-label", "30 × 30 × 0.5 mm") end)
+    assert has_element?(view, "#stock-issues", "10 mm past the stock's right edge")
+    assert has_element?(view, "#stock-issues", "0.5 mm deeper than the stock is thick")
+
+    # In the pre-start checks: a warning, Start still allowed
+    view |> element("#program-start") |> render_click()
+    assert has_element?(view, "#start-checks #stock-check.is-warn")
+    refute has_element?(view, "#confirm-start[disabled]")
+    view |> element("#cancel-start") |> render_click()
+
+    # Big enough: on the stock
+    view |> element("#stock-edit") |> render_click()
+    view |> form("#stock-form", %{width: "300", depth: "200", thickness: "18"}) |> render_submit()
+    assert eventually(fn -> !has_element?(view, "#stock-issues") end)
+    view |> element("#program-start") |> render_click()
+    assert has_element?(view, "#start-checks #stock-check.is-ok", "Stays on the stock")
+    view |> element("#cancel-start") |> render_click()
+
+    # No stock: nothing checked
+    view |> element("#stock-edit") |> render_click()
+    view |> element("#stock-clear") |> render_click()
+    assert eventually(fn -> has_element?(view, "#stock-row", "not set") end)
+  end
+
   test "a file that won't fit can't be started", %{conn: conn, program: program} do
     {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
     {:ok, view, _} = live(conn, ~p"/")

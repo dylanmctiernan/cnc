@@ -244,6 +244,24 @@ defmodule CNCWeb.Run do
   defp line_fraction(%{total: total}, _machine) when total == 0, do: 0.0
   defp line_fraction(job, machine), do: min(max(job.acked - waiting(machine), 0) / job.total, 1.0)
 
+  @doc "A stock issue (`CNCApp.Stock.issues/2`) in words."
+  def stock_issue({:edge, edge, out}, _stock),
+    do: "Cuts #{mm(out)} mm past the stock's #{edge} edge."
+
+  def stock_issue({:through, out}, stock),
+    do:
+      "Cuts #{mm(out)} mm deeper than the stock is thick (#{mm(stock.thickness)} mm): " <>
+        "into what's under it."
+
+  @doc "The stock in a few words: `300 × 200 × 18 mm, zero front-left`."
+  def stock_label(%{width: w, depth: d, thickness: t, zero: zero}),
+    do:
+      "#{mm(w)} × #{mm(d)} × #{mm(t)} mm, zero #{if zero == :center, do: "centred", else: "front-left"}"
+
+  @doc "Where the work zero is on the stock, in words."
+  def zero_label(:front_left), do: "on top, front-left corner"
+  def zero_label(:center), do: "on top, centre"
+
   @doc "Seconds as a clock reads: 4:05, 1:02:03."
   def duration(seconds) when is_integer(seconds) and seconds >= 3600,
     do: "#{div(seconds, 3600)}:#{pad(div(rem(seconds, 3600), 60))}:#{pad(rem(seconds, 60))}"

@@ -80,6 +80,7 @@ defmodule CNCWeb.PendantModesLiveTest do
     # The cycle button opens the same check as Start…
     view |> element("#pendant-action") |> render_click()
     assert has_element?(view, "#pendant-start-dialog li.is-ok")
+    assert has_element?(view, "#pendant-stock-check", "No stock set")
     view |> element("#pendant-cancel-start") |> render_click()
     refute has_element?(view, "#pendant-start-dialog")
     assert Machine.status(m).state == :idle

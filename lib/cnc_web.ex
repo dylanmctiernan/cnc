@@ -16,7 +16,7 @@ defmodule CNCWeb do
   below. Instead, define additional modules and import
   those modules here.
   """
-  use Boundary, deps: [CNC, CNCApp.Settings], exports: [Endpoint, Telemetry]
+  use Boundary, deps: [CNC, CNCApp.Settings, CNCApp.Stock], exports: [Endpoint, Telemetry]
 
   def static_paths,
     do:

@@ -109,6 +109,11 @@ export default {
       this.paintDone()
       this.reframe()
     })
+    // The stock: a box in work coordinates (its top at Z 0), or null
+    this.handleEvent("stock", ({box}) => {
+      this.buildStock(box)
+      this.render()
+    })
     this.handleEvent("travel", ({travel}) => {
       this.travel = travel
       this.buildMachine()
@@ -301,6 +306,33 @@ export default {
   },
 
   // The bed (at the bottom of Z travel), its grid, and the travel envelope.
+  // The stock as a translucent block in the work group: it moves with the
+  // work zero, the path drawn through it
+  buildStock(box) {
+    if (this.stockMesh) {
+      this.work.remove(this.stockMesh)
+      this.stockMesh.geometry.dispose()
+      this.stockMesh = null
+    }
+    if (!box) return
+    const w = box.x1 - box.x0, d = box.y1 - box.y0, h = box.z1 - box.z0
+    const color = new THREE.Color(token("--stock-edge", "#c4a06e"))
+    const geometry = new THREE.BoxGeometry(w, d, h)
+    const block = new THREE.Mesh(
+      geometry,
+      new THREE.MeshLambertMaterial({color, transparent: true, opacity: 0.12, depthWrite: false}),
+    )
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({color, transparent: true, opacity: 0.6}),
+    )
+    this.stockMesh = new THREE.Group()
+    this.stockMesh.geometry = geometry
+    this.stockMesh.add(block, edges)
+    this.stockMesh.position.set(box.x0 + w / 2, box.y0 + d / 2, box.z0 + h / 2)
+    this.work.add(this.stockMesh)
+  },
+
   buildMachine() {
     this.machine.clear()
     const [[x0, x1], [y0, y1], [z0, z1]] = this.travel

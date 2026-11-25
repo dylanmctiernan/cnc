@@ -19,7 +19,8 @@ defmodule CNCWeb.PendantLive do
   """
   use CNCWeb, :live_view
 
-  import CNCWeb.Run, only: [fit: 2, fit_issue: 1, progress: 3, duration: 1]
+  import CNCWeb.Run,
+    only: [fit: 2, fit_issue: 1, progress: 3, duration: 1, stock_issue: 2, stock_label: 1]
 
   alias CNC.{Machine, Program}
 
@@ -29,13 +30,18 @@ defmodule CNCWeb.PendantLive do
   @impl true
   def mount(_params, session, socket) do
     cnc = CNCWeb.Instance.from_session(session)
-    if connected?(socket), do: Program.subscribe(cnc.program_topic)
+
+    if connected?(socket) do
+      Program.subscribe(cnc.program_topic)
+      CNCApp.Stock.subscribe(cnc.db)
+    end
+
     program = Program.current(cnc.program)
 
     {:ok,
      socket
      |> assign(page_title: "Pendant", cnc: cnc, tier: :normal, tiers: CNCWeb.Jog.tiers())
-     |> assign(program: program, modes: @modes, steps: @steps)
+     |> assign(program: program, modes: @modes, steps: @steps, stock: CNCApp.Stock.get(cnc.db))
      # A job running when the pendant opens: show it
      |> assign(mode: if(socket.assigns.shell_machine.job, do: :job, else: :jog))
      |> assign(seen_job: (job = socket.assigns.shell_machine.job) && job.started_at)
@@ -61,6 +67,7 @@ defmodule CNCWeb.PendantLive do
   end
 
   def handle_info({:program, program}, socket), do: {:noreply, assign(socket, program: program)}
+  def handle_info({:stock, stock}, socket), do: {:noreply, assign(socket, stock: stock)}
 
   @impl true
   def handle_event("mode", %{"mode" => mode}, socket) when mode in ~w(jog inc zero job),
@@ -289,6 +296,10 @@ defmodule CNCWeb.PendantLive do
             />
             <span>{fit_text(fit(@program, @shell_machine))}</span>
           </li>
+          <.stock_check
+            stock={@stock}
+            issues={CNCApp.Stock.issues(@program.gcode.cut_bounds, @stock)}
+          />
           <li class="cnc-check-item">
             <.icon name="hero-hand-raised" class="cnc-check-icon" />
             <span>Stock clamped, spindle on and up to speed, hands and cables clear.</span>
@@ -621,6 +632,26 @@ defmodule CNCWeb.PendantLive do
         </div>
       <% end %>
     </section>
+    """
+  end
+
+  attr :stock, :any, required: true
+  attr :issues, :list, required: true
+
+  defp stock_check(assigns) do
+    ~H"""
+    <li :if={@stock == nil} class="cnc-check-item" id="pendant-stock-check">
+      <.icon name="hero-square-3-stack-3d" class="cnc-check-icon" />
+      <span>No stock set: what it cuts isn't checked against the piece.</span>
+    </li>
+    <li :if={@stock && @issues == []} class="cnc-check-item is-ok" id="pendant-stock-check">
+      <.icon name="hero-check-circle" class="cnc-check-icon" />
+      <span>Stays on the stock ({stock_label(@stock)}).</span>
+    </li>
+    <li :if={@stock && @issues != []} class="cnc-check-item is-warn" id="pendant-stock-check">
+      <.icon name="hero-exclamation-triangle" class="cnc-check-icon" />
+      <span>{Enum.map_join(@issues, " ", &stock_issue(&1, @stock))}</span>
+    </li>
     """
   end
 

@@ -206,6 +206,9 @@
   /* The trace of what a running job has cut, over the ghosted plan (a
      plain hex: read by the canvas and three.js) */
   --path-done: #6cc58a;
+  /* The stock: a muted wood tone, material not a signal */
+  --stock-edge: #b79a72;
+  --stock-fill: rgba(183, 154, 114, 0.10);
   --bed: var(--ref-gray-750);
   --grid: #343a3f;
   --grid-major: #424a51;
@@ -4114,4 +4117,31 @@ body {
   margin: var(--space-1) 0 calc(-1 * var(--space-2));
   color: var(--text-muted);
   font-size: var(--text-sm);
+}
+
+/* The stock: one line under the file's summary (or the empty state) */
+.cnc-stock {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  min-width: 0;
+}
+.cnc-stock-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+}
+/* A check that needs a look, not a stop */
+.cnc-check-item.is-warn .cnc-check-icon {
+  color: var(--warn);
+}
+#stock-dialog .cnc-seg {
+  margin-bottom: 0.5rem;
+}
+/* The Auto panel scrolls inside its fixed height if a file has many notes
+   (Start sits above them, so it's always in view) */
+.cnc-mode-body > .cnc-program {
+  overflow-y: auto;
+  min-height: 0;
 }

@@ -80,6 +80,10 @@ export default {
     this.doneCache = document.createElement("canvas")
     this.doneKey = null
     this.doneDrawn = 0
+    // The stock: a box in work coordinates (its top at Z 0), or null
+    this.handleEvent("stock", ({box}) => {
+      this.stock = box
+    })
     this.handleEvent("program", ({path}) => {
       this.program = path ? decodePath(path) : null
       this.pathKey = null
@@ -239,6 +243,7 @@ export default {
     ctx.rect(v.meters, 0, v.mapRight - v.meters, v.height)
     ctx.clip()
     this.drawBed()
+    this.drawStock()
     this.drawProgram()
     this.drawWorkOrigin()
     this.drawTrail()
@@ -456,6 +461,22 @@ export default {
   },
 
   // Work origin (G54): small axes and a label, in neutral text colour.
+  // The stock where it sits: a soft fill and its outline, under the path
+  drawStock() {
+    if (!this.stock || !this.wco) return
+    const [ox, oy] = this.wco
+    const {ctx} = this
+    const [ax, ay] = this.px(this.stock.x0 + ox, this.stock.y0 + oy)
+    const [bx, by] = this.px(this.stock.x1 + ox, this.stock.y1 + oy)
+    ctx.save()
+    ctx.fillStyle = css("--stock-fill") || "rgba(196, 160, 110, 0.10)"
+    ctx.strokeStyle = css("--stock-edge") || "rgba(196, 160, 110, 0.55)"
+    ctx.lineWidth = 1
+    ctx.fillRect(ax, by, bx - ax, ay - by)
+    ctx.strokeRect(ax + 0.5, by + 0.5, bx - ax, ay - by)
+    ctx.restore()
+  },
+
   drawWorkOrigin() {
     if (!this.wco) return
     const [wx, wy] = this.wco
