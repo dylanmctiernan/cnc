@@ -1,3 +1,4 @@
+import {Progress} from "./progress"
 // Top-down bed view plus a Z gauge. Draws only positions the server reports
 // ("pos" events), interpolating between samples so the marker moves
 // smoothly at frame rate. Colour means state only: yellow moving, red alarm.
@@ -72,9 +73,17 @@ export default {
     this.program = null
     this.pathCache = document.createElement("canvas")
     this.pathKey = null
+    // A running job: what's been cut is drawn faint over the path, into its
+    // own cache, a few new segments at a time
+    this.progress = new Progress()
+    this.doneCache = document.createElement("canvas")
+    this.doneKey = null
+    this.doneDrawn = 0
     this.handleEvent("program", ({path}) => {
       this.program = path ? decodePath(path) : null
       this.pathKey = null
+      this.progress.reset()
+      this.doneKey = null
       this.fit()
     })
     // "bed": the whole bed. "file": the loaded file's area, following the
@@ -108,7 +117,7 @@ export default {
     this.resize.disconnect()
   },
 
-  sample({x, y, z, state, jog, wco, speed}) {
+  sample({x, y, z, state, jog, wco, speed, job}) {
     const now = performance.now()
     // Glide from where the marker is drawn now to the new report, over
     // roughly the interval between reports.
@@ -124,6 +133,7 @@ export default {
     if (wcoChanged && this.view && this.view.zoomed) this.fit()
     if (speed) this.speed = speed
     this.pushTrail(x, y)
+    if (this.program) this.progress.update(this.program.data, !!job, {x, y, z}, wco)
   },
 
   pushTrail(x, y) {
@@ -250,6 +260,49 @@ export default {
       this.renderProgram(ctx, wco)
     }
     this.ctx.drawImage(this.pathCache, 0, 0, v.width, v.height)
+    this.drawDone(key, dpr, wco)
+  },
+
+  // Cut so far: each finished segment painted over in the bed's colour and
+  // redrawn faint, so what's left stands out. Only new segments are drawn;
+  // the cache is rebuilt when the view or the job starts over.
+  drawDone(key, dpr, [ox, oy]) {
+    const done = this.progress.done
+    if (done <= 0) return
+    const {view: v, colors: c} = this
+    const cache = this.doneCache
+    if (key !== this.doneKey || done < this.doneDrawn) {
+      this.doneKey = key
+      this.doneDrawn = 0
+      cache.width = Math.round(v.width * dpr)
+      cache.height = Math.round(v.height * dpr)
+    }
+    if (done > this.doneDrawn) {
+      const ctx = cache.getContext("2d")
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const d = this.program.data
+      const erase = new Path2D(), faint = new Path2D()
+      for (let i = Math.max(1, this.doneDrawn + 1); i <= done; i++) {
+        if (d[i * 4] < 0) continue
+        const [ax, ay] = this.px(d[(i - 1) * 4 + 1] + ox, d[(i - 1) * 4 + 2] + oy)
+        const [bx, by] = this.px(d[i * 4 + 1] + ox, d[i * 4 + 2] + oy)
+        for (const p of [erase, faint]) {
+          p.moveTo(ax, ay)
+          p.lineTo(bx, by)
+        }
+      }
+      ctx.lineCap = "round"
+      ctx.strokeStyle = c.bed
+      ctx.lineWidth = 3
+      ctx.stroke(erase)
+      ctx.strokeStyle = c.dim
+      ctx.globalAlpha = 0.45
+      ctx.lineWidth = 1
+      ctx.stroke(faint)
+      ctx.globalAlpha = 1
+      this.doneDrawn = done
+    }
+    this.ctx.drawImage(cache, 0, 0, v.width, v.height)
   },
 
   // Rapids dashed and quiet; cuts in the path colour, in depth bands that

@@ -3744,3 +3744,97 @@ body {
 .cnc-messages:has(> :nth-child(2)):not(:has(> :nth-child(3)))::after { content: "+1 more"; }
 .cnc-messages:has(> :nth-child(3)):not(:has(> :nth-child(4)))::after { content: "+2 more"; }
 .cnc-messages:has(> :nth-child(4))::after { content: "+3 or more"; }
+
+/* Running a job
+   ===================================================================== */
+
+/* Cycle start: Start and Resume take the same room (no shift) */
+.cnc-cycle {
+  min-width: 6.75rem;
+  justify-content: center;
+}
+
+/* Running: moving, informative (as jogging) */
+.cnc-state--running {
+  background: color-mix(in srgb, var(--move) 16%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--move) 60%, transparent);
+  color: var(--text);
+}
+.cnc-state--running .cnc-state-icon {
+  color: var(--move);
+}
+
+/* The job panel (in place of the file summary while running) */
+.cnc-job {
+  display: grid;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-faint);
+}
+.cnc-job-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.cnc-job-pct {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.cnc-job-bar {
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+.cnc-job-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--move);
+  transition: width 300ms linear;
+}
+.cnc-job-ov {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.cnc-job-ov .cnc-seg .cnc-btn {
+  min-width: 4rem;
+}
+.cnc-abort {
+  justify-self: start;
+}
+.cnc-abort:hover:not(:disabled) {
+  color: var(--danger-text);
+}
+
+/* The pre-start check */
+.cnc-checks {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+.cnc-check-item {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr;
+  gap: var(--space-2);
+  align-items: start;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.cnc-check-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  color: var(--text-muted);
+}
+.cnc-check-item.is-ok .cnc-check-icon {
+  color: var(--ok);
+}
+.cnc-check-item.is-bad .cnc-check-icon {
+  color: var(--danger-text);
+}

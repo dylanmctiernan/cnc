@@ -13,6 +13,7 @@
 // On mount it pushes "viewport_ready" so the page sends what it has now.
 import * as THREE from "three"
 import {OrbitControls} from "three/examples/jsm/controls/OrbitControls.js"
+import {Progress} from "./progress"
 
 const token = (name, fallback) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
@@ -53,6 +54,8 @@ export default {
       z: new THREE.Color(token("--z", "#4dabf7")),
       path: new THREE.Color(token("--path", "#c792ea")),
       rapid: new THREE.Color(token("--text-faint", "#5a636b")),
+      // Cut so far: recedes toward the background, as in 2D
+      done: new THREE.Color(token("--border", "#3d444b")).lerp(new THREE.Color(token("--surface-0", "#1c1f22")), 0.35),
       tool: new THREE.Color(token("--text", "#e4e7e9")),
     }
 
@@ -72,8 +75,11 @@ export default {
     this.resize()
     this.view("iso")
 
-    this.handleEvent("pos", ({x, y, z, wco}) => {
+    this.progress = new Progress()
+    this.handleEvent("pos", ({x, y, z, wco, job}) => {
       this.tool.position.set(x, y, z)
+      if (this.pathData && this.progress.update(this.pathData, !!job, {x, y, z}, wco || this.wco))
+        this.paintDone()
       if (wco && (wco[0] !== this.wco[0] || wco[1] !== this.wco[1] || wco[2] !== this.wco[2])) {
         this.setWork(wco)
         this.buildShadow()
@@ -83,6 +89,7 @@ export default {
     })
     this.handleEvent("program", ({path}) => {
       this.pathData = path ? decode(path) : null
+      this.progress.reset()
       this.buildPath()
       this.reframe()
     })
@@ -302,15 +309,36 @@ export default {
     this.scene.add(this.shadow)
   },
 
+  // Fade the segments a running job has finished (only the new ones)
+  paintDone() {
+    if (!this.pathSegs) return
+    const done = this.progress.done
+    if (done < 0) return
+    // A new job on the same file: start from fresh colours
+    if (this.painted > 0 && this.segEnd[this.painted - 1] > done) this.buildPath()
+    const colors = this.pathSegs.geometry.attributes.color
+    const faint = this.colors.done
+    let k = this.painted
+    while (k < this.segEnd.length && this.segEnd[k] <= done) {
+      colors.setXYZ(k * 2, faint.r, faint.g, faint.b)
+      colors.setXYZ(k * 2 + 1, faint.r, faint.g, faint.b)
+      k++
+    }
+    if (k !== this.painted) {
+      this.painted = k
+      colors.needsUpdate = true
+      this.render()
+    }
+  },
+
   buildPath() {
     if (this.pathLines) this.work.remove(...this.pathLines)
     this.pathLines = []
     this.pathBox = null
     if (!this.pathData) return
 
-    const cut = [], rapid = []
     const v = this.pathData
-    // The toolpath's extent (work coordinates), for the File view
+    // The toolpath's extent (work coordinates), for the framed views
     const box = {x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity, z0: Infinity, z1: -Infinity}
     for (let i = 0; i < v.length; i += 4) {
       box.x0 = Math.min(box.x0, v[i + 1]); box.x1 = Math.max(box.x1, v[i + 1])
@@ -318,13 +346,27 @@ export default {
       box.z0 = Math.min(box.z0, v[i + 3]); box.z1 = Math.max(box.z1, v[i + 3])
     }
     this.pathBox = v.length ? box : null
+
+    // One set of segments, cuts and rapids, coloured per vertex so a job's
+    // progress can fade what's done in place. segEnd[k] is the path vertex
+    // that segment k ends at.
+    const pos = [], col = [], segEnd = []
+    const cut = this.colors.path, rapid = this.colors.rapid
     for (let i = 4; i < v.length; i += 4) {
       const kind = v[i]
       if (kind < 0) continue
-      ;(kind === 1 ? cut : rapid).push(v[i - 3], v[i - 2], v[i - 1], v[i + 1], v[i + 2], v[i + 3])
+      pos.push(v[i - 3], v[i - 2], v[i - 1], v[i + 1], v[i + 2], v[i + 3])
+      const c = kind === 1 ? cut : rapid
+      col.push(c.r, c.g, c.b, c.r, c.g, c.b)
+      segEnd.push(i / 4)
     }
-    const rapidLines = lines(rapid, this.colors.rapid, 0.5)
-    this.pathLines = [lines(cut, this.colors.path), rapidLines]
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3))
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3))
+    this.pathSegs = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({vertexColors: true}))
+    this.segEnd = segEnd
+    this.painted = 0
+    this.pathLines = [this.pathSegs]
     this.work.add(...this.pathLines)
     if (!this.axes) this.setWork(this.wco)
     this.buildShadow()

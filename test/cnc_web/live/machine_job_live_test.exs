@@ -1,0 +1,107 @@
+defmodule CNCWeb.MachineJobLiveTest do
+  use CNCWeb.ConnCase, async: true
+
+  import Phoenix.LiveViewTest
+
+  alias CNC.Machine
+
+  # A small square at Z-1 (the fake sim's Z travel is -100..0)
+  @square "G21 G90\nG0 Z0\nG0 X0 Y0\nG1 Z-1 F600\nG1 X40 F3000\nG1 Y40\nG1 X0\nG1 Y0\nG0 Z0\n"
+
+  setup %{conn: conn} do
+    {conn, m, program} = with_instance(conn)
+    assert eventually(fn -> Machine.status(m).state == :alarm end)
+    :ok = Machine.unlock(m)
+    assert eventually(fn -> Machine.status(m).state == :idle and Machine.status(m).wco end)
+    %{conn: conn, m: m, program: program}
+  end
+
+  test "Start: nothing without a file; with one, a check first, then it runs", %{
+    conn: conn,
+    m: m,
+    program: program
+  } do
+    {:ok, view, _} = live(conn, ~p"/")
+    assert has_element?(view, "#bar-resume[disabled]", "Start")
+
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])", "Start") end)
+
+    view |> element("#bar-resume") |> render_click()
+    assert has_element?(view, "#start-dialog #start-checks li.is-ok")
+    view |> element("#cancel-start") |> render_click()
+    refute has_element?(view, "#start-dialog")
+    assert Machine.status(m).state == :idle
+
+    view |> element("#bar-resume") |> render_click()
+    view |> element("#confirm-start") |> render_click()
+    assert eventually(fn -> Machine.status(m).state == :running end)
+    assert eventually(fn -> has_element?(view, "#job-panel", "square.nc") end)
+    assert has_element?(view, "#open-file[disabled]")
+
+    # Hold: the reminder, and the same button resumes
+    view |> element("#bar-hold") |> render_click()
+    assert eventually(fn -> has_element?(view, "#note-held", "spindle keeps turning") end)
+    assert has_element?(view, "#bar-resume:not([disabled])", "Resume")
+    view |> element("#bar-resume") |> render_click()
+
+    assert eventually(fn -> Machine.status(m).state == :idle end, 10_000)
+    assert eventually(fn -> has_element?(view, "#note-job", "Finished square.nc") end)
+    refute has_element?(view, "#job-panel")
+  end
+
+  test "a file that won't fit can't be started", %{conn: conn, program: program} do
+    {:ok, _} = CNC.Program.load("big.nc", "G0 X0 Y0\nG1 X5000 F1000\n", server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+    view |> element("#bar-resume") |> render_click()
+    assert has_element?(view, "#start-checks li.is-bad", "Won't fit")
+    assert has_element?(view, "#confirm-start[disabled]")
+  end
+
+  test "Abort asks first; the machine comes back locked; the outcome says so", %{
+    conn: conn,
+    m: m,
+    program: program
+  } do
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+    view |> element("#bar-resume") |> render_click()
+    view |> element("#confirm-start") |> render_click()
+    assert eventually(fn -> has_element?(view, "#job-panel") end)
+
+    view |> element("#abort-job") |> render_click()
+    assert has_element?(view, "#abort-dialog")
+    view |> element("#cancel-abort") |> render_click()
+    assert Machine.status(m).state == :running
+
+    view |> element("#abort-job") |> render_click()
+    view |> element("#confirm-abort") |> render_click()
+    assert eventually(fn -> Machine.status(m).state == :alarm end)
+    assert eventually(fn -> has_element?(view, "#note-job", "Aborted square.nc") end)
+  end
+
+  test "feed override from the job panel", %{conn: conn, m: m, program: program} do
+    {:ok, _} = CNC.Program.load("square.nc", @square, server: program)
+    {:ok, view, _} = live(conn, ~p"/")
+    assert eventually(fn -> has_element?(view, "#bar-resume:not([disabled])") end)
+    view |> element("#bar-resume") |> render_click()
+    view |> element("#confirm-start") |> render_click()
+    assert eventually(fn -> has_element?(view, "#job-panel") end)
+
+    view |> element("#ov-plus") |> render_click()
+    assert eventually(fn -> has_element?(view, "#ov-reset", "110%") end)
+    view |> element("#ov-reset") |> render_click()
+    assert eventually(fn -> Machine.status(m).overrides == {100, 100, 100} end)
+    Machine.abort(m)
+  end
+
+  defp eventually(fun, timeout \\ 3000) do
+    cond do
+      fun.() -> true
+      timeout <= 0 -> false
+      true -> Process.sleep(20) && eventually(fun, timeout - 20)
+    end
+  end
+end

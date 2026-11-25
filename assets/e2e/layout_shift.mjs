@@ -67,10 +67,16 @@ for (const [w, h] of SIZES) {
   await page.waitForSelector(".phx-connected")
   await page.waitForTimeout(800)
 
-  // A known starting point: unlocked, not held, no file, 2D, Stick
+  // A known starting point: no job running, unlocked, not held, 2D, Stick
+  if (await page.locator("#abort-job").count()) {
+    await click(page, "#abort-job")
+    await click(page, "#confirm-abort")
+    await page.waitForTimeout(1500)
+  }
   if (await page.locator(".cnc-lock button", {hasText: "Unlock"}).count())
     await page.locator(".cnc-lock button", {hasText: "Unlock"}).click()
-  if (await page.locator("#bar-resume:not([disabled])").count()) await click(page, "#bar-resume")
+  if (await page.locator("#bar-resume:not([disabled])", {hasText: "Resume"}).count())
+    await click(page, "#bar-resume")
   await page.waitForTimeout(800)
 
   const M = MACHINE
@@ -93,6 +99,11 @@ for (const [w, h] of SIZES) {
   await step(page, where, "Resume", M, () => click(page, "#bar-resume"))
   await step(page, where, "Zero X/Y", M, () => click(page, ".cnc-dro-tools button:has-text('Zero X/Y')"))
   await step(page, where, "Undo the zero", M, () => click(page, "#undo-zero"))
+  // The Start check is a dialog: opening and closing it moves nothing
+  await step(page, where, "Start check, then Not yet", M, async () => {
+    await click(page, "#bar-resume")
+    await click(page, "#cancel-start")
+  })
 
   // Configuration: the tabs change what's below them, never the frame
   await page.goto(BASE + "/configuration")

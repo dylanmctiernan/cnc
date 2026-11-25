@@ -181,8 +181,8 @@ defmodule CNCWeb.UI do
   end
 
   # Busy because it's held (or the door is open): the controller's own word
-  defp held(%{state: :busy, controller: :hold}), do: "On hold"
-  defp held(%{state: :busy, controller: :door}), do: "Door open"
+  defp held(%{state: s, controller: :hold}) when s in [:busy, :running], do: "On hold"
+  defp held(%{state: s, controller: :door}) when s in [:busy, :running], do: "Door open"
   defp held(_), do: nil
 
   @doc "A machine state in words."
@@ -195,13 +195,14 @@ defmodule CNCWeb.UI do
       jogging: "Jogging",
       uploading: "Uploading",
       homing: "Homing",
-      busy: "Busy"
+      busy: "Busy",
+      running: "Running"
     }[state] || to_string(state)
   end
 
   defp state_tone(:idle), do: "neutral"
   defp state_tone(:alarm), do: "danger"
-  defp state_tone(s) when s in [:jogging, :homing, :busy], do: "move"
+  defp state_tone(s) when s in [:jogging, :homing, :busy, :running], do: "move"
   defp state_tone(s) when s in [:connecting, :uploading], do: "info"
   defp state_tone(_), do: "neutral"
 

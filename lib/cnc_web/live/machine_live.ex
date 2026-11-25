@@ -35,7 +35,7 @@ defmodule CNCWeb.MachineLive do
      |> assign(frame: :work, action_error: nil, control_mode: :joystick, step_axis: :x)
      |> assign(more?: false, dismissed: MapSet.new(), fades: %{})
      |> assign(file?: false, program: program, file_error: nil)
-     |> assign(work_edit: nil, undo_zero: nil)
+     |> assign(work_edit: nil, undo_zero: nil, start_check?: false, abort_check?: false)
      |> assign(zoom: if(program, do: :file, else: :bed), view_mode: :top)
      |> allow_upload(:gcode,
        accept: ~w(.nc .gcode .ngc .tap .cnc .txt),
@@ -63,6 +63,11 @@ defmodule CNCWeb.MachineLive do
     socket =
       if machine.last_error != socket.assigns.machine.last_error,
         do: socket |> forget_note(:error) |> fade_later(:error),
+        else: socket
+
+    socket =
+      if machine.last_job != socket.assigns.machine.last_job,
+        do: forget_note(socket, :job),
         else: socket
 
     {:noreply, socket |> assign(machine: machine) |> push_pos(machine)}
@@ -118,6 +123,47 @@ defmodule CNCWeb.MachineLive do
   def handle_event("unlock", _, socket), do: tap_noreply(socket, &Machine.unlock/1)
   def handle_event("home", _, socket), do: tap_noreply(socket, &Machine.home/1)
   def handle_event("resume", _, socket), do: tap_noreply(socket, &Machine.resume/1)
+
+  # Cycle start: Resume a hold, or (Ready, a file loaded) the pre-start check.
+  def handle_event("cycle_start", _, socket) do
+    case cycle(socket.assigns.machine, socket.assigns.program) do
+      :resume -> tap_noreply(socket, &Machine.resume/1)
+      :start -> {:noreply, assign(socket, start_check?: true)}
+      nil -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_start", _, socket), do: {:noreply, assign(socket, start_check?: false)}
+
+  def handle_event("confirm_start", _, socket) do
+    %Program{name: name, text: text} = socket.assigns.program
+
+    case Machine.run(srv(socket), name, text) do
+      :ok ->
+        {:noreply, assign(socket, start_check?: false)}
+
+      {:error, reason} ->
+        {:noreply, socket |> assign(start_check?: false) |> set_action_error(run_error(reason))}
+    end
+  end
+
+  def handle_event("abort_job", _, socket), do: {:noreply, assign(socket, abort_check?: true)}
+  def handle_event("cancel_abort", _, socket), do: {:noreply, assign(socket, abort_check?: false)}
+
+  def handle_event("confirm_abort", _, socket) do
+    Machine.abort(srv(socket))
+    {:noreply, assign(socket, abort_check?: false)}
+  end
+
+  def handle_event("feed_override", %{"op" => op}, socket)
+      when op in ~w(reset plus10 minus10) do
+    Machine.feed_override(srv(socket), String.to_existing_atom(op))
+    {:noreply, socket}
+  end
+
+  def handle_event("dismiss", %{"note" => "job"}, socket),
+    do: {:noreply, dismiss(socket, :job)}
+
   def handle_event("reset", _, socket), do: tap_noreply(socket, &Machine.reset/1)
 
   def handle_event("step", %{"x" => x, "y" => y} = params, socket) do
@@ -421,7 +467,7 @@ defmodule CNCWeb.MachineLive do
                Hold last and always in the same place. --%>
           <div class="cnc-actions">
             <div class="cnc-run-group" role="group" aria-label="Job">
-              <UI.button id="open-file" phx-click="open_file">
+              <UI.button id="open-file" phx-click="open_file" disabled={@machine.state == :running}>
                 <.icon name="hero-document-arrow-up" class="ui-btn-icon" /> Open file
               </UI.button>
               <UI.button
@@ -441,13 +487,21 @@ defmodule CNCWeb.MachineLive do
               >
                 Reset
               </UI.button>
+              <%!-- Cycle start, as on a machine's panel: Start the loaded file
+                   when Ready, Resume a hold. Same place and size either way. --%>
               <UI.button
                 id="bar-resume"
-                phx-click="resume"
-                disabled={not held?(@machine)}
-                title="Carry on after a Hold"
+                class="cnc-cycle"
+                phx-click="cycle_start"
+                disabled={cycle(@machine, @program) == nil}
+                title={
+                  if held?(@machine),
+                    do: "Carry on after a Hold",
+                    else: "Run the loaded file (checks first)"
+                }
               >
-                <.icon name="hero-play" class="ui-btn-icon" /> Resume
+                <.icon name="hero-play" class="ui-btn-icon" />
+                {if held?(@machine), do: "Resume", else: "Start"}
               </UI.button>
               <UI.hold_button id="bar-hold" />
             </div>
@@ -489,6 +543,24 @@ defmodule CNCWeb.MachineLive do
               </button>
             </div>
           </div>
+          <div
+            :if={held?(@machine) and @machine.state == :running}
+            class="cnc-note cnc-note--warn"
+            id="note-held"
+          >
+            <p>
+              On hold: motion paused, the position kept. The spindle keeps turning.
+              Resume to carry on, or Abort.
+            </p>
+          </div>
+          <.note
+            :if={@machine.last_job && not MapSet.member?(@dismissed, :job)}
+            id="note-job"
+            key="job"
+            warn={@machine.last_job.result != :done}
+          >
+            {job_outcome(@machine.last_job)}
+          </.note>
           <.note
             :if={note = not MapSet.member?(@dismissed, :error) && error_text(@machine.last_error)}
             id="note-error"
@@ -770,7 +842,8 @@ defmodule CNCWeb.MachineLive do
 
         <%!-- Workstation only: details and keyboard --%>
         <aside class="cnc-side" aria-label="Details and keyboard">
-          <section :if={@program} class="cnc-file-side" aria-label="Loaded file">
+          <.job_panel :if={@machine.job} job={@machine.job} program={@program} machine={@machine} />
+          <section :if={@program && !@machine.job} class="cnc-file-side" aria-label="Loaded file">
             <.program_summary program={@program} fit={fit(@program, @machine)} />
             <div class="cnc-row">
               <button type="button" class="cnc-btn cnc-btn--quiet" phx-click="open_file">
@@ -1027,9 +1100,222 @@ defmodule CNCWeb.MachineLive do
           </p>
         </section>
       </div>
+
+      <UI.dialog
+        :if={@start_check? and @program}
+        id="start-dialog"
+        title={"Start #{@program.name}?"}
+        on_cancel="cancel_start"
+      >
+        <.start_checks program={@program} machine={@machine} fit={fit(@program, @machine)} />
+        <:actions>
+          <UI.button
+            variant="primary"
+            id="confirm-start"
+            phx-click="confirm_start"
+            disabled={fit(@program, @machine) != []}
+          >
+            <.icon name="hero-play" class="ui-btn-icon" /> Start
+          </UI.button>
+          <UI.button id="cancel-start" phx-click="cancel_start">Not yet</UI.button>
+        </:actions>
+      </UI.dialog>
+
+      <UI.dialog
+        :if={@abort_check? and @machine.job}
+        id="abort-dialog"
+        title="Abort the job?"
+        on_cancel="cancel_abort"
+      >
+        <p class="ui-muted">
+          The machine stops at once (a soft reset) and comes back locked: unlock or
+          home to carry on. The work zero is kept. The job can't continue from here.
+        </p>
+        <:actions>
+          <UI.button variant="danger" id="confirm-abort" phx-click="confirm_abort">
+            Abort
+          </UI.button>
+          <UI.button id="cancel-abort" phx-click="cancel_abort">Keep running</UI.button>
+        </:actions>
+      </UI.dialog>
     </Layouts.app>
     """
   end
+
+  attr :program, Program, required: true
+  attr :machine, State, required: true
+  attr :fit, :any, required: true
+
+  # Before anything moves: where it starts, whether it fits, which bit, and
+  # what only the operator can check.
+  defp start_checks(assigns) do
+    ~H"""
+    <ul class="cnc-checks" id="start-checks">
+      <li class={["cnc-check-item", @fit == [] && "is-ok", @fit != [] && "is-bad"]}>
+        <.icon
+          name={if(@fit == [], do: "hero-check-circle", else: "hero-x-circle")}
+          class="cnc-check-icon"
+        />
+        <span>
+          <%= cond do %>
+            <% @fit == [] -> %>
+              Fits the travel from the work zero (X {fmt(elem(@machine.wco, 0))}, Y {fmt(
+                elem(@machine.wco, 1)
+              )}, Z {fmt(elem(@machine.wco, 2))} on the machine).
+            <% @fit == :no_work_zero -> %>
+              The controller hasn't reported a work zero yet.
+            <% true -> %>
+              Won't fit from this work zero: {Enum.map_join(@fit, "; ", &fit_issue/1)}
+          <% end %>
+        </span>
+      </li>
+      <li class="cnc-check-item">
+        <.icon name="hero-wrench" class="cnc-check-icon" />
+        <span>
+          {case Enum.reject(@program.gcode.tools, &is_nil/1) do
+            [] ->
+              "The file doesn't name a bit: check the one that's in."
+
+            tools ->
+              "Bit: " <> Enum.map_join(tools, ", ", &"T#{&1}") <> ". Tool changes aren't handled yet."
+          end}
+        </span>
+      </li>
+      <li class="cnc-check-item">
+        <.icon name="hero-hand-raised" class="cnc-check-icon" />
+        <span>Stock clamped, spindle on and up to speed, hands and cables clear.</span>
+      </li>
+    </ul>
+    """
+  end
+
+  attr :job, :map, required: true
+  attr :program, :any, required: true
+  attr :machine, State, required: true
+
+  # The running job: how far, how long, the feed override, Abort.
+  defp job_panel(assigns) do
+    fraction = if assigns.job.total > 0, do: assigns.job.acked / assigns.job.total, else: 0.0
+    elapsed = DateTime.diff(DateTime.utc_now(), assigns.job.started_at)
+    {feed_ov, _, _} = assigns.machine.overrides || {100, 100, 100}
+
+    assigns =
+      assign(assigns,
+        pct: round(fraction * 100),
+        elapsed: elapsed,
+        left: time_left(fraction, elapsed, assigns.program, feed_ov),
+        feed_ov: feed_ov
+      )
+
+    ~H"""
+    <section class="cnc-job" id="job-panel" aria-label="Job">
+      <div class="cnc-job-head">
+        <p class="cnc-file-name">{@job.name}</p>
+        <span class="cnc-job-pct num">{@pct}%</span>
+      </div>
+      <div
+        class="cnc-job-bar"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={@pct}
+        aria-label="Progress"
+      >
+        <span style={"width: #{@pct}%"}></span>
+      </div>
+      <dl class="cnc-facts">
+        <dt>line</dt>
+        <dd class="num">{@job.line} of {(@program && @program.gcode.lines) || @job.total}</dd>
+        <dt>elapsed</dt>
+        <dd class="num">{duration(@elapsed)}</dd>
+        <dt>left</dt>
+        <dd class="num">{if @left, do: "about #{duration(@left)}", else: "–"}</dd>
+      </dl>
+      <div class="cnc-job-ov">
+        <span class="cnc-h">Feed</span>
+        <div class="cnc-seg cnc-seg--small" role="group" aria-label="Feed override">
+          <button
+            type="button"
+            class="cnc-btn"
+            id="ov-minus"
+            phx-click="feed_override"
+            phx-value-op="minus10"
+          >
+            −10%
+          </button>
+          <button
+            type="button"
+            class="cnc-btn num"
+            id="ov-reset"
+            phx-click="feed_override"
+            phx-value-op="reset"
+            aria-pressed={to_string(@feed_ov == 100)}
+            title="Back to 100%"
+          >
+            {@feed_ov}%
+          </button>
+          <button
+            type="button"
+            class="cnc-btn"
+            id="ov-plus"
+            phx-click="feed_override"
+            phx-value-op="plus10"
+          >
+            +10%
+          </button>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="abort-job"
+        class="cnc-btn cnc-btn--quiet cnc-abort"
+        phx-click="abort_job"
+      >
+        Abort the job
+      </button>
+    </section>
+    """
+  end
+
+  # Early on, from the file's estimate (at the feed override); once a few
+  # percent are done, from the pace so far.
+  defp time_left(fraction, _elapsed, %Program{gcode: %{seconds: secs}}, ov) when fraction < 0.05,
+    do: round(secs * (1 - fraction) * 100 / max(ov, 10))
+
+  defp time_left(fraction, elapsed, _program, _ov) when fraction > 0 and fraction < 1,
+    do: round(elapsed / fraction - elapsed)
+
+  defp time_left(_, _, _, _), do: nil
+
+  defp duration(seconds) when is_integer(seconds) and seconds >= 3600,
+    do: "#{div(seconds, 3600)}:#{pad(div(rem(seconds, 3600), 60))}:#{pad(rem(seconds, 60))}"
+
+  defp duration(seconds) when is_integer(seconds),
+    do: "#{div(max(seconds, 0), 60)}:#{pad(rem(max(seconds, 0), 60))}"
+
+  defp pad(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
+
+  defp job_outcome(%{result: :done} = j),
+    do: "Finished #{j.name} in #{duration(DateTime.diff(j.ended_at, j.started_at))}."
+
+  defp job_outcome(%{result: :aborted} = j), do: "Aborted #{j.name} at line #{j.line}."
+
+  defp job_outcome(%{result: :error, error: {code, line, text}} = j),
+    do: "#{j.name} stopped: the controller refused line #{line} (#{text}), error #{code}."
+
+  defp job_outcome(%{result: {:alarm, code}} = j),
+    do: "#{j.name} stopped at line #{j.line}: alarm #{code}. #{alarm_cause(code)}"
+
+  defp job_outcome(%{result: :lost} = j),
+    do: "#{j.name} stopped at line #{j.line}: the connection to the controller was lost."
+
+  defp job_outcome(j), do: "#{j.name} stopped at line #{j.line}."
+
+  defp run_error(:busy), do: "Wait for the machine to settle, then Start."
+  defp run_error({:invalid_state, _}), do: "Only when the machine is Ready."
+  defp run_error(:empty), do: "The file has nothing to run."
+  defp run_error({:line_too_long, n}), do: "Line #{n} is too long for the controller."
+  defp run_error(other), do: "Couldn't start: #{inspect(other)}"
 
   attr :machine, State, required: true
   attr :frame, :atom, required: true
@@ -1115,7 +1401,8 @@ defmodule CNCWeb.MachineLive do
       state: m.state,
       jog: [jx, jy, jz],
       wco: wco,
-      speed: speed_payload(m, socket.assigns.tier)
+      speed: speed_payload(m, socket.assigns.tier),
+      job: m.state == :running
     })
   end
 
@@ -1506,16 +1793,33 @@ defmodule CNCWeb.MachineLive do
   defp adapter_label(name), do: name
 
   # A hold Resume can release (an open door must be closed first)
-  defp held?(%State{state: :busy, controller: :hold}), do: true
+  defp held?(%State{state: s, controller: :hold}) when s in [:busy, :running], do: true
   defp held?(_), do: false
 
+  # The cycle-start button: Resume a hold, or Start the loaded file when
+  # Ready; nil when it does nothing (disabled, never removed).
+  defp cycle(machine, program) do
+    cond do
+      held?(machine) -> :resume
+      machine.state == :idle and program != nil -> :start
+      true -> nil
+    end
+  end
+
   # Attention states get colour; normal ones stay calm (see the CSS).
-  defp state_class(%State{state: :busy, controller: c}) when c in [:hold, :door], do: "hold"
+  defp state_class(%State{state: s, controller: c})
+       when s in [:busy, :running] and c in [:hold, :door],
+       do: "hold"
+
   defp state_class(%State{state: state}), do: state
 
   defp state_icon(%State{state: :busy, controller: c}) when c in [:hold, :door],
     do: "hero-pause-circle"
 
+  defp state_icon(%State{state: :running, controller: c}) when c in [:hold, :door],
+    do: "hero-pause-circle"
+
+  defp state_icon(%State{state: :running}), do: "hero-play-circle"
   defp state_icon(%State{state: :idle}), do: "hero-check-circle"
   defp state_icon(%State{state: :alarm}), do: "hero-lock-closed"
   defp state_icon(%State{state: :jogging}), do: "hero-arrows-pointing-out"
@@ -1527,6 +1831,8 @@ defmodule CNCWeb.MachineLive do
 
   defp state_icon(_), do: "hero-arrow-path"
 
+  defp state_label(%State{state: :running, controller: :hold}), do: "On hold"
+  defp state_label(%State{state: :running, controller: :door}), do: "Door open"
   defp state_label(%State{state: :busy, controller: :door}), do: "Door open"
   defp state_label(%State{state: :busy, controller: :hold}), do: "On hold"
 
@@ -1539,7 +1845,8 @@ defmodule CNCWeb.MachineLive do
       jogging: "Jogging",
       uploading: "Uploading",
       homing: "Homing",
-      busy: "Busy"
+      busy: "Busy",
+      running: "Running"
     }[state]
   end
 
