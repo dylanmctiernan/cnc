@@ -7,6 +7,8 @@ const TRAIL_BATCHES = 20
 const GRID_MM = 100
 const PAD = 40
 const GAUGE = 72 // px reserved on the right for the Z gauge
+const STRIP_GAP = 10 // px between the plan and the depth strip under it
+const STRIP_LABEL = 20 // px at the top of the strip for its label
 const METERS = 72 // px reserved on the left for the X/Y and Z speed meters
 const METERS_COMPACT = 56
 // The mono face from the design tokens (--font-mono), read once.
@@ -80,9 +82,15 @@ export default {
     this.doneCache = document.createElement("canvas")
     this.doneKey = null
     this.doneDrawn = 0
+    // The depth strip's own: the program from the front, and its trace
+    this.stripCache = document.createElement("canvas")
+    this.stripDoneCache = document.createElement("canvas")
+    this.stripKey = null
+    this.stripDoneDrawn = 0
     // The stock: a box in work coordinates (its top at Z 0), or null
     this.handleEvent("stock", ({box}) => {
       this.stock = box
+      this.fit()
     })
     this.handleEvent("program", ({path}) => {
       this.program = path ? decodePath(path) : null
@@ -172,29 +180,60 @@ export default {
     const pad = this.mini ? 3 : this.compact ? 22 : PAD
     const meters = this.mini ? 0 : this.compact ? METERS_COMPACT : METERS
     const room = width - meters - (this.mini ? 0 : this.compact ? 48 : GAUGE)
+    // The depth strip (a front view, X across and Z up) under the plan: a
+    // fixed band, always there, so nothing moves when a file loads
+    const stripH = this.mini || this.compact ? 0 : Math.round(Math.min(Math.max(height * 0.2, 64), 150))
+    const planH = stripH ? height - stripH - STRIP_GAP : height
     const file = !this.mini && this.zoomMode === "file" && this.fileWindow()
     const w = file || {x0, x1, y0, y1}
-    const scale = Math.min((room - pad * 2) / (w.x1 - w.x0), (height - pad * 2) / (w.y1 - w.y0))
+    const scale = Math.min((room - pad * 2) / (w.x1 - w.x0), (planH - pad * 2) / (w.y1 - w.y0))
     const winW = (w.x1 - w.x0) * scale
     const winH = (w.y1 - w.y0) * scale
     // The instruments (speed meters, Z gauge) keep the whole bed's height
     // whatever the zoom, so zooming never moves them
-    const bedH = (y1 - y0) * Math.min((room - pad * 2) / (x1 - x0), (height - pad * 2) / (y1 - y0))
+    const bedH = (y1 - y0) * Math.min((room - pad * 2) / (x1 - x0), (planH - pad * 2) / (y1 - y0))
     this.view = {
       width, height, scale, x0, x1, y0, y1, z0, z1,
       // The window drawn: the bed, or the file's area when zoomed
       wx0: w.x0, wy0: w.y0, wx1: w.x1, wy1: w.y1,
       zoomed: !!file,
       left: meters + (room - winW) / 2,
-      bottom: (height + winH) / 2,
-      top: (height - winH) / 2,
-      itop: (height - bedH) / 2,
-      ibottom: (height + bedH) / 2,
+      bottom: (planH + winH) / 2,
+      top: (planH - winH) / 2,
+      itop: (planH - bedH) / 2,
+      ibottom: (planH + bedH) / 2,
       gaugeX: meters + room + 8,
       meters,
       mapRight: meters + room,
+      planH,
+      // The strip: its band, and the Z range it shows (machine mm)
+      stripH,
+      stripTop: planH + STRIP_GAP,
+      ...this.stripRange(file, z0, z1),
     }
     this.pathKey = null
+    this.stripKey = null
+  },
+
+  // The strip's Z range (machine mm): the whole travel; zoomed to the file,
+  // the file's depth and the stock, padded
+  stripRange(file, z0, z1) {
+    if (!file || !this.program) return {sz0: z0, sz1: z1}
+    const oz = (this.wco || [0, 0, 0])[2]
+    let lo = this.program.zLow, hi = this.program.zHigh
+    if (this.stock) {
+      lo = Math.min(lo, this.stock.z0)
+      hi = Math.max(hi, this.stock.z1)
+    }
+    const pad = Math.max((hi - lo) * 0.12, 1)
+    return {sz0: Math.max(lo + oz - pad, z0), sz1: Math.min(hi + oz + pad, z1)}
+  },
+
+  // Z mm (machine) -> canvas y in the strip
+  sy(z) {
+    const v = this.view
+    const top = v.stripTop + STRIP_LABEL, bottom = v.stripTop + v.stripH - 4
+    return bottom - ((z - v.sz0) / (v.sz1 - v.sz0)) * (bottom - top)
   },
 
   // Machine mm → canvas px, Y up, origin front-left, within the view window.
@@ -249,6 +288,7 @@ export default {
     this.drawTrail()
     this.drawTool(this.shown)
     ctx.restore()
+    if (v.stripH) this.drawStrip()
     if (!this.mini) {
       this.drawGauge(this.shown.z)
       this.drawSpeed(now)
@@ -523,6 +563,175 @@ export default {
     ctx.globalAlpha = 1
   },
 
+  // The depth strip: the front view (X across, as the plan above it; Z up).
+  // The stock as a band, the program's passes, the trace growing behind the
+  // bit, the work Z0, and the tool: how deep it is, and how deep it goes.
+  drawStrip() {
+    const {ctx, view: v, colors: c} = this
+    const x0 = v.meters, x1 = v.mapRight, top = v.stripTop, h = v.stripH
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x0, top, x1 - x0, h)
+    ctx.clip()
+    ctx.fillStyle = c.bed
+    ctx.fillRect(x0, top, x1 - x0, h)
+
+    // What it is; and if depth is stretched to be readable, by how much
+    const zScale = (h - STRIP_LABEL - 4) / (v.sz1 - v.sz0)
+    const stretch = zScale / v.scale
+    ctx.font = `11px ${FONT}`
+    ctx.fillStyle = c.dim
+    ctx.textAlign = "left"
+    ctx.textBaseline = "top"
+    ctx.fillText(stretch > 1.5 ? `Front  Z ×${Math.round(stretch)}` : "Front", x0 + 8, top + 5)
+
+    const [ox, , oz] = this.wco || [0, 0, 0]
+    // The stock: a band from its top (work Z0) to its bottom
+    if (this.stock && this.wco) {
+      const [ax] = this.px(this.stock.x0 + ox, 0)
+      const [bx] = this.px(this.stock.x1 + ox, 0)
+      const ty = this.sy(this.stock.z1 + oz), by = this.sy(this.stock.z0 + oz)
+      ctx.fillStyle = css("--stock-fill") || "rgba(196, 160, 110, 0.10)"
+      ctx.strokeStyle = css("--stock-edge") || "rgba(196, 160, 110, 0.55)"
+      ctx.fillRect(ax, ty, bx - ax, by - ty)
+      ctx.strokeRect(ax + 0.5, ty + 0.5, bx - ax, by - ty)
+    }
+    // Work Z0: a quiet dashed line across
+    if (this.wco) {
+      const y = this.sy(oz)
+      ctx.strokeStyle = c.gridMajor
+      ctx.setLineDash([3, 4])
+      line(ctx, x0, y, x1, y)
+      ctx.setLineDash([])
+      ctx.fillStyle = c.dim
+      ctx.textAlign = "right"
+      ctx.textBaseline = "bottom"
+      ctx.fillText("Z0", x1 - 8, y - 2)
+    }
+
+    if (this.program) this.drawStripProgram()
+
+    // The tool: its tip where it is (an arrow at the edge when it's out of
+    // the range shown), and the bit above it
+    const {x, z} = this.shown
+    const [tx] = this.px(x, 0)
+    const topY = top + STRIP_LABEL, bottomY = top + h - 4
+    const ty = this.sy(z)
+    const dim = ["disconnected", "connecting"].includes(this.state)
+    ctx.globalAlpha = dim ? 0.4 : 1
+    if (ty < topY) {
+      ctx.fillStyle = this.markerColor()
+      ctx.beginPath()
+      ctx.moveTo(tx, topY - 6)
+      ctx.lineTo(tx - 5, topY + 2)
+      ctx.lineTo(tx + 5, topY + 2)
+      ctx.fill()
+    } else {
+      const tipY = Math.min(ty, bottomY)
+      ctx.strokeStyle = c.text
+      ctx.lineWidth = 3
+      line(ctx, tx, topY - 4, tx, tipY - 3)
+      ctx.beginPath()
+      ctx.moveTo(tx - 4, tipY - 6)
+      ctx.lineTo(tx + 4, tipY - 6)
+      ctx.lineTo(tx, tipY)
+      ctx.closePath()
+      ctx.fillStyle = this.markerColor()
+      ctx.fill()
+      ctx.lineWidth = 1
+    }
+    ctx.globalAlpha = 1
+    ctx.restore()
+
+    // Its edge, over everything
+    ctx.strokeStyle = c.grid
+    ctx.lineWidth = 1
+    ctx.strokeRect(x0 + 0.5, top + 0.5, x1 - x0 - 1, h - 1)
+  },
+
+  // The program seen from the front: cuts in the path colour, rapids dashed;
+  // while a job traces, ghosted under the green trace (as the plan is)
+  drawStripProgram() {
+    const {view: v, colors: c} = this
+    const d = this.program.data
+    const [ox, , oz] = this.wco || [0, 0, 0]
+    const dpr = window.devicePixelRatio || 1
+    const key = [v.width, v.height, v.scale, v.left, v.wx0, v.sz0, v.sz1, v.stripTop, dpr, ...(this.wco || [])].join(",")
+    const X = (i) => this.px(d[i * 4 + 1] + ox, 0)[0]
+    const Z = (i) => this.sy(d[i * 4 + 3] + oz)
+
+    if (key !== this.stripKey) {
+      this.stripKey = key
+      this.stripDoneDrawn = 0
+      for (const cache of [this.stripCache, this.stripDoneCache]) {
+        cache.width = Math.round(v.width * dpr)
+        cache.height = Math.round(v.height * dpr)
+      }
+      const ctx = this.stripCache.getContext("2d")
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const cuts = new Path2D(), rapids = new Path2D()
+      for (let i = 1; i * 4 < d.length; i++) {
+        const p = d[i * 4] === 0 ? rapids : cuts
+        p.moveTo(X(i - 1), Z(i - 1))
+        p.lineTo(X(i), Z(i))
+      }
+      ctx.lineCap = "round"
+      ctx.lineJoin = "round"
+      ctx.setLineDash([4, 4])
+      ctx.strokeStyle = c.dim
+      ctx.globalAlpha = 0.5
+      ctx.lineWidth = 1
+      ctx.stroke(rapids)
+      ctx.setLineDash([])
+      ctx.globalAlpha = 1
+      ctx.strokeStyle = c.path
+      ctx.lineWidth = 1.25
+      ctx.stroke(cuts)
+    }
+
+    const done = this.progress.done
+    const tracing = done >= 0
+    this.ctx.globalAlpha = tracing ? 0.28 : 1
+    this.ctx.drawImage(this.stripCache, 0, 0, v.width, v.height)
+    this.ctx.globalAlpha = 1
+    if (!tracing) return
+
+    // The trace: whole segments, drawn once each
+    if (done < this.stripDoneDrawn) {
+      this.stripDoneCache.width = this.stripDoneCache.width
+      this.stripDoneDrawn = 0
+    }
+    if (done > this.stripDoneDrawn) {
+      const ctx = this.stripDoneCache.getContext("2d")
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      const trace = new Path2D()
+      for (let i = Math.max(1, this.stripDoneDrawn + 1); i <= done; i++) {
+        if (d[i * 4] !== 1) continue
+        trace.moveTo(X(i - 1), Z(i - 1))
+        trace.lineTo(X(i), Z(i))
+      }
+      ctx.lineCap = "round"
+      ctx.lineJoin = "round"
+      ctx.strokeStyle = c.done
+      ctx.lineWidth = 1.75
+      ctx.stroke(trace)
+      this.stripDoneDrawn = done
+    }
+    this.ctx.drawImage(this.stripDoneCache, 0, 0, v.width, v.height)
+
+    // ... and the one being cut, to the tool
+    if (this.running && (done + 1) * 4 < d.length && d[(done + 1) * 4] === 1) {
+      const [wx, wy] = [this.shown.x - ox, this.shown.y - (this.wco || [0, 0, 0])[1]]
+      if (onSegment(d, done, [wx, wy, this.shown.z - oz])) {
+        const ctx = this.ctx
+        ctx.strokeStyle = c.done
+        ctx.lineWidth = 1.75
+        ctx.lineCap = "round"
+        line(ctx, X(done), Z(done), this.px(this.shown.x, 0)[0], this.sy(this.shown.z))
+      }
+    }
+  },
+
   drawTool({x, y}) {
     const {ctx, colors: c} = this
     const [px, py] = this.px(x, y)
@@ -740,6 +949,13 @@ function decodePath(b64) {
     }
   }
   if (zMin === Infinity) zMin = zMax = 0
+  // Every move's Z (rapids lift above the cuts), for the depth strip's range
+  let zLow = Infinity, zHigh = -Infinity
+  for (let i = 0; i < data.length; i += 4) {
+    zLow = Math.min(zLow, data[i + 3])
+    zHigh = Math.max(zHigh, data[i + 3])
+  }
+  if (zLow === Infinity) zLow = zHigh = 0
   // X/Y extent of all moves (work coordinates), for zooming to the file
   let box = null
   for (let i = 0; i < data.length; i += 4) {
@@ -752,7 +968,7 @@ function decodePath(b64) {
       if (y > box.y1) box.y1 = y
     }
   }
-  return {data, zMin, zMax, box}
+  return {data, zMin, zMax, zLow, zHigh, box}
 }
 
 function line(ctx, x1, y1, x2, y2) {

@@ -12,11 +12,18 @@ const AHEAD = 600 // vertices searched past the last one reached
 const NEAR = 3 // mm: the tool must be this close to count as on the path
 
 // Index of the last vertex the tool has passed, or `done` unchanged.
+//
+// Only cutting moves are matched. Rapids run at a safe height, where many of
+// them cross the same places (to each pass, back home): a tool lifting or
+// travelling there, as at the start of a job from wherever it was, would
+// match a much later one and jump the trace near the end. They're not traced
+// anyway; progress catches up at the next cut.
 export function advance(data, done, [tx, ty, tz]) {
   const n = data.length / 4
   let best = -1, bestD = NEAR * NEAR
   const last = Math.min(n - 1, done + AHEAD)
   for (let i = Math.max(1, done); i <= last; i++) {
+    if (data[i * 4] !== 1) continue
     const d = segDist2(data, i - 1, i, tx, ty, tz)
     if (d < bestD) {
       bestD = d

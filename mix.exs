@@ -89,7 +89,14 @@ defmodule CNC.MixProject do
       ],
       # Layout stability against the running dev server (see assets/e2e)
       "e2e.layout": ["cmd --cd assets node e2e/layout_shift.mjs"],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "test",
+        # The JS hooks' own tests (Node's built-in runner, no dependencies)
+        "cmd node --test assets/test/*.test.mjs"
+      ]
     ]
   end
 end
