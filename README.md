@@ -109,3 +109,7 @@ Then choose it under **Controllers** in the app.
 
 `mise run test` runs every test. `PLAN.md` has the longer story of how and why
 it's built this way.
+
+## License
+
+GPL-3.0: you can use, change and share it, as long as changed versions you share stay open under the same license. See [LICENSE](LICENSE).
