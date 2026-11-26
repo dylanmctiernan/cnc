@@ -1,0 +1,33 @@
+# Everything this project needs, pinned. With mise installed, one command
+# installs the tools below, the dependencies, and the FluidNC sim:
+#
+#   mise run setup
+#   mise run dev        # then open http://localhost:4000
+#
+# (The first time, mise asks to trust this folder, and compiles Erlang from
+# source: that takes a while and needs a C compiler and OpenSSL.)
+
+[tools]
+erlang = "29.1.1"
+elixir = "1.20.4-otp-29"
+# Asset tooling (npm: three.js, Playwright for the layout check)
+node = "22"
+# FluidNC's build tool, PlatformIO, runs on Python
+python = "3.13"
+
+[tasks.setup]
+description = "Install Hex and the deps, build the assets, build the FluidNC sim"
+run = [
+  "mix local.hex --force --if-missing",
+  "mix local.rebar --force --if-missing",
+  "mix setup",
+  "mix cnc.fluidnc.build",
+]
+
+[tasks.dev]
+description = "Run the app at http://localhost:4000 (CNC_LAN=1 to reach it from a phone)"
+run = "mix phx.server"
+
+[tasks.test]
+description = "Compile strictly, format, and run the tests (what to run before a commit)"
+run = "mix precommit"

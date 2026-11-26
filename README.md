@@ -1,92 +1,111 @@
-# CNC Host
+# CNC
 
-Elixir/Phoenix LiveView host for a home-built CNC router (FluidNC controller).
-See [PLAN.md](PLAN.md) for the full Phase 1 plan.
+A web app for running a home-built CNC router from a computer or a phone.
 
-## Boundaries
+You load a cutting file, check it fits, and watch it cut, with a big **Hold**
+button always on screen. You can try all of it without a machine: it comes with
+a simulator that runs the real controller software on your computer.
 
-Enforced at compile time by [Boundary](https://hexdocs.pm/boundary); a violation fails
-`mix compile --warnings-as-errors`.
+> This moves a real machine. It's a hobby project: keep a physical emergency
+> stop within reach.
 
-```
-CNCApp  (supervision + wiring)            deps: CNC, CNCWeb
-├── CNCWeb  (LiveView UI)                 deps: CNC          exports: Endpoint, Telemetry
-└── CNC  (domain)                         deps: —            exports: Machine
-    ├── CNC.Machine    state + jogging    deps: Grbl, Link
-    ├── CNC.Link  link to controller deps: Grbl         exports: Sim
-    └── CNC.Grbl       pure protocol      deps: —
-```
+## Try it
 
-The web layer can only reach `CNC.Machine`; protocol and link stay private to the domain.
-
-## Dev
+You need [mise](https://mise.jdx.dev), which installs everything else for this
+project. To install it:
 
 ```sh
-mise install        # Erlang/Elixir from .mise.toml
-mix setup
-mix cnc.fluidnc.build    # once: real FluidNC firmware, built to run on this Mac
-mix phx.server      # http://localhost:4000
-mix test
+curl https://mise.run | sh      # or on a Mac: brew install mise
 ```
 
-`mix phx.server` drives the active **controller profile** (`CNC.Controllers`,
-kept in `.cnc/controllers.json`). The first run adds "FluidNC sim" (the real
-firmware running on this computer; nothing physical moves) when it's built,
-and "Fake sim" (a simple imitation built into the app); the first is active.
-`CNC_LINK=fake|uart|tcp` bypasses the profiles. Tests use the fake sim; the
-`test/cnc/fluidnc_sim_*_test.exs` modules run against native FluidNC when
-it's built.
-
-Every controller starts from one config: this machine
-(`priv/fluidnc/config.yaml.eex`: travel, speeds, homing) with its board's
-pins (`CNC.Boards`: FluidNC sim, ESP32 DevKit, 6x). After that the
-controller's own config is the source of truth: a FluidNC sim keeps it in
-`.cnc/controllers/<id>/fluidnc/`, a board in its flash. The FluidNC sim has
-no switches, so homing is off (`$22=0`): Unlock instead.
-
-### Against the real board (FluidNC over USB)
-
-Flash the bench ESP32 with FluidNC (same pinned commit as the sim) and its
-board's default config: `mix cnc.fluidnc.flash /dev/cu.usbserial-0001`
-(`--board six_x` for the 6x). The first session is in `docs/bench-esp32.md`.
+Then turn it on in your terminal (once), and open a new terminal window:
 
 ```sh
-mix cnc.ports                                          # find the board, e.g. /dev/cu.usbserial-0001
-CNC_LINK=uart CNC_UART=/dev/cu.usbserial-0001 mix phx.server
+echo 'eval "$(~/.local/bin/mise activate zsh)"' >> ~/.zshrc     # Mac (zsh)
+echo 'eval "$(~/.local/bin/mise activate bash)"' >> ~/.bashrc   # Linux (bash)
 ```
 
-Opening the port may reset the board; the machine then shows Locked as after
-any controller restart. The serial adapter is tested against a virtual serial
-port (`test/support/pty_bridge.py`), not yet against hardware.
+(If you installed it with Homebrew, use `mise activate` instead of
+`~/.local/bin/mise activate`.) Check it works with `mise --version`.
 
-FluidNC can also be reached over Wi-Fi (telnet, port 23):
+Then:
 
 ```sh
-CNC_LINK=tcp CNC_TCP=fluidnc.local mix phx.server  # or <ip>:<port>
+git clone <this repo> cnc && cd cnc
+mise run setup                  # once; the first time takes 10–20 minutes
+mise run dev
 ```
 
-### From another device on your network
+Open **http://localhost:4000**, press **Unlock**, and jog around. To cut
+something, open the **Auto** tab and drop in `test/fixtures/quick.nc`.
+
+If setup stops while building Erlang, install a compiler first:
+
+- **Mac:** `xcode-select --install`, then `brew install openssl@3 autoconf`
+- **Linux / Raspberry Pi:** `sudo apt install build-essential autoconf libssl-dev libncurses-dev`
+
+### On your phone
 
 ```sh
-CNC_LAN=1 mix phx.server     # then open http://<this-mac's-ip>:4000
+CNC_LAN=1 mise run dev
 ```
 
-Dev only. There's no login: the app is for one person on a home network, and
-anyone on that network can drive the machine. What it does guard against is a
-website in your browser reaching it: only local names and addresses are
-served (`localhost`, `*.local`, private IPs; more with
-`config :cnc, :allowed_hosts`), and only the app's own pages may open its
-socket. Never port-forward it, and keep guests on a separate Wi-Fi.
+Then open `http://<your-computer>.local:4000/pendant` on a phone on the same
+Wi-Fi. On an iPhone, **Share → Add to Home Screen** makes it an app.
 
-For a name instead of an IP address, announce one over mDNS (Bonjour) in a
-second terminal (macOS; Ctrl-C withdraws it):
+There's no password: anyone on your network can use it. Keep it on a home
+network you trust.
+
+### With a real machine
+
+The controller is an ESP32 board running FluidNC, plugged in by USB:
 
 ```sh
-mix cnc.mdns.announce               # cnc-XXXX.local (XXXX: this computer's id)
-mix cnc.mdns.announce --name shop   # or a name you choose: shop.local
+mix cnc.ports                                  # find the board
+mix cnc.fluidnc.flash /dev/cu.usbserial-0001   # put FluidNC on it
 ```
 
-XXXX is a short random id made once and kept in `.cnc/device-id`, so the name
-is stable and two machines never share one. It's its own site to browsers,
-so other apps on `localhost:4000` don't share its favicon or cookies. Stop
-using it once the Pi announces its own name.
+Then choose it under **Controllers** in the app.
+
+---
+
+## Words used here
+
+| Word | Means |
+|---|---|
+| **Controller** | The small computer on the machine that turns commands into motor steps. Here, an ESP32 board. |
+| **FluidNC** | The software on the controller. |
+| **G-code** | The cutting file: a list of moves, made by design software (CAM). |
+| **Work zero** | The point on your piece that the file measures from, usually a corner of its top. |
+| **Jog** | Moving the machine by hand. **Inc** moves it one fixed step per press. |
+| **Hold / Resume** | Pause all motion now, keeping its place / carry on. |
+| **Abort** | End the job. The machine comes back **Locked** until you Unlock it. |
+| **Stock** | The piece of material you're cutting. |
+| **Rapids** | Fast moves in the air between cuts. |
+| **Dry run** | Running the file with the bit lifted clear, to watch the path safely. |
+| **Pendant** | A handheld remote for the machine: here, your phone. |
+| **Sim** | The simulator: the real FluidNC software running on your computer, with no motors. |
+
+## How it's built
+
+- **Elixir and Phoenix** run the app. Each screen is a live page that updates as
+  the machine moves, without reloading.
+- **One part talks to the machine.** Every button, on every screen and phone,
+  goes through it, and it only allows what's safe in the machine's current state
+  (you can't jog while a job runs, for example). The allowed moves are written
+  down in one table, and a test checks the real code against it with thousands
+  of random button sequences.
+- **three.js** draws the 3D view.
+- **The tests** run against a fake controller, and against the real FluidNC
+  software when the sim is built.
+
+| Folder | What's in it |
+|---|---|
+| `lib/cnc/` | The machine: talking to the controller, running jobs, reading G-code |
+| `lib/cnc_web/` | The screens: the workstation and the phone pendant |
+| `lib/cnc_app/` | Your saved settings: the stock, the bit, preferences |
+| `priv/fluidnc/` | The machine's FluidNC settings (size, speeds) |
+| `test/` | The tests, and sample cutting files in `test/fixtures/` |
+
+`mise run test` runs every test. `PLAN.md` has the longer story of how and why
+it's built this way.
