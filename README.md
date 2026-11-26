@@ -44,6 +44,23 @@ If setup stops while building Erlang, install a compiler first:
 - **Mac:** `xcode-select --install`, then `brew install openssl@3 autoconf`
 - **Linux / Raspberry Pi:** `sudo apt install build-essential autoconf libssl-dev libncurses-dev`
 
+### On Windows
+
+Use WSL, which runs Linux inside Windows (the simulator only builds on Mac and
+Linux):
+
+1. In PowerShell: `wsl --install`, then restart and open **Ubuntu** from the
+   Start menu.
+2. In Ubuntu, follow the steps above as on Linux (install mise, then the
+   `apt install` line, then `mise run setup`).
+3. Open **http://localhost:4000** in your Windows browser as usual.
+
+For a real machine, the USB board has to be passed through to WSL with
+[usbipd-win](https://learn.microsoft.com/windows/wsl/connect-usb). For the phone
+pendant, turn on WSL's mirrored networking so your phone can reach it: add
+`networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`, then run
+`wsl --shutdown` and start Ubuntu again.
+
 ### On your phone
 
 ```sh
